@@ -1,4 +1,7 @@
 onlyBuiltDependencies:
+  - better-auth
+  - drizzle-orm
   - mediasoup
-  - sharp
   - msw
+  - pg
+  - sharp
