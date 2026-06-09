@@ -1,7 +1,7 @@
 {
-  "name": "riplexo-mediasoup-server",
+  "name": "replixo-mediasoup-server",
   "version": "1.0.0",
-  "description": "Mediasoup SFU server for Riplexo",
+  "description": "Mediasoup SFU server for Replixo",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

@@ -1,4 +1,4 @@
-const KEY = "riplexo_display_name"
+const KEY = "replixo_display_name"
 const DEFAULT_NAME = "Гость"
 
 /** Read the saved display name from localStorage (falls back to "Гость"). */

@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   // Start
   // ---------------------------------------------------------------------------
   httpServer.listen(PORT, () => {
-    console.log(`[server] Riplexo mediasoup server running on port ${PORT}`)
+    console.log(`[server] Replixo mediasoup server running on port ${PORT}`)
     console.log(`[server] CORS allowed origin: ${CLIENT_ORIGIN}`)
   })
 

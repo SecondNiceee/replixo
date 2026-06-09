@@ -10,9 +10,9 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Riplexo — Мгновенные видеозвонки',
+  title: 'Replixo — Мгновенные видеозвонки',
   description:
-    'Riplexo позволяет начать кристально чистые видеозвонки мгновенно. Без установки, без лишних действий.',
+    'Replixo позволяет начать кристально чистые видеозвонки мгновенно. Без установки, без лишних действий.',
   generator: 'v0.app',
   icons: {
     icon: [
