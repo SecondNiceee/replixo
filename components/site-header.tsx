@@ -1,7 +1,14 @@
+import { headers } from 'next/headers'
+import { auth } from '@/lib/auth'
 import { Logo } from "@/components/logo"
-import { Button } from "@/components/ui/button"
+import { AuthButtons } from "@/components/auth-buttons"
 
-export function SiteHeader() {
+export async function SiteHeader() {
+  const session = await auth.api.getSession({ headers: await headers() })
+  const user = session?.user
+    ? { name: session.user.name, email: session.user.email }
+    : null
+
   return (
     <header className="absolute inset-x-0 top-0 z-20">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -21,12 +28,7 @@ export function SiteHeader() {
           <span className="inline-flex items-center rounded-full border border-border bg-secondary/50 px-2.5 py-1 text-xs font-medium text-foreground">
             RU
           </span>
-          <Button
-            variant="ghost"
-            className="text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
-          >
-            Войти
-          </Button>
+          <AuthButtons user={user} />
         </div>
       </div>
     </header>
