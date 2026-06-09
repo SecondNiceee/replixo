@@ -1,4 +1,4 @@
-import type { Router, Worker, DtlsParameters } from 'mediasoup/node/lib/types'
+import type { Router, Worker, DtlsParameters, WebRtcTransport } from 'mediasoup/node/lib/types'
 import * as mediasoup from 'mediasoup'
 import { mediaCodecs, webRtcTransportOptions, MAX_PEERS_PER_ROOM, iceServers } from './config'
 import { Peer } from './Peer'
@@ -186,7 +186,7 @@ export class Room {
     if (!consumerPeer) throw new Error(`Consumer peer ${consumerPeerId} not found`)
 
     // Find recv transport for this peer (marked by appData.direction)
-    let recvTransport = null
+    let recvTransport: WebRtcTransport | null = null
     for (const transport of consumerPeer.transports.values()) {
       if ((transport.appData as Record<string, unknown>).direction === 'recv') {
         recvTransport = transport
