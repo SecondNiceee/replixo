@@ -1,0 +1,4 @@
+onlyBuiltDependencies:
+  - mediasoup
+  - sharp
+  - msw
