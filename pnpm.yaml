@@ -1,7 +1,1 @@
-onlyBuiltDependencies:
-  - better-auth
-  - drizzle-orm
-  - mediasoup
-  - msw
-  - pg
-  - sharp
+# pnpm v10 uses pnpm-approved-builds.yaml for build script approvals
