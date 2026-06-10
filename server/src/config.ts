@@ -22,17 +22,49 @@ export const listenIps: TransportListenIp[] = [
   },
 ]
 
+// ICE servers sent to every WebRTC client.
+//
+// STUN alone is NOT enough for phone <-> PC calls: mobile carriers put phones
+// behind symmetric NAT (CGNAT), which STUN cannot traverse. Without a TURN
+// relay the media path silently fails and the remote person "can't be heard".
+//
+// We therefore ALWAYS ship a TURN relay. If the operator provides their own
+// (TURN_URL), we use it; otherwise we fall back to the free public OpenRelay
+// TURN servers, which work over UDP/TCP/TLS on ports 80/443 so they survive
+// restrictive mobile and corporate firewalls.
+const customTurn = process.env.TURN_URL
+  ? [
+      {
+        urls: process.env.TURN_URL,
+        username: process.env.TURN_USERNAME ?? '',
+        credential: process.env.TURN_CREDENTIAL ?? '',
+      },
+    ]
+  : []
+
+const fallbackTurn = [
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+]
+
 export const iceServers = [
   { urls: process.env.STUN_URL ?? 'stun:stun.l.google.com:19302' },
-  ...(process.env.TURN_URL
-    ? [
-        {
-          urls: process.env.TURN_URL,
-          username: process.env.TURN_USERNAME ?? '',
-          credential: process.env.TURN_CREDENTIAL ?? '',
-        },
-      ]
-    : []),
+  { urls: 'stun:stun1.l.google.com:19302' },
+  // Prefer a custom TURN if configured, otherwise use the public fallback.
+  ...(customTurn.length > 0 ? customTurn : fallbackTurn),
 ]
 
 // ---------------------------------------------------------------------------

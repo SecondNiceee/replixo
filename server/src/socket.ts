@@ -21,6 +21,10 @@ import type {
 
 const rooms = new Map<string, Room>()
 
+// peerId → socketId — tracks where each peer is currently connected so we can
+// kick an old tab when the same peer reconnects from a new one.
+const peerSockets = new Map<string, string>()
+
 function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
   if (rooms.has(roomId)) return Promise.resolve(rooms.get(roomId)!)
   return Room.create(roomId, worker).then((room) => {
@@ -92,10 +96,34 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
             return err(callback as Callback<never>, 'Комната не найдена')
           }
 
+          // If this peerId is already connected from another socket (another tab /
+          // device), kick the old session so only the latest one stays.
+          const existingSocketId = peerSockets.get(peerId)
+          if (existingSocketId && existingSocketId !== socket.id) {
+            const oldSocket = io.sockets.sockets.get(existingSocketId)
+            if (oldSocket) {
+              oldSocket.emit('kicked', { reason: 'duplicate' })
+              oldSocket.disconnect(true)
+            }
+            // Remove the old peer from whatever room it was in
+            for (const [rid, r] of rooms.entries()) {
+              if (r.hasPeer(peerId)) {
+                r.removePeer(peerId)
+                io.to(rid).emit('peerLeft', { peerId })
+                cleanupRoomIfEmpty(rid)
+                break
+              }
+            }
+          }
+
           const room = await getOrCreateRoom(roomId, worker)
 
           if (room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
-          if (room.hasPeer(peerId)) return err(callback as Callback<never>, `Peer ${peerId} already in room`)
+          // After kicking the old socket above, the peer should no longer be in the
+          // room. But guard defensively just in case.
+          if (room.hasPeer(peerId)) {
+            room.removePeer(peerId)
+          }
 
           const peer = new Peer({ peerId, displayName, socketId: socket.id })
           peer.rtpCapabilities = rtpCapabilities
@@ -103,6 +131,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
 
           currentRoomId = roomId
           currentPeerId = peerId
+          peerSockets.set(peerId, socket.id)
           socket.join(roomId)
 
           const existingPeers = room.getExistingPeersFor(peerId)
@@ -311,6 +340,24 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     )
 
     // -----------------------------------------------------------------------
+    // rejoinProbe — client checks whether the server still has the peer after
+    // a socket.io reconnect. Returns null if the peer is still in the room,
+    // or an error string if it was evicted (so the client can do a full rejoin).
+    // -----------------------------------------------------------------------
+    socket.on(
+      'rejoinProbe',
+      ({ roomId, peerId }: { roomId: string; peerId: string }, callback: Callback<void>) => {
+        const room = rooms.get(roomId)
+        if (!room || !room.hasPeer(peerId)) {
+          return err(callback as Callback<never>, 'peer evicted')
+        }
+        // Update the socket mapping in case the socket.id changed on reconnect.
+        peerSockets.set(peerId, socket.id)
+        ack(callback, undefined)
+      },
+    )
+
+    // -----------------------------------------------------------------------
     // leaveRoom  (explicit)
     // -----------------------------------------------------------------------
     socket.on('leaveRoom', ({ roomId, peerId }: { roomId: string; peerId: string }) => {
@@ -337,6 +384,13 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       room.removePeer(peerId)
       socket.to(roomId).emit('peerLeft', { peerId })
       socket.leave(roomId)
+
+      // Only clear the global peerSockets entry if this socket is still the
+      // authoritative one for that peerId (it won't be if a new tab already
+      // took over via the kick-duplicate logic above).
+      if (peerSockets.get(peerId) === socket.id) {
+        peerSockets.delete(peerId)
+      }
 
       console.log(`[room] Peer ${peerId} left room ${roomId}`)
       cleanupRoomIfEmpty(roomId)
