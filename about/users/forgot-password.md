@@ -20,50 +20,82 @@
 ## Технические детали
 
 ### Стек
-- **Better Auth** — встроенный flow `forgetPassword` / `resetPassword`
-- **Resend** — транзакционные email
+- **Better Auth** — встроенный flow `requestPasswordReset` / `resetPassword`
+- **Nodemailer** — отправка писем через любой SMTP-сервер
 
 ### Задействованные файлы
 | Файл | Роль |
 |------|------|
-| `lib/auth.ts` | `sendResetPassword` — генерирует токен, отправляет письмо через Resend |
-| `app/forgot-password/page.tsx` | Форма ввода email; вызывает `authClient.forgetPassword()` |
+| `lib/auth.ts` | `sendResetPassword` — генерирует токен, отправляет письмо через Nodemailer |
+| `app/forgot-password/page.tsx` | Форма ввода email; вызывает `authClient.requestPasswordReset()` |
 | `app/reset-password/page.tsx` | Форма нового пароля; читает `?token=` из URL, вызывает `authClient.resetPassword()` |
 | `components/auth-form.tsx` | Ссылка «Забыли пароль?» рядом с полем пароля на `/sign-in` |
 
 ### Переменные окружения
 | Переменная | Обязательна | Описание |
 |------------|-------------|----------|
-| `RESEND_API_KEY` | **да** | API-ключ Resend (resend.com → API Keys) |
-| `RESEND_FROM_EMAIL` | нет | Email-отправитель. По умолчанию `noreply@replixo.com`. Должен быть верифицирован в Resend. |
+| `SMTP_HOST` | **да** | Хост почтового сервера, напр. `smtp.gmail.com` |
+| `SMTP_PORT` | нет | Порт. По умолчанию `587`. Используй `465` для SSL. |
+| `SMTP_USER` | **да** | Логин на SMTP-сервере (обычно email) |
+| `SMTP_PASS` | **да** | Пароль или app-пароль |
+| `SMTP_FROM` | нет | Адрес отправителя в письме. По умолчанию = `SMTP_USER`. |
 
-Если `RESEND_API_KEY` не задан — запрос формально «успешен» (чтобы не раскрывать существование аккаунта), но письмо не отправляется. В серверных логах будет ошибка `[auth] RESEND_API_KEY not set`.
-
-### Настройка Resend
-
-1. Зарегистрироваться на [resend.com](https://resend.com)
-2. Создать API-ключ (`API Keys → Create API Key`)
-3. Верифицировать домен-отправитель (`Domains → Add Domain`) или использовать тестовый `onboarding@resend.dev` (только для dev)
-4. Добавить в переменные окружения проекта:
-   ```
-   RESEND_API_KEY=re_...
-   RESEND_FROM_EMAIL=noreply@yourdomain.com
-   ```
+Если переменные не заданы — письмо не отправляется, в серверных логах будет ошибка `[auth] SMTP env vars not set`.
 
 ---
 
-## Если всё равно не приходит письмо
+## Настройка SMTP
+
+### Gmail
+
+1. Включить двухфакторную аутентификацию на аккаунте Google.
+2. Зайти в **Google Account → Security → App Passwords**.
+3. Создать пароль для приложения → скопировать (16 символов без пробелов).
+4. Заполнить переменные:
+   ```
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=ты@gmail.com
+   SMTP_PASS=xxxx xxxx xxxx xxxx
+   SMTP_FROM=noreply@replixo.com   # опционально
+   ```
+
+### Yandex
+
+```
+SMTP_HOST=smtp.yandex.ru
+SMTP_PORT=465
+SMTP_USER=ты@yandex.ru
+SMTP_PASS=<пароль приложения из Яндекс ID>
+```
+
+Включить «Пароли приложений» в настройках Яндекс ID → Безопасность.
+
+### Mail.ru
+
+```
+SMTP_HOST=smtp.mail.ru
+SMTP_PORT=465
+SMTP_USER=ты@mail.ru
+SMTP_PASS=<пароль приложения>
+```
+
+Включить «Внешние клиенты» в настройках почты Mail.ru, создать пароль приложения.
+
+---
+
+## Если письмо не приходит
 
 1. Проверить папку **«Спам»**
-2. Убедиться, что `RESEND_API_KEY` задан в Vercel (Settings → Environment Variables)
-3. Проверить логи функции в Vercel Dashboard — там будет сообщение об ошибке от Resend
-4. Убедиться, что домен-отправитель верифицирован в Resend
+2. Убедиться, что все четыре SMTP-переменные заданы в Vercel (Settings → Vars)
+3. Проверить логи в Vercel Dashboard — там будет конкретная ошибка от Nodemailer
+4. Для Gmail убедиться, что используется **app-пароль**, а не основной пароль аккаунта
 
 ---
 
 ## Ручной сброс (для администратора)
 
-Если email-сервис недоступен, администратор может сбросить пароль вручную через БД:
+Если SMTP-сервер недоступен, администратор может сбросить пароль вручную через БД:
 
 ```sql
 -- 1. Найти userId
