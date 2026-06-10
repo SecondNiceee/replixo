@@ -60,11 +60,13 @@ export function VideoTile({
   // Play remote audio through a dedicated <audio> element. Local audio is
   // never played back to avoid echo/feedback. Playback + autoplay-unlock is
   // handled centrally by the audio-unlock manager.
+  // On iOS we also pass the raw MediaStream so the manager can route it
+  // through an AudioContext (the only reliable path on mobile Safari).
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !audioStream || isLocal) return
     audio.srcObject = audioStream
-    const unregister = registerAudioElement(audio)
+    const unregister = registerAudioElement(audio, audioStream)
     return unregister
   }, [audioStream, isLocal])
 

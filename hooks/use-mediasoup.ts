@@ -162,8 +162,16 @@ function reducer(state: State, action: Action): State {
 const SERVER_URL =
   process.env.NEXT_PUBLIC_MEDIASOUP_URL ?? "http://localhost:3001"
 
-function generatePeerId(): string {
-  return Math.random().toString(36).slice(2, 10)
+const PEER_ID_KEY = "replixo_peer_id"
+
+function getOrCreatePeerId(): string {
+  if (typeof window === "undefined") return Math.random().toString(36).slice(2, 10)
+  let id = localStorage.getItem(PEER_ID_KEY)
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10)
+    localStorage.setItem(PEER_ID_KEY, id)
+  }
+  return id
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +195,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const deviceRef = useRef<Device | null>(null)
   const sendTransportRef = useRef<Transport | null>(null)
   const recvTransportRef = useRef<Transport | null>(null)
-  const peerId = useRef<string>(generatePeerId())
+  const peerId = useRef<string>(getOrCreatePeerId())
   const localStreamRef = useRef<MediaStream | null>(null)
   const videoProducerRef = useRef<Producer | null>(null)
   const audioProducerRef = useRef<Producer | null>(null)
@@ -479,27 +487,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
     })
 
-    socket.on("connect", async () => {
-      // -----------------------------------------------------------------------
-      // RECONNECT path — socket.io re-established the signaling channel after a
-      // transient network drop. The mediasoup session (Device, transports,
-      // producers, consumers) is still intact on the server because the peer
-      // was NOT removed (pingTimeout keeps it alive for ~30 s). All we need to
-      // do is re-negotiate ICE on both transports so RTP can flow again.
-      // -----------------------------------------------------------------------
-      if (hasJoinedRef.current) {
-        restartIceForTransport(sendTransportRef.current)
-        restartIceForTransport(recvTransportRef.current)
-        return
-      }
-
-      // -----------------------------------------------------------------------
-      // FIRST CONNECT path — normal join sequence.
-      // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Core join sequence — called on first connect and on full rejoin after
+    // the server evicts a peer during a long network drop.
+    // -----------------------------------------------------------------------
+    const doJoinSequence = async () => {
       const device = new Device()
       deviceRef.current = device
 
-      // First call joinRoom to get router RTP capabilities, then load device
       socket.emit(
         "joinRoom",
         {
@@ -522,24 +517,61 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             return
           }
 
-          // Load device with router capabilities BEFORE creating transports
           await device.load({ routerRtpCapabilities: data.rtpCapabilities as RTCRtpCapabilities })
-
           dispatch({ type: "CONNECTED", localStream })
-
-          // Mark as joined so reconnects follow the ICE-restart path above.
           hasJoinedRef.current = true
 
-          // Register existing peers immediately so the participant count is
-          // accurate even before any of them produce media.
           for (const p of data.existingPeers) {
             dispatch({ type: "PEER_JOINED", peerId: p.peerId, displayName: p.displayName })
           }
 
-          // setupTransports uses device.rtpCapabilities which are now populated
           await setupTransports(socket, device, data.existingPeers)
         },
       )
+    }
+
+    socket.on("connect", async () => {
+      // -----------------------------------------------------------------------
+      // RECONNECT path — socket.io re-established the signaling channel after a
+      // transient network drop.
+      //
+      // Probe the server first. If the peer is still alive → ICE restart only.
+      // If it was evicted (long drop) → full rejoin.
+      // -----------------------------------------------------------------------
+      if (hasJoinedRef.current) {
+        socket.emit(
+          "rejoinProbe",
+          { roomId, peerId: peerId.current },
+          (error: string | null) => {
+            if (!error) {
+              restartIceForTransport(sendTransportRef.current)
+              restartIceForTransport(recvTransportRef.current)
+            } else {
+              // Server evicted the peer — tear down stale state and rejoin.
+              hasJoinedRef.current = false
+              sendTransportRef.current?.close()
+              recvTransportRef.current?.close()
+              sendTransportRef.current = null
+              recvTransportRef.current = null
+              consumersRef.current.clear()
+              doJoinSequence()
+            }
+          },
+        )
+        return
+      }
+
+      // -----------------------------------------------------------------------
+      // FIRST CONNECT path.
+      // -----------------------------------------------------------------------
+      await doJoinSequence()
+    })
+
+    // Kicked because this peerId reconnected from another tab/device.
+    // The new session will take over — just reload to re-join cleanly.
+    socket.on("kicked", () => {
+      socket.disconnect()
+      window.location.reload()
     })
 
     // A peer joined the room (may not have produced media yet)

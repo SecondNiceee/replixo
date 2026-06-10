@@ -3,15 +3,13 @@
 // ---------------------------------------------------------------------------
 // Centralised remote-audio playback manager.
 //
-// Browsers block audio playback with sound until the user has interacted with
-// the *current* document. Because the user navigates from the lobby into the
-// room (a new document), that gesture does not carry over, so the first
-// play() on a remote <audio> element is often rejected. There is no way to
-// bypass this policy programmatically — the best we can do is:
-//   1. Retry playback automatically on the very first user gesture
-//      (pointerdown / keydown / touchstart) anywhere on the page.
-//   2. Expose whether audio is currently blocked so the UI can show an
-//      explicit "Enable sound" button as a guaranteed one-click fix.
+// On iOS Safari, <audio srcObject=...> is unreliable — the element is often
+// silenced even after the user has tapped. The workaround is to route every
+// remote stream through an AudioContext:
+//   createMediaStreamSource(stream) → destination → context plays out loud
+// The AudioContext must be created (or resumed) inside a user gesture.
+//
+// On desktop browsers we keep the plain <audio>.play() path as a fallback.
 // ---------------------------------------------------------------------------
 
 const audioElements = new Set<HTMLAudioElement>()
@@ -19,6 +17,43 @@ const blockedListeners = new Set<(blocked: boolean) => void>()
 
 let blocked = false
 let gestureBound = false
+
+// Shared AudioContext — created/resumed on first user gesture.
+let sharedAudioContext: AudioContext | null = null
+
+// stream → { source, destination } nodes kept alive while the stream is registered.
+interface AudioNodes {
+  source: MediaStreamAudioSourceNode
+  gain: GainNode
+}
+const streamNodes = new Map<MediaStream, AudioNodes>()
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null
+  if (!sharedAudioContext) {
+    try {
+      sharedAudioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+    } catch {
+      return null
+    }
+  }
+  return sharedAudioContext
+}
+
+function resumeContext() {
+  const ctx = getAudioContext()
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume().catch(() => {})
+  }
+}
+
+// ---------------------------------------------------------------------------
+// iOS detection — use AudioContext path on mobile Safari
+// ---------------------------------------------------------------------------
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+}
 
 function setBlocked(next: boolean) {
   if (next === blocked) return
@@ -29,6 +64,9 @@ function setBlocked(next: boolean) {
 // Try to play every registered audio element. Resolves the blocked state
 // based on whether any element was rejected by the autoplay policy.
 export function playAll() {
+  // Resume the AudioContext first (unlocks iOS audio in one shot).
+  resumeContext()
+
   let anyBlocked = false
   const attempts: Promise<void>[] = []
 
@@ -56,25 +94,66 @@ function handleGesture() {
 function bindGestureListeners() {
   if (gestureBound || typeof window === "undefined") return
   gestureBound = true
-  // `once: false` because a single element might still need a retry, but
-  // playAll() will flip the blocked flag to false once everything plays.
   window.addEventListener("pointerdown", handleGesture)
   window.addEventListener("keydown", handleGesture)
-  window.addEventListener("touchstart", handleGesture)
+  window.addEventListener("touchstart", handleGesture, { passive: true })
 }
 
-// Register an audio element and immediately try to play it.
-export function registerAudioElement(el: HTMLAudioElement) {
+// ---------------------------------------------------------------------------
+// iOS AudioContext routing for a MediaStream
+// ---------------------------------------------------------------------------
+function connectStreamToContext(stream: MediaStream) {
+  const ctx = getAudioContext()
+  if (!ctx || streamNodes.has(stream)) return
+  try {
+    const source = ctx.createMediaStreamSource(stream)
+    const gain = ctx.createGain()
+    source.connect(gain)
+    gain.connect(ctx.destination)
+    streamNodes.set(stream, { source, gain })
+  } catch {
+    // MediaStream may not have audio tracks yet — ignore
+  }
+}
+
+function disconnectStreamFromContext(stream: MediaStream) {
+  const nodes = streamNodes.get(stream)
+  if (!nodes) return
+  try {
+    nodes.source.disconnect()
+    nodes.gain.disconnect()
+  } catch { /* ignore */ }
+  streamNodes.delete(stream)
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+// Register an audio element (and optionally a raw MediaStream for iOS routing).
+export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream) {
   audioElements.add(el)
   bindGestureListeners()
 
-  const p = el.play()
-  if (p && typeof p.then === "function") {
-    p.catch(() => setBlocked(true))
+  if (isIOS() && stream) {
+    // On iOS: route stream through AudioContext so it plays reliably.
+    // We still set srcObject so the element exists, but mute it to avoid
+    // double playback — the AudioContext graph is the real audio path.
+    el.muted = true
+    connectStreamToContext(stream)
+    resumeContext()
+  } else {
+    // Desktop / non-iOS path: plain element play().
+    el.muted = false
+    const p = el.play()
+    if (p && typeof p.then === "function") {
+      p.catch(() => setBlocked(true))
+    }
   }
 
   return () => {
     audioElements.delete(el)
+    if (stream) disconnectStreamFromContext(stream)
   }
 }
 
