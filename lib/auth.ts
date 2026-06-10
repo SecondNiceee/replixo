@@ -1,13 +1,24 @@
 import { betterAuth } from 'better-auth'
 import { username } from 'better-auth/plugins'
 import { pool } from '@/lib/db'
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 
 const USERNAME_RE = /^[a-zA-Z0-9_]{2,20}$/
 
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
-  : null
+function createTransport() {
+  const host = process.env.SMTP_HOST
+  const user = process.env.SMTP_USER
+  const pass = process.env.SMTP_PASS
+
+  if (!host || !user || !pass) return null
+
+  return nodemailer.createTransport({
+    host,
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_PORT === '465',
+    auth: { user, pass },
+  })
+}
 
 const APP_URL =
   process.env.BETTER_AUTH_URL ??
@@ -32,12 +43,13 @@ export const auth = betterAuth({
     enabled: true,
     autoSignIn: true,
     sendResetPassword: async ({ user, url }) => {
-      if (!resend) {
-        console.error('[auth] RESEND_API_KEY not set — cannot send reset email')
+      const transport = createTransport()
+      if (!transport) {
+        console.error('[auth] SMTP env vars not set — cannot send reset email')
         return
       }
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL ?? 'noreply@replixo.com',
+      await transport.sendMail({
+        from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
         to: user.email,
         subject: 'Сброс пароля — Replixo',
         html: `
