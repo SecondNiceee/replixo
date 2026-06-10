@@ -106,7 +106,7 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
                   autoComplete="username"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Допустимы — англ. буквы, цифры, нижнее подчеркивание
+                  Допустимы: англ. буквы, цифры, нижнее подчеркивание
                 </p>
               </div>
             )}
