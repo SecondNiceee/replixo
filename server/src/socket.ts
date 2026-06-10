@@ -25,6 +25,27 @@ const rooms = new Map<string, Room>()
 // kick an old tab when the same peer reconnects from a new one.
 const peerSockets = new Map<string, string>()
 
+// peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
+// Wi-Fi hand-off, tunnel switch) we DON'T evict the peer immediately. Instead we
+// keep its producers/consumers/transports alive for a grace window so that when
+// the device comes back it resumes via rejoinProbe + ICE restart and never
+// "disappears" for the other participants. Only if it stays gone past the
+// window do we actually remove it.
+const pendingDisconnects = new Map<string, ReturnType<typeof setTimeout>>()
+
+// How long a peer may stay silently disconnected before we evict it. Mobile
+// backgrounding / screen-lock can suspend the socket for a while, so we allow a
+// generous window. 45 s comfortably covers a user briefly checking another app.
+const DISCONNECT_GRACE_MS = 45000
+
+function clearPendingDisconnect(peerId: string): void {
+  const t = pendingDisconnects.get(peerId)
+  if (t) {
+    clearTimeout(t)
+    pendingDisconnects.delete(peerId)
+  }
+}
+
 function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
   if (rooms.has(roomId)) return Promise.resolve(rooms.get(roomId)!)
   return Room.create(roomId, worker).then((room) => {
@@ -115,6 +136,9 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
               }
             }
           }
+
+          // This peer is (re)joining — cancel any pending grace-window eviction.
+          clearPendingDisconnect(peerId)
 
           const room = await getOrCreateRoom(roomId, worker)
 
@@ -351,6 +375,14 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         if (!room || !room.hasPeer(peerId)) {
           return err(callback as Callback<never>, 'peer evicted')
         }
+        // The peer is back on a fresh socket within the grace window — cancel the
+        // pending eviction and re-bind it to this socket so media keeps flowing.
+        clearPendingDisconnect(peerId)
+        // Re-join the socket.io room: after a reconnect this is a brand-new
+        // socket, so without this it would miss peerJoined/newProducer/etc.
+        socket.join(roomId)
+        currentRoomId = roomId
+        currentPeerId = peerId
         // Update the socket mapping in case the socket.id changed on reconnect.
         peerSockets.set(peerId, socket.id)
         ack(callback, undefined)
@@ -365,19 +397,45 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     })
 
     // -----------------------------------------------------------------------
-    // disconnect  (implicit)
+    // disconnect  (implicit) — DO NOT evict immediately.
+    //
+    // A dropped socket usually means the phone locked/backgrounded or the
+    // network hiccupped, not that the user left. Removing the peer right away is
+    // exactly what made people "disappear and never come back". Instead we keep
+    // the peer (and all its producers/consumers) alive for a grace window. If
+    // the same peer reconnects (rejoinProbe / joinRoom) within that window we
+    // cancel the eviction and media resumes seamlessly. Only if it never comes
+    // back do we finally remove it.
     // -----------------------------------------------------------------------
     socket.on('disconnect', () => {
       console.log(`[socket] Client disconnected: ${socket.id}`)
-      if (currentRoomId && currentPeerId) {
-        handleLeave(currentRoomId, currentPeerId)
-      }
+      if (!currentRoomId || !currentPeerId) return
+
+      const roomId = currentRoomId
+      const peerId = currentPeerId
+
+      // If a newer socket already took over this peerId (duplicate-tab kick or a
+      // fast reconnect), this stale socket must not touch the peer at all.
+      if (peerSockets.get(peerId) !== socket.id) return
+
+      clearPendingDisconnect(peerId)
+      const timer = setTimeout(() => {
+        pendingDisconnects.delete(peerId)
+        // Re-check: the peer may have reconnected on a new socket meanwhile.
+        if (peerSockets.get(peerId) !== socket.id) return
+        console.log(`[room] Peer ${peerId} did not return within grace window — evicting`)
+        handleLeave(roomId, peerId)
+      }, DISCONNECT_GRACE_MS)
+      pendingDisconnects.set(peerId, timer)
     })
 
     // -----------------------------------------------------------------------
     // Internal helper
     // -----------------------------------------------------------------------
     function handleLeave(roomId: string, peerId: string): void {
+      // An explicit leave (or grace-window expiry) supersedes any pending timer.
+      clearPendingDisconnect(peerId)
+
       const room = rooms.get(roomId)
       if (!room) return
 
