@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import useSWR, { mutate } from 'swr'
-import { UserCircle, UserPlus, Users, Check, X, UserMinus, Loader2, Pencil } from 'lucide-react'
+import { UserCircle, UserPlus, Users, Check, X, UserMinus, Loader2, Pencil, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -13,22 +13,34 @@ interface User {
 }
 
 interface Friend {
-  id: string // friendship id
+  id: string
   friendId: string
   friendName: string
   friendUsername: string | null
 }
 
 interface PendingRequest {
-  id: string // friendship id
+  id: string
   requesterId: string
   requesterName: string
   requesterUsername: string | null
 }
 
+interface SentRequest {
+  id: string
+  addresseeId: string
+  addresseeName: string
+  addresseeUsername: string | null
+  createdAt: string
+}
+
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+type Tab = 'friends' | 'sent'
+
 export function ProfileClient({ user }: { user: User }) {
+  const [activeTab, setActiveTab] = useState<Tab>('friends')
+
   const { data: friendsData, isLoading: friendsLoading } = useSWR<{ friends: Friend[] }>(
     '/api/friends',
     fetcher,
@@ -36,6 +48,10 @@ export function ProfileClient({ user }: { user: User }) {
   const { data: pendingData, isLoading: pendingLoading } = useSWR<{
     pending: PendingRequest[]
   }>('/api/friends/pending', fetcher)
+  const { data: sentData, isLoading: sentLoading } = useSWR<{ sent: SentRequest[] }>(
+    '/api/friends/sent',
+    fetcher,
+  )
 
   // --- username edit ---
   const [editingName, setEditingName] = useState(false)
@@ -75,7 +91,6 @@ export function ProfileClient({ user }: { user: User }) {
       setNameError(data.error ?? 'Ошибка')
       return
     }
-    // Force page reload so server session updates
     window.location.reload()
   }
 
@@ -85,8 +100,13 @@ export function ProfileClient({ user }: { user: User }) {
   const [addLoading, setAddLoading] = useState(false)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
 
+  // --- cancel sent request ---
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [cancelledIds, setCancelledIds] = useState<Set<string>>(new Set())
+
   const friends = friendsData?.friends ?? []
   const pending = pendingData?.pending ?? []
+  const sent = sentData?.sent ?? []
 
   const handleAddFriend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -113,6 +133,7 @@ export function ProfileClient({ user }: { user: User }) {
 
     setAddUsername('')
     setAddSuccess(`Заявка отправлена пользователю ${trimmed}`)
+    mutate('/api/friends/sent')
   }
 
   const handleAccept = async (friendshipId: string) => {
@@ -149,8 +170,27 @@ export function ProfileClient({ user }: { user: User }) {
     }
   }
 
+  const handleCancel = async (friendshipId: string) => {
+    setCancellingId(friendshipId)
+    const res = await fetch('/api/friends/cancel', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ friendshipId }),
+    })
+    setCancellingId(null)
+    if (res.ok) {
+      setCancelledIds((prev) => new Set(prev).add(friendshipId))
+      mutate('/api/friends/sent')
+    }
+  }
+
   const displayName = (user as unknown as Record<string, unknown>).username as string | undefined
     ?? user.name
+
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: 'friends', label: 'Друзья', count: friends.length || undefined },
+    { id: 'sent', label: 'Мои заявки', count: sent.length || undefined },
+  ]
 
   return (
     <div className="flex flex-col gap-8">
@@ -230,58 +270,160 @@ export function ProfileClient({ user }: { user: User }) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
-        {/* Left — friends list */}
+        {/* Left — tabs + list */}
         <aside className="flex flex-col gap-4">
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <Users className="size-4 text-muted-foreground" />
-              <h2 className="text-sm font-medium text-foreground">
-                Друзья
-                {friends.length > 0 && (
-                  <span className="ml-1.5 text-muted-foreground">({friends.length})</span>
-                )}
-              </h2>
-            </div>
-
-            {friendsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : friends.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-center">
-                <Users className="size-8 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">Список друзей пуст</p>
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {friends.map((f) => (
-                  <li
-                    key={f.id}
-                    className="group flex items-center justify-between rounded-lg px-2 py-2 hover:bg-secondary/50"
+          {/* Tab switcher */}
+          <div className="flex rounded-lg border border-border bg-secondary/30 p-1 gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tab.label}
+                {tab.count !== undefined && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                      activeTab === tab.id
+                        ? 'bg-secondary text-foreground'
+                        : 'bg-secondary/50 text-muted-foreground'
+                    }`}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
-                        {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
-                      </div>
-                      <span className="text-sm text-foreground">
-                        {f.friendUsername ?? f.friendName}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => handleRemove(f.id)}
-                      className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
-                      aria-label="Удалить из друзей"
-                    >
-                      <UserMinus className="size-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
+
+          {/* Friends tab */}
+          {activeTab === 'friends' && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Users className="size-4 text-muted-foreground" />
+                <h2 className="text-sm font-medium text-foreground">
+                  Друзья
+                  {friends.length > 0 && (
+                    <span className="ml-1.5 text-muted-foreground">({friends.length})</span>
+                  )}
+                </h2>
+              </div>
+
+              {friendsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : friends.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-8 text-center">
+                  <Users className="size-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">Список друзей пуст</p>
+                </div>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {friends.map((f) => (
+                    <li
+                      key={f.id}
+                      className="group flex items-center justify-between rounded-lg px-2 py-2 hover:bg-secondary/50"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+                          {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-sm text-foreground">
+                          {f.friendUsername ?? f.friendName}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemove(f.id)}
+                        className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
+                        aria-label="Удалить из друзей"
+                      >
+                        <UserMinus className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Sent tab */}
+          {activeTab === 'sent' && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Send className="size-4 text-muted-foreground" />
+                <h2 className="text-sm font-medium text-foreground">
+                  Мои заявки
+                  {sent.length > 0 && (
+                    <span className="ml-1.5 text-muted-foreground">({sent.length})</span>
+                  )}
+                </h2>
+              </div>
+
+              {sentLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : sent.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-8 text-center">
+                  <Send className="size-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">Нет исходящих заявок</p>
+                </div>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {sent.map((s) => {
+                    const isCancelled = cancelledIds.has(s.id)
+                    const isCancelling = cancellingId === s.id
+                    return (
+                      <li
+                        key={s.id}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2.5 transition-opacity ${
+                          isCancelled ? 'border-border/40 opacity-40' : 'border-border'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+                            {(s.addresseeUsername ?? s.addresseeName).charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm text-foreground">
+                              {s.addresseeUsername ?? s.addresseeName}
+                            </span>
+                            {isCancelled && (
+                              <span className="text-[11px] text-muted-foreground">Отменена</span>
+                            )}
+                          </div>
+                        </div>
+                        {!isCancelled && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleCancel(s.id)}
+                            disabled={isCancelling}
+                            className="h-8 gap-1 px-2.5 text-xs text-muted-foreground hover:text-destructive"
+                          >
+                            {isCancelling ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <X className="size-3.5" />
+                            )}
+                            Отменить
+                          </Button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </aside>
 
-        {/* Right — add friend + pending */}
+        {/* Right — add friend + pending incoming */}
         <section className="flex flex-col gap-4">
           {/* Add friend */}
           <div className="rounded-xl border border-border bg-card p-5">

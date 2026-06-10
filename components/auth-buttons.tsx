@@ -45,13 +45,22 @@ export function AuthButtons({ user }: AuthButtonsProps) {
   }
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={() => router.push('/sign-in')}
-      className="text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
-    >
-      Войти
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push('/sign-in')}
+        className="h-9 px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground active:scale-95"
+      >
+        Войти
+      </Button>
+      <Button
+        size="sm"
+        onClick={() => router.push('/sign-up')}
+        className="h-9 px-4 text-sm font-medium transition-all hover:opacity-90 active:scale-95"
+      >
+        Зарегистрироваться
+      </Button>
+    </div>
   )
 }
