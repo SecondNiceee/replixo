@@ -28,8 +28,16 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
         setError('Username не может быть пустым')
         return
       }
+      if (trimmed.length < 2) {
+        setError('Username должен быть минимум 2 символа')
+        return
+      }
       if (trimmed.length > 20) {
         setError('Username не может быть длиннее 20 символов')
+        return
+      }
+      if (!/^[a-zA-Z0-9_.]+$/.test(trimmed)) {
+        setError('Username может содержать только буквы, цифры, _ и .')
         return
       }
     }
@@ -98,7 +106,7 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
                   autoComplete="username"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Максимум 20 символов
+                  Буквы, цифры, _ и . — максимум 20 символов
                 </p>
               </div>
             )}

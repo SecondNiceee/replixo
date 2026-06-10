@@ -7,12 +7,7 @@ export const auth = betterAuth({
   plugins: [
     username({
       maxUsernameLength: 20,
-      minUsernameLength: 1,
-      usernameValidator: (u) => {
-        // trim is handled on client, but double-check server side
-        if (u !== u.trim()) return false
-        return true
-      },
+      minUsernameLength: 2,
     }),
   ],
   baseURL:
