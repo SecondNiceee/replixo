@@ -16,7 +16,10 @@ export interface RemotePeer {
   audioStream?: MediaStream
   screenStream?: MediaStream
   screenAudioStream?: MediaStream
+  presentationStream?: MediaStream
 }
+
+export type MediaSource = "media" | "screen" | "presentation"
 
 export type RoomStatus =
   | "idle"
@@ -70,6 +73,7 @@ interface State {
   isMicMuted: boolean
   isCamOff: boolean
   isScreenSharing: boolean
+  isPresenting: boolean
   // whether the user has ever enabled mic/cam (i.e. track exists)
   hasMic: boolean
   hasCam: boolean
@@ -81,12 +85,13 @@ type Action =
   | { type: "ERROR"; error: string }
   | { type: "DISCONNECTED" }
   | { type: "PEER_JOINED"; peerId: string; displayName: string }
-  | { type: "PEER_STREAM"; peerId: string; displayName: string; kind: "video" | "audio"; source: "media" | "screen"; stream: MediaStream }
-  | { type: "PEER_PRODUCER_CLOSED"; peerId: string; source: "media" | "screen"; kind: "video" | "audio" }
+  | { type: "PEER_STREAM"; peerId: string; displayName: string; kind: "video" | "audio"; source: MediaSource; stream: MediaStream }
+  | { type: "PEER_PRODUCER_CLOSED"; peerId: string; source: MediaSource; kind: "video" | "audio" }
   | { type: "PEER_LEFT"; peerId: string }
   | { type: "TOGGLE_MIC"; isMuted: boolean; hasMic?: boolean }
   | { type: "TOGGLE_CAM"; isOff: boolean; hasCam?: boolean }
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
+  | { type: "SET_PRESENTING"; isPresenting: boolean }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -109,13 +114,15 @@ function reducer(state: State, action: Action): State {
       const peers = new Map(state.peers)
       const existing = peers.get(action.peerId) ?? { peerId: action.peerId, displayName: action.displayName }
       const key =
-        action.source === "screen"
-          ? action.kind === "video"
-            ? "screenStream"
-            : "screenAudioStream"
-          : action.kind === "video"
-            ? "videoStream"
-            : "audioStream"
+        action.source === "presentation"
+          ? "presentationStream"
+          : action.source === "screen"
+            ? action.kind === "video"
+              ? "screenStream"
+              : "screenAudioStream"
+            : action.kind === "video"
+              ? "videoStream"
+              : "audioStream"
       peers.set(action.peerId, {
         ...existing,
         [key]: action.stream,
@@ -127,13 +134,15 @@ function reducer(state: State, action: Action): State {
       const existing = peers.get(action.peerId)
       if (!existing) return state
       const key =
-        action.source === "screen"
-          ? action.kind === "video"
-            ? "screenStream"
-            : "screenAudioStream"
-          : action.kind === "video"
-            ? "videoStream"
-            : "audioStream"
+        action.source === "presentation"
+          ? "presentationStream"
+          : action.source === "screen"
+            ? action.kind === "video"
+              ? "screenStream"
+              : "screenAudioStream"
+            : action.kind === "video"
+              ? "videoStream"
+              : "audioStream"
       const updated = { ...existing }
       delete updated[key]
       peers.set(action.peerId, updated)
@@ -150,6 +159,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, isCamOff: action.isOff, hasCam: action.hasCam ?? state.hasCam }
     case "SET_SCREEN_SHARING":
       return { ...state, isScreenSharing: action.isSharing }
+    case "SET_PRESENTING":
+      return { ...state, isPresenting: action.isPresenting }
     default:
       return state
   }
@@ -187,6 +198,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     isMicMuted: true,
     isCamOff: true,
     isScreenSharing: false,
+    isPresenting: false,
     hasMic: false,
     hasCam: false,
   })
@@ -202,6 +214,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const screenVideoProducerRef = useRef<Producer | null>(null)
   const screenAudioProducerRef = useRef<Producer | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
+  const presentationVideoProducerRef = useRef<Producer | null>(null)
+  const presentationStreamRef = useRef<MediaStream | null>(null)
   const selectedMicIdRef = useRef<string | undefined>(undefined)
   // currently selected screen-share quality preset
   const screenQualityRef = useRef<ScreenQuality>("auto")
@@ -355,10 +369,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             return
           }
 
-          const source =
-            (appData?.source ?? (data.appData as Record<string, unknown>)?.source) === "screen"
+          const rawSource =
+            appData?.source ?? (data.appData as Record<string, unknown>)?.source
+          const source: MediaSource =
+            rawSource === "screen"
               ? "screen"
-              : "media"
+              : rawSource === "presentation"
+                ? "presentation"
+                : "media"
 
           const consumer = await recvTransport.consume({
             id: data.consumerId,
@@ -995,6 +1013,64 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     },
     [startScreenShare, stopScreenShare],
   )
+
+  // -------------------------------------------------------------------------
+  // Presentation sharing
+  //
+  // A presentation (PPTX / PDF / image) is rendered to a <canvas> by the
+  // owner. We capture that canvas as a video track and publish it through the
+  // normal send transport, tagged with appData.source === "presentation".
+  // Every other peer receives it as a regular video stream and shows it in a
+  // fullscreen overlay. Because only the owner controls the canvas (which
+  // slide/scroll position), navigation is implicitly owner-only.
+  // -------------------------------------------------------------------------
+  const stopPresentation = useCallback(() => {
+    const socket = socketRef.current
+    const producer = presentationVideoProducerRef.current
+    if (producer) {
+      socket?.emit("closeProducer", {
+        roomId,
+        peerId: peerId.current,
+        producerId: producer.id,
+      })
+      producer.close()
+    }
+    presentationVideoProducerRef.current = null
+    presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
+    presentationStreamRef.current = null
+    dispatch({ type: "SET_PRESENTING", isPresenting: false })
+  }, [roomId])
+
+  // Publish a canvas-captured stream as the presentation video track.
+  const startPresentation = useCallback(async (stream: MediaStream) => {
+    const sendTransport = sendTransportRef.current
+    if (!sendTransport) return
+
+    // Replace any existing presentation first.
+    if (presentationVideoProducerRef.current) {
+      stopPresentation()
+    }
+
+    presentationStreamRef.current = stream
+    const videoTrack = stream.getVideoTracks()[0]
+    if (!videoTrack) return
+
+    // Optimise the encoder for sharp text/detail (slides, documents).
+    if ("contentHint" in videoTrack) {
+      videoTrack.contentHint = "detail"
+    }
+
+    const producer = await sendTransport.produce({
+      track: videoTrack,
+      encodings: [{ maxBitrate: 4_000_000, scaleResolutionDownBy: 1 }],
+      codecOptions: { videoGoogleStartBitrate: 2000 },
+      appData: { source: "presentation" },
+    })
+    presentationVideoProducerRef.current = producer
+    videoTrack.onended = () => stopPresentation()
+
+    dispatch({ type: "SET_PRESENTING", isPresenting: true })
+  }, [stopPresentation])
 
   // -------------------------------------------------------------------------
   // Auto-join on mount, leave on unmount
