@@ -6,6 +6,7 @@ import { pgTable, text, timestamp, boolean, unique } from 'drizzle-orm/pg-core'
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
   username: text('username').unique(),
+  displayUsername: text('displayUsername'),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   emailVerified: boolean('emailVerified').notNull().default(false),
