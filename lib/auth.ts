@@ -34,8 +34,7 @@ export const auth = betterAuth({
     username({
       maxUsernameLength: 20,
       minUsernameLength: 2,
-      // Reject non-latin usernames at the Better Auth level
-      validator: (value: string) => USERNAME_RE.test(value),
+      usernameValidator: (value: string) => USERNAME_RE.test(value),
     }),
   ],
   baseURL: APP_URL,
