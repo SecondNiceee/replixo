@@ -106,7 +106,7 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
                   autoComplete="username"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Буквы, цифры, _ и . — максимум 20 символов
+                  Только англ. буквы, цифры, _ и . До 20 символов.
                 </p>
               </div>
             )}
