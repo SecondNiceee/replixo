@@ -27,6 +27,9 @@ Riplexo — это веб-приложение для видеосвязи. Он
 | [`client-logic.md`](./client-logic.md) | Клиентская логика: хук `use-mediasoup` (WebRTC/mediasoup), `use-audio-devices`, `use-speaking`, утилиты `audio-unlock` и `display-name`. |
 | [`server.md`](./server.md) | Бэкенд на Node.js: mediasoup-сервер, Socket.io события, модели `Room` и `Peer`, конфигурация. |
 | [`design-system.md`](./design-system.md) | Дизайн-система: цвета (тёмная тема), шрифты, токены, радиусы, общие визуальные приёмы. |
+| [`users/authorization.md`](./users/authorization.md) | Авторизация: Better Auth, схема БД, сессии, страницы входа/регистрации. |
+| [`users/friends.md`](./users/friends.md) | Система друзей: модель данных, API, UI на /profile, безопасность. |
+| [`users/forgot-password.md`](./users/forgot-password.md) | Что делать если забыл пароль. Ручной сброс через БД, план автоматического сброса через Better Auth. |
 
 ---
 
