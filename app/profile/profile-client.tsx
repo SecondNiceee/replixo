@@ -155,8 +155,8 @@ export function ProfileClient({ user }: { user: User }) {
   return (
     <div className="flex flex-col gap-8">
       {/* Profile header */}
-      <div className="flex items-center gap-4">
-        <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-secondary text-2xl font-semibold text-foreground">
+      <div className="flex items-start gap-4">
+        <div className="mt-1 flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-xl font-semibold text-foreground">
           {displayName.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0">
