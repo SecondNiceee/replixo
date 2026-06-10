@@ -10,7 +10,7 @@ import { Logo } from '@/components/logo'
 
 export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const router = useRouter()
-  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -21,10 +21,30 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+
+    if (isSignUp) {
+      const trimmed = username.trim()
+      if (trimmed.length === 0) {
+        setError('Username не может быть пустым')
+        return
+      }
+      if (trimmed.length > 20) {
+        setError('Username не может быть длиннее 20 символов')
+        return
+      }
+    }
+
     setLoading(true)
 
+    const trimmedUsername = username.trim()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = isSignUp
-      ? await authClient.signUp.email({ email, password, name })
+      ? await (authClient as any).signUp.email({
+          email,
+          password,
+          name: trimmedUsername,
+          username: trimmedUsername,
+        })
       : await authClient.signIn.email({ email, password })
 
     setLoading(false)
@@ -63,19 +83,23 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             {isSignUp && (
               <div className="flex flex-col gap-1.5">
                 <label
-                  htmlFor="name"
+                  htmlFor="username"
                   className="text-sm font-medium text-foreground"
                 >
-                  Имя
+                  Username
                 </label>
                 <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Иван Иванов"
+                  id="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="cooluser"
                   required
-                  autoComplete="name"
+                  maxLength={20}
+                  autoComplete="username"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Максимум 20 символов
+                </p>
               </div>
             )}
 

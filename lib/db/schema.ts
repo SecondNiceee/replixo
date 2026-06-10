@@ -1,10 +1,11 @@
-import { pgTable, text, timestamp, boolean } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
+  username: text('username').unique(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   emailVerified: boolean('emailVerified').notNull().default(false),
@@ -52,3 +53,23 @@ export const verification = pgTable('verification', {
   createdAt: timestamp('createdAt').defaultNow(),
   updatedAt: timestamp('updatedAt').defaultNow(),
 })
+
+// --- Friends system --------------------------------------------------------
+
+export const friendship = pgTable(
+  'friendship',
+  {
+    id: text('id').primaryKey(),
+    requesterId: text('requesterId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    addresseeId: text('addresseeId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // 'pending' | 'accepted' | 'declined'
+    status: text('status').notNull().default('pending'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (t) => [unique().on(t.requesterId, t.addresseeId)],
+)
