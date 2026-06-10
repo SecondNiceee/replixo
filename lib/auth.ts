@@ -2,12 +2,16 @@ import { betterAuth } from 'better-auth'
 import { username } from 'better-auth/plugins'
 import { pool } from '@/lib/db'
 
+const USERNAME_RE = /^[a-zA-Z0-9_]{2,20}$/
+
 export const auth = betterAuth({
   database: pool,
   plugins: [
     username({
       maxUsernameLength: 20,
       minUsernameLength: 2,
+      // Reject non-latin usernames at the Better Auth level
+      validator: (value: string) => USERNAME_RE.test(value),
     }),
   ],
   baseURL:
