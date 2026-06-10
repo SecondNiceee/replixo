@@ -215,19 +215,53 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const hasJoinedRef = useRef(false)
   // guards against firing several overlapping ICE restarts for one transport
   const iceRestartingRef = useRef<Set<string>>(new Set())
+  // per-transport retry timers — used to keep retrying an ICE restart until the
+  // transport reports "connected" again (mobile networks often need several).
+  const iceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   // -------------------------------------------------------------------------
   // Restart ICE on a transport whose network path broke (transient drop / VPN
-  // switch). The transport, its producers and consumers all stay alive — only
-  // the ICE candidates are renegotiated, so media resumes without re-creating
-  // anything and the peer never leaves the room.
+  // switch / phone changing cell tower). The transport, its producers and
+  // consumers all stay alive — only the ICE candidates are renegotiated, so
+  // media resumes without re-creating anything and the peer never leaves.
+  //
+  // On mobile a single restart frequently isn't enough (the new path takes a
+  // few seconds to settle), so we retry with backoff until the transport's
+  // connectionstatechange reports "connected"/"completed", which clears the
+  // timer via clearIceRetry().
   // -------------------------------------------------------------------------
+  const clearIceRetry = useCallback((transportId: string) => {
+    const t = iceRetryTimersRef.current.get(transportId)
+    if (t) {
+      clearTimeout(t)
+      iceRetryTimersRef.current.delete(transportId)
+    }
+  }, [])
+
   const restartIceForTransport = useCallback(
-    (transport: Transport | null) => {
+    (transport: Transport | null, attempt = 0) => {
       const socket = socketRef.current
       if (!socket || !transport || transport.closed) return
-      if (iceRestartingRef.current.has(transport.id)) return
+      // Don't stack concurrent restarts, but DO allow scheduled retries.
+      if (attempt === 0 && iceRestartingRef.current.has(transport.id)) return
       iceRestartingRef.current.add(transport.id)
+
+      const scheduleRetry = () => {
+        // Stop retrying once the transport recovered or was closed.
+        if (transport.closed || transport.connectionState === "connected") {
+          clearIceRetry(transport.id)
+          return
+        }
+        // Backoff: 1s, 2s, 4s … capped at 8s. Retries indefinitely while the
+        // transport stays broken so a phone that's been off-network for a
+        // while still recovers the moment it comes back.
+        const delay = Math.min(1000 * 2 ** attempt, 8000)
+        clearIceRetry(transport.id)
+        const timer = setTimeout(() => {
+          restartIceForTransport(transport, attempt + 1)
+        }, delay)
+        iceRetryTimersRef.current.set(transport.id, timer)
+      }
 
       socket.emit(
         "restartIce",
@@ -236,18 +270,53 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           iceRestartingRef.current.delete(transport.id)
           if (error || !iceParameters) {
             console.error("[useMediasoup] restartIce error:", error)
+            scheduleRetry()
             return
           }
           try {
             await transport.restartIce({ iceParameters: iceParameters as RTCIceParameters })
+            // Verify it actually recovered; if not, keep retrying.
+            scheduleRetry()
           } catch (e) {
             console.error("[useMediasoup] transport.restartIce failed:", e)
+            scheduleRetry()
           }
         },
       )
     },
-    [roomId],
+    [roomId, clearIceRetry],
   )
+
+  // -------------------------------------------------------------------------
+  // Force-recover the whole connection. Called when the app comes back to the
+  // foreground / regains network on mobile, where the browser silently freezes
+  // WebRTC and socket.io and does NOT always auto-fire a reconnect. We kick the
+  // socket back to life and renegotiate ICE on both transports.
+  // -------------------------------------------------------------------------
+  const recoverConnection = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket || !hasJoinedRef.current) return
+
+    // If the signaling socket dropped, reconnect it — the "connect" handler
+    // then runs the rejoinProbe / ICE-restart path.
+    if (!socket.connected) {
+      socket.connect()
+      return
+    }
+
+    // Socket is alive but media may be frozen — probe + restart ICE.
+    socket.emit(
+      "rejoinProbe",
+      { roomId, peerId: peerId.current },
+      (error: string | null) => {
+        if (!error) {
+          restartIceForTransport(sendTransportRef.current)
+          restartIceForTransport(recvTransportRef.current)
+        }
+        // If evicted, the next "connect" cycle handles the full rejoin.
+      },
+    )
+  }, [roomId, restartIceForTransport])
 
   // -------------------------------------------------------------------------
   // consume a remote producer
@@ -391,12 +460,17 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             })
 
             // When the underlying ICE/DTLS path breaks (transient network drop,
-            // VPN toggle), WebRTC reports "disconnected" then "failed". Instead
-            // of tearing the call down, renegotiate ICE so media resumes on the
-            // new network path. The peer stays in the room the whole time.
+            // VPN toggle, phone switching towers), WebRTC reports "disconnected"
+            // then "failed". Instead of tearing the call down, renegotiate ICE so
+            // media resumes on the new network path. The peer stays in the room
+            // the whole time. We keep retrying (with backoff) until the state
+            // returns to "connected", at which point we stop.
             transport.on("connectionstatechange", (connectionState) => {
               if (connectionState === "disconnected" || connectionState === "failed") {
                 restartIceForTransport(transport as Transport)
+              } else if (connectionState === "connected") {
+                // Recovered — stop any pending ICE-restart retries.
+                clearIceRetry(transport.id)
               }
             })
 
@@ -466,7 +540,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     localStreamRef.current = localStream
 
     const socket = io(SERVER_URL, {
-      transports: ["websocket"],
+      // Allow polling as a fallback: some mobile/corporate networks block raw
+      // websockets, and websocket-only would then never connect. socket.io
+      // upgrades to websocket automatically once it's available.
+      transports: ["websocket", "polling"],
       // Keep reconnecting indefinitely with short delays so a ~1-second network
       // blip re-establishes the signaling channel quickly. The server's
       // pingTimeout (30 s) ensures the peer is not evicted during this window.
@@ -474,6 +551,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
       reconnectionDelayMax: 3000,
+      // Lower connect timeout so a stalled attempt fails fast and retries.
+      timeout: 10000,
     })
     socketRef.current = socket
 
@@ -628,6 +707,39 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   }, [roomId, displayName, state.status, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
+  // Mobile / background recovery.
+  //
+  // The single biggest cause of "the phone user froze and never came back" is
+  // that mobile browsers (especially iOS Safari) suspend JS timers, WebRTC and
+  // websockets when the tab is backgrounded or the screen locks — and they do
+  // NOT reliably fire socket.io's auto-reconnect when the app returns. We
+  // listen for every signal that the app is alive again and proactively
+  // recover: re-open the socket and renegotiate ICE so audio/video resume.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recoverConnection()
+    }
+    const onOnline = () => recoverConnection()
+    const onFocus = () => recoverConnection()
+    const onPageShow = () => recoverConnection()
+
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("online", onOnline)
+    window.addEventListener("focus", onFocus)
+    window.addEventListener("pageshow", onPageShow)
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("online", onOnline)
+      window.removeEventListener("focus", onFocus)
+      window.removeEventListener("pageshow", onPageShow)
+    }
+  }, [recoverConnection])
+
+  // -------------------------------------------------------------------------
   // Leave
   // -------------------------------------------------------------------------
   const leave = useCallback(() => {
@@ -652,6 +764,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // an intentional leave) follows the full first-connect path, not reconnect.
     hasJoinedRef.current = false
     iceRestartingRef.current.clear()
+    // Clear any pending ICE-restart retry timers.
+    iceRetryTimersRef.current.forEach((t) => clearTimeout(t))
+    iceRetryTimersRef.current.clear()
     dispatch({ type: "DISCONNECTED" })
   }, [roomId])
 
