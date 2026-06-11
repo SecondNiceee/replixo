@@ -383,10 +383,11 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         let slideEventCount = 0
         let slideWindowStart = Date.now()
 
-        return (payload: PresentationSlidePayload) => {
+        return (payload: unknown) => {
           // --- Input validation ---
+          // Accept unknown — Socket.io doesn't guarantee the incoming type.
           if (!payload || typeof payload !== 'object') return
-          const { roomId: rid, peerId: pid, slide, total } = payload
+          const { roomId: rid, peerId: pid, slide, total } = payload as PresentationSlidePayload
 
           if (typeof rid !== 'string' || !rid) return
           if (typeof pid !== 'string' || !pid) return
@@ -441,7 +442,9 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         if (peerSockets.get(pid) !== socket.id) return
 
         room.currentSlide = null
-        socket.to(rid).emit('presentationEnded', { peerId: pid })
+        // Use io.to() — consistent with handleLeave; works even if the socket
+        // is mid-disconnect when stopPresentation fires.
+        io.to(rid).emit('presentationEnded', { peerId: pid })
         console.log(`[presentation] Peer ${pid} ended presentation in room ${rid}`)
       },
     )

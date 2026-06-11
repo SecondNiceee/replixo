@@ -222,6 +222,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     hasCam: false,
     currentSlide: null,
   })
+  // Keep statusRef in sync — used inside callbacks to avoid stale closures.
+  statusRef.current = state.status
 
   const socketRef = useRef<Socket | null>(null)
   const deviceRef = useRef<Device | null>(null)
@@ -236,6 +238,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const screenStreamRef = useRef<MediaStream | null>(null)
   const presentationVideoProducerRef = useRef<Producer | null>(null)
   const presentationStreamRef = useRef<MediaStream | null>(null)
+  const isPresentingRef = useRef(false)
   const selectedMicIdRef = useRef<string | undefined>(undefined)
   // currently selected screen-share quality preset
   const screenQualityRef = useRef<ScreenQuality>("auto")
@@ -247,6 +250,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // whether an initial join has completed. Distinguishes a first connect from
   // a socket.io reconnection after a transient network drop.
   const hasJoinedRef = useRef(false)
+  // mirrors state.status in a ref so join() can read it without being a dep
+  const statusRef = useRef<RoomStatus>("idle")
   // guards against firing several overlapping ICE restarts for one transport
   const iceRestartingRef = useRef<Set<string>>(new Set())
   // per-transport retry timers — used to keep retrying an ICE restart until the
@@ -569,7 +574,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Join
   // -------------------------------------------------------------------------
   const join = useCallback(async () => {
-    if (state.status === "connecting" || state.status === "connected") return
+    if (statusRef.current === "connecting" || statusRef.current === "connected") return
 
     dispatch({ type: "CONNECTING" })
 
@@ -707,18 +712,25 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     // New remote producer appeared
     socket.on("newProducer", async ({ peerId: remotePeerId, displayName: remoteName, producerId, kind, appData }) => {
-      // Wait briefly for recv transport to be ready
-      let attempts = 0
-      const waitAndConsume = async () => {
-        if (!recvTransportRef.current) {
-          if (attempts++ < 20) {
-            setTimeout(waitAndConsume, 250)
-          }
-          return
-        }
-        await consumeProducer(remotePeerId, remoteName, producerId, kind as "audio" | "video", appData)
+      // The recv transport may not be ready yet (e.g. we got newProducer before
+      // setupTransports finished). Poll with a hard timeout of 5 s (20 × 250 ms)
+      // rather than an open-ended loop so we never leak a dangling callback.
+      const waitForTransport = (): Promise<boolean> =>
+        new Promise((resolve) => {
+          if (recvTransportRef.current) { resolve(true); return }
+          let attempts = 0
+          const id = setInterval(() => {
+            if (recvTransportRef.current) { clearInterval(id); resolve(true); return }
+            if (++attempts >= 20) { clearInterval(id); resolve(false) }
+          }, 250)
+        })
+
+      const ready = await waitForTransport()
+      if (!ready) {
+        console.warn("[useMediasoup] newProducer: recv transport not ready after 5s — skipping", producerId)
+        return
       }
-      await waitAndConsume()
+      await consumeProducer(remotePeerId, remoteName, producerId, kind as "audio" | "video", appData)
     })
 
     socket.on("peerLeft", ({ peerId: leftPeerId }) => {
@@ -780,7 +792,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         dispatch({ type: "SET_SLIDE", slide: null })
       },
     )
-  }, [roomId, displayName, state.status, setupTransports, consumeProducer])
+  }, [roomId, displayName, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
   // Mobile / background recovery.
@@ -1095,7 +1107,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const producer = presentationVideoProducerRef.current
 
     // Guard: nothing to tear down if no presentation is active.
-    if (!producer && !presentationStreamRef.current) return
+    // Use isPresentingRef (not state) to avoid stale-closure issues in leave().
+    if (!isPresentingRef.current && !producer && !presentationStreamRef.current) return
+    isPresentingRef.current = false
 
     if (producer) {
       // Clear onended BEFORE stopping tracks so we don't trigger a recursive call.
@@ -1165,6 +1179,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       appData: { source: "presentation" },
     })
     presentationVideoProducerRef.current = producer
+    isPresentingRef.current = true
     videoTrack.onended = () => stopPresentation()
 
     dispatch({ type: "SET_PRESENTING", isPresenting: true })
