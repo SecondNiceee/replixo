@@ -409,7 +409,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           slideEventCount = 0
           slideWindowStart = now
         }
-        if (++slideEventCount > SLIDE_RATE_LIMIT) return
+        if (++slideEventCount >= SLIDE_RATE_LIMIT) return
 
         room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
         socket.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
@@ -423,15 +423,18 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     // -----------------------------------------------------------------------
     socket.on(
       'presentationEnded',
-      ({ roomId: rid, peerId: pid }: { roomId: string; peerId: string }) => {
+      (payload: unknown) => {
+        if (!payload || typeof payload !== 'object') return
+        const { roomId: rid, peerId: pid } = payload as Record<string, unknown>
+
         if (typeof rid !== 'string' || !rid) return
         if (typeof pid !== 'string' || !pid) return
 
         const room = rooms.get(rid)
         if (!room) return
 
-        // Auth: only the current presenter (who must own this socket) may end the presentation.
-        if (room.currentSlide?.peerId !== pid) return
+        // Auth: only the active presenter owning this socket may end the presentation.
+        if (room.currentSlide == null || room.currentSlide.peerId !== pid) return
         if (peerSockets.get(pid) !== socket.id) return
 
         room.currentSlide = null

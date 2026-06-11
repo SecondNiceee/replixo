@@ -762,7 +762,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     socket.on(
       "presentationEnded",
-      () => {
+      (_payload: { peerId: string }) => {
         dispatch({ type: "SET_SLIDE", slide: null })
       },
     )
@@ -1071,17 +1071,27 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const stopPresentation = useCallback(() => {
     const socket = socketRef.current
     const producer = presentationVideoProducerRef.current
+
+    // Guard: nothing to tear down if no presentation is active.
+    if (!producer && !presentationStreamRef.current) return
+
     if (producer) {
+      // Clear onended BEFORE stopping tracks so we don't trigger a recursive call.
+      const track = presentationStreamRef.current?.getVideoTracks()[0]
+      if (track) track.onended = null
+
       socket?.emit("closeProducer", {
         roomId,
         peerId: peerId.current,
         producerId: producer.id,
       })
       producer.close()
+      presentationVideoProducerRef.current = null
+
+      // Notify the server so it clears currentSlide and broadcasts to other peers.
+      socket?.emit("presentationEnded", { roomId, peerId: peerId.current })
     }
-    // Notify the server so it clears currentSlide and broadcasts to other peers.
-    socket?.emit("presentationEnded", { roomId, peerId: peerId.current })
-    presentationVideoProducerRef.current = null
+
     presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
     presentationStreamRef.current = null
     dispatch({ type: "STOP_PRESENTING" })
