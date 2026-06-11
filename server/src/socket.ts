@@ -415,7 +415,9 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           if (++slideEventCount > SLIDE_RATE_LIMIT) return
 
           room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
-          socket.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
+          // Use io.to() for reliability — socket.to() is a no-op if the socket
+          // has already left the room (e.g. mid-disconnect race).
+          io.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
         }
       })(),
     )
