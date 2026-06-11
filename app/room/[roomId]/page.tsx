@@ -3,7 +3,7 @@
 import { use } from "react"
 import { useRouter } from "next/navigation"
 import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, ChevronDown, Pencil, MonitorUp, MonitorOff, FileText } from "lucide-react"
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { EditNameDialog } from "@/components/edit-name-dialog"
 import { getDisplayName } from "@/lib/display-name"
@@ -121,12 +121,11 @@ export default function RoomPage({
     setPresentationFile(null)
   }, [stopPresentation])
 
-  const handleSlideChange = useCallback(
-    (slide: number, total: number) => {
-      notifySlideChange(slide, total)
-    },
-    [notifySlideChange],
-  )
+  // Clear local file state if isPresenting was cancelled externally
+  // (e.g. the server closed the producer or the user left and rejoined).
+  useEffect(() => {
+    if (!isPresenting) setPresentationFile(null)
+  }, [isPresenting])
 
   const handleCopyCode = useCallback(() => {
     navigator.clipboard.writeText(roomId)
@@ -180,7 +179,10 @@ export default function RoomPage({
 
   // Presentation: find the peer that is presenting (if any remote peer).
   const presentingPeer = allPeers.find((p) => p.presentationStream)
-  const hasPresentation = isPresenting || !!presentingPeer
+  // Use currentSlide as a secondary signal: the server notifies slide state
+  // before the MediaStream subscription completes, so the overlay should open
+  // as soon as we know a presentation is in progress.
+  const hasPresentation = isPresenting || !!presentingPeer || currentSlide !== null
 
   // Collect every active screen share (local + remote) as primary "stage" tiles.
   const remoteScreens = allPeers.filter((p) => p.screenStream)
@@ -321,7 +323,7 @@ export default function RoomPage({
             <PresentationViewer
               isPresenter={isPresenting}
               currentSlide={currentSlide}
-              onSlideChange={handleSlideChange}
+              onSlideChange={notifySlideChange}
               onStop={handleStopPresentation}
               canvasRef={isPresenting ? presentationCanvasRef : undefined}
               remoteStream={presentingPeer?.presentationStream}
@@ -331,6 +333,7 @@ export default function RoomPage({
           {/* Filmstrip of cameras */}
           <div className="flex shrink-0 gap-2 overflow-x-auto lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
             <VideoTile
+              key="local"
               stream={localStream ?? undefined}
               speakingStream={localStream ?? undefined}
               displayName={displayName}

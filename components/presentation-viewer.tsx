@@ -141,39 +141,39 @@ export function PresentationViewer({
           )}
         </div>
 
-        {/* Slide counter + arrows */}
+        {/* Slide counter — always shown. Arrows — presenter only. */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={goPrev}
-            disabled={!canGoBack}
-            className={cn(
-              "flex size-8 items-center justify-center rounded-full transition-colors",
-              canGoBack
-                ? "text-white hover:bg-white/15"
-                : "cursor-default text-white/20",
-            )}
-            aria-label="Предыдущий слайд"
-          >
-            <ChevronLeft className="size-5" />
-          </button>
+          {isPresenter && (
+            <button
+              onClick={goPrev}
+              disabled={!canGoBack}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-full transition-colors",
+                canGoBack ? "text-white hover:bg-white/15" : "cursor-default text-white/20",
+              )}
+              aria-label="Предыдущий слайд"
+            >
+              <ChevronLeft className="size-5" />
+            </button>
+          )}
 
           <span className="min-w-[56px] text-center text-sm font-medium tabular-nums text-white/80">
             {total > 0 ? `${slide + 1} / ${total}` : "—"}
           </span>
 
-          <button
-            onClick={goNext}
-            disabled={!canGoForward}
-            className={cn(
-              "flex size-8 items-center justify-center rounded-full transition-colors",
-              canGoForward
-                ? "text-white hover:bg-white/15"
-                : "cursor-default text-white/20",
-            )}
-            aria-label="Следующий слайд"
-          >
-            <ChevronRight className="size-5" />
-          </button>
+          {isPresenter && (
+            <button
+              onClick={goNext}
+              disabled={!canGoForward}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-full transition-colors",
+                canGoForward ? "text-white hover:bg-white/15" : "cursor-default text-white/20",
+              )}
+              aria-label="Следующий слайд"
+            >
+              <ChevronRight className="size-5" />
+            </button>
+          )}
         </div>
 
         {/* Spacer to keep arrows centred */}
@@ -268,7 +268,11 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         const page = await pdf.getPage(pageIndex + 1)
         if (signal.aborted) return
 
-        const viewport = page.getViewport({ scale: 2 })
+        // Scale so the rendered width matches the 1280px capture canvas.
+        // page.view = [x, y, width, height] in PDF user units.
+        const naturalWidth: number = (page.view as number[])[2] ?? 612
+        const scale = 1280 / naturalWidth
+        const viewport = page.getViewport({ scale })
         const tmp = document.createElement("canvas")
         tmp.width = viewport.width
         tmp.height = viewport.height
@@ -383,7 +387,10 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
           "background:#fff;overflow:hidden;z-index:-1;"
         document.body.appendChild(container)
 
-        const previewer = pptxMod.init(container, { width: 1280, height: 720, mode: "slide" })
+        // pptx-preview types declare number but the runtime renderer requires
+        // CSS strings. Cast to avoid the TS mismatch.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const previewer = pptxMod.init(container, { width: "1280px" as any, height: "720px" as any, mode: "slide" })
         pptxPreviewerRef.current = previewer
 
         await previewer.load(buf)
