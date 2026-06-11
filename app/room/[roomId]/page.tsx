@@ -2,8 +2,8 @@
 
 import { use } from "react"
 import { useRouter } from "next/navigation"
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, ChevronDown, Pencil, MonitorUp, MonitorOff } from "lucide-react"
-import { useState, useCallback } from "react"
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, ChevronDown, Pencil, MonitorUp, MonitorOff, FileText } from "lucide-react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { EditNameDialog } from "@/components/edit-name-dialog"
 import { getDisplayName } from "@/lib/display-name"
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { VideoTile } from "@/components/video-tile"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
+import { PresentationViewer } from "@/components/presentation-viewer"
 import { useMediasoup, type ScreenQuality } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
 import { cn } from "@/lib/utils"
@@ -65,12 +66,72 @@ export default function RoomPage({
     setScreenQuality,
     switchMic,
     leave,
+    // Presentation
+    isPresenting,
+    startPresentation,
+    stopPresentation,
+    notifySlideChange,
+    currentSlide,
   } = useMediasoup(roomId, displayName, create === "true")
 
   const { devices: micDevices } = useAudioDevices()
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
 
   const [copied, setCopied] = useState(false)
+
+  // -------------------------------------------------------------------------
+  // Presentation state
+  // -------------------------------------------------------------------------
+  const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [presentationFile, setPresentationFile] = useState<File | null>(null)
+
+  const handleOpenFilePicker = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      // Reset value so the same file can be re-selected later.
+      e.target.value = ""
+
+      const canvas = presentationCanvasRef.current
+      if (!canvas) return
+
+      try {
+        // Capture stream from offscreen canvas first — it is always mounted so
+        // captureStream is safe before PresenterCanvas draws anything; frames
+        // start flowing as soon as the first slide is rendered.
+        const stream = canvas.captureStream(30)
+        await startPresentation(stream)
+        // Set file after stream is established so PresenterCanvas mounts with
+        // an active producer and never races against an unstarted transport.
+        setPresentationFile(file)
+      } catch (err) {
+        console.error("[Replixo] startPresentation failed:", err)
+      }
+    },
+    [startPresentation],
+  )
+
+  const handleStopPresentation = useCallback(() => {
+    stopPresentation()
+    setPresentationFile(null)
+  }, [stopPresentation])
+
+  // Clear local file state only when isPresenting transitions true → false
+  // (server closed the producer, or user left and rejoined).
+  // We use a ref to track the previous value so we don't fire on mount
+  // (isPresenting starts as false, which would clear a file that was just set).
+  const wasPresentingRef = useRef(false)
+  useEffect(() => {
+    if (wasPresentingRef.current && !isPresenting) {
+      setPresentationFile(null)
+    }
+    wasPresentingRef.current = isPresenting
+  }, [isPresenting])
 
   const handleCopyCode = useCallback(() => {
     navigator.clipboard.writeText(roomId)
@@ -121,6 +182,13 @@ export default function RoomPage({
   // Active call
   // -------------------------------------------------------------------------
   const allPeers = [...peers.values()]
+
+  // Presentation: find the peer that is presenting (if any remote peer).
+  const presentingPeer = allPeers.find((p) => p.presentationStream)
+  // Use currentSlide as a secondary signal: the server notifies slide state
+  // before the MediaStream subscription completes, so the overlay should open
+  // as soon as we know a presentation is in progress.
+  const hasPresentation = isPresenting || !!presentingPeer || currentSlide !== null
 
   // Collect every active screen share (local + remote) as primary "stage" tiles.
   const remoteScreens = allPeers.filter((p) => p.screenStream)
@@ -194,6 +262,23 @@ export default function RoomPage({
 
   return (
     <div className="flex h-screen flex-col bg-background">
+      {/* Hidden offscreen canvas for presentation capture */}
+      <canvas
+        ref={presentationCanvasRef}
+        className="pointer-events-none fixed left-[-9999px] top-0"
+        width={1280}
+        height={720}
+        aria-hidden
+      />
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.pptx"
+        className="hidden"
+        onChange={handleFileSelected}
+        aria-label="Выбрать файл презентации"
+      />
       <EnableSoundBanner />
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-border px-5 py-3">
@@ -236,27 +321,66 @@ export default function RoomPage({
         </div>
       </header>
 
-      {/* Video area */}
-      {hasScreenShare ? (
-        // Speaker layout: screen share takes the stage, cameras in a filmstrip.
+      {/* Presentation overlay — takes over the video area when a presentation is active */}
+      {hasPresentation && (
         <main className="flex flex-1 flex-col gap-2 overflow-hidden p-3 lg:flex-row">
-          {/* Stage — one or more shared screens */}
-          <div
-            className={cn(
-              "grid min-h-0 flex-1 gap-2",
-              remoteScreens.length + (isScreenSharing && localScreenStream ? 1 : 0) > 1
-                ? "grid-cols-1 sm:grid-cols-2"
-                : "grid-cols-1",
-            )}
-          >
-            {screenTiles}
+          {/* Large presentation stage */}
+          <div className="min-h-0 flex-1">
+            <PresentationViewer
+              isPresenter={isPresenting}
+              currentSlide={currentSlide}
+              onSlideChange={notifySlideChange}
+              onStop={handleStopPresentation}
+              canvasRef={isPresenting ? presentationCanvasRef : undefined}
+              remoteStream={presentingPeer?.presentationStream}
+              file={presentationFile}
+            />
           </div>
-
-          {/* Filmstrip — camera tiles */}
+          {/* Filmstrip of cameras */}
           <div className="flex shrink-0 gap-2 overflow-x-auto lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
-            {[
+            <VideoTile
+              key="local"
+              stream={localStream ?? undefined}
+              speakingStream={localStream ?? undefined}
+              displayName={displayName}
+              isMuted={isMicMuted}
+              isCamOff={isCamOff}
+              isLocal
+              className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
+            />
+            {allPeers.map((peer) => (
               <VideoTile
-                key="local"
+                key={peer.peerId}
+                stream={peer.videoStream}
+                audioStream={peer.audioStream}
+                displayName={peer.displayName}
+                className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
+              />
+            ))}
+          </div>
+        </main>
+      )}
+
+      {/* Video area — only when no presentation is active */}
+      {!hasPresentation && (
+        hasScreenShare ? (
+          // Speaker layout: screen share takes the stage, cameras in a filmstrip.
+          <main className="flex flex-1 flex-col gap-2 overflow-hidden p-3 lg:flex-row">
+            {/* Stage — one or more shared screens */}
+            <div
+              className={cn(
+                "grid min-h-0 flex-1 gap-2",
+                remoteScreens.length + (isScreenSharing && localScreenStream ? 1 : 0) > 1
+                  ? "grid-cols-1 sm:grid-cols-2"
+                  : "grid-cols-1",
+              )}
+            >
+              {screenTiles}
+            </div>
+
+            {/* Filmstrip — camera tiles */}
+            <div className="flex shrink-0 gap-2 overflow-x-auto lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
+              <VideoTile
                 stream={localStream ?? undefined}
                 speakingStream={localStream ?? undefined}
                 displayName={displayName}
@@ -264,8 +388,8 @@ export default function RoomPage({
                 isCamOff={isCamOff}
                 isLocal
                 className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
-              />,
-              ...allPeers.map((peer) => (
+              />
+              {allPeers.map((peer) => (
                 <VideoTile
                   key={peer.peerId}
                   stream={peer.videoStream}
@@ -273,13 +397,13 @@ export default function RoomPage({
                   displayName={peer.displayName}
                   className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
                 />
-              )),
-            ]}
-          </div>
-        </main>
-      ) : (
-        // Default grid layout when nobody is sharing their screen.
-        <main className={cn("grid flex-1 gap-2 p-3", gridClass)}>{cameraTiles}</main>
+              ))}
+            </div>
+          </main>
+        ) : (
+          // Default grid layout when nobody is sharing their screen.
+          <main className={cn("grid flex-1 gap-2 p-3", gridClass)}>{cameraTiles}</main>
+        )
       )}
 
       {/* Controls */}
@@ -298,17 +422,14 @@ export default function RoomPage({
             {isMicMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-12 w-6 rounded-l-none px-1",
-                  isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
-                )}
-                aria-label="Выбрать микрофон"
-              >
-                <ChevronDown className="size-3" />
-              </Button>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+                isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+              )}
+              aria-label="Выбрать ��икрофон"
+            >
+              <ChevronDown className="size-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" side="top">
               {micDevices.length === 0 && (
@@ -348,26 +469,25 @@ export default function RoomPage({
           <Button
             variant="outline"
             onClick={toggleScreenShare}
+            disabled={isPresenting && !isScreenSharing}
             className={cn(
               "size-12 rounded-full rounded-r-none border-r-0",
               isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
             )}
             aria-label={isScreenSharing ? "Остановить демонстрацию экрана" : "Демонстрация экрана"}
+            title={isPresenting && !isScreenSharing ? "Завершите презентацию перед демонстрацией экрана" : undefined}
           >
             {isScreenSharing ? <MonitorOff className="size-5" /> : <MonitorUp className="size-5" />}
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-12 w-6 rounded-l-none px-1",
-                  isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
-                )}
-                aria-label="Качество демонстрации экрана"
-              >
-                <ChevronDown className="size-3" />
-              </Button>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+                isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+              )}
+              aria-label="Качество демонстрации экрана"
+            >
+              <ChevronDown className="size-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" side="top">
               <DropdownMenuGroup>
@@ -386,6 +506,22 @@ export default function RoomPage({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Presentation button — disabled while screen share is active */}
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={isPresenting ? handleStopPresentation : handleOpenFilePicker}
+          disabled={isScreenSharing && !isPresenting}
+          className={cn(
+            "size-12 rounded-full",
+            isPresenting && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+          )}
+          aria-label={isPresenting ? "Завершить презентацию" : "Открыть презентацию (PDF / PPTX)"}
+          title={isScreenSharing && !isPresenting ? "Остановите демонстрацию экрана перед запуском презентации" : undefined}
+        >
+          <FileText className="size-5" />
+        </Button>
 
         <Button
           variant="destructive"
