@@ -373,47 +373,53 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     // and broadcasts it to every other peer in the room.
     // -----------------------------------------------------------------------
 
-    // Sliding-window rate-limit: max 10 slide-change events per second per peer.
-    let slideEventCount = 0
-    let slideWindowStart = Date.now()
-    const SLIDE_RATE_LIMIT = 10
-    const SLIDE_RATE_WINDOW_MS = 1000
-
     socket.on(
       'presentationSlide',
-      (payload: PresentationSlidePayload) => {
-        // --- Input validation ---
-        if (!payload || typeof payload !== 'object') return
-        const { roomId: rid, peerId: pid, slide, total } = payload
+      (() => {
+        // Sliding-window rate-limit: max 10 accepted events per second per socket.
+        // Declared inside an IIFE so the counters are scoped only to this handler.
+        const SLIDE_RATE_LIMIT = 10
+        const SLIDE_RATE_WINDOW_MS = 1000
+        let slideEventCount = 0
+        let slideWindowStart = Date.now()
 
-        if (typeof rid !== 'string' || !rid) return
-        if (typeof pid !== 'string' || !pid) return
-        if (
-          typeof slide !== 'number' || !Number.isFinite(slide) || slide < 0 ||
-          typeof total !== 'number' || !Number.isFinite(total) || total < 1
-        ) return
+        return (payload: unknown) => {
+          // --- Input validation ---
+          // Accept unknown — Socket.io doesn't guarantee the incoming type.
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, slide, total } = payload as PresentationSlidePayload
 
-        const slideIndex = Math.floor(slide)
-        const totalPages = Math.floor(total)
-        if (slideIndex >= totalPages) return
+          if (typeof rid !== 'string' || !rid) return
+          if (typeof pid !== 'string' || !pid) return
+          if (
+            typeof slide !== 'number' || !Number.isFinite(slide) || slide < 0 ||
+            typeof total !== 'number' || !Number.isFinite(total) || total < 1
+          ) return
 
-        // --- Auth: sender must own this peerId in this room ---
-        const room = rooms.get(rid)
-        if (!room) return
-        if (!room.hasPeer(pid)) return
-        if (peerSockets.get(pid) !== socket.id) return
+          const slideIndex = Math.floor(slide)
+          const totalPages = Math.floor(total)
+          if (slideIndex >= totalPages) return
 
-        // --- Rate limit ---
-        const now = Date.now()
-        if (now - slideWindowStart > SLIDE_RATE_WINDOW_MS) {
-          slideEventCount = 0
-          slideWindowStart = now
+          // --- Auth: sender must own this peerId in this room ---
+          const room = rooms.get(rid)
+          if (!room) return
+          if (!room.hasPeer(pid)) return
+          if (peerSockets.get(pid) !== socket.id) return
+
+          // --- Rate limit (fixed: > not >=, so exactly LIMIT events pass) ---
+          const now = Date.now()
+          if (now - slideWindowStart > SLIDE_RATE_WINDOW_MS) {
+            slideEventCount = 0
+            slideWindowStart = now
+          }
+          if (++slideEventCount > SLIDE_RATE_LIMIT) return
+
+          room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
+          // Use io.to() for reliability — socket.to() is a no-op if the socket
+          // has already left the room (e.g. mid-disconnect race).
+          io.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
         }
-        if (++slideEventCount > SLIDE_RATE_LIMIT) return
-
-        room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
-        socket.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
-      },
+      })(),
     )
 
     // -----------------------------------------------------------------------
@@ -423,19 +429,24 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     // -----------------------------------------------------------------------
     socket.on(
       'presentationEnded',
-      ({ roomId: rid, peerId: pid }: { roomId: string; peerId: string }) => {
+      (payload: unknown) => {
+        if (!payload || typeof payload !== 'object') return
+        const { roomId: rid, peerId: pid } = payload as Record<string, unknown>
+
         if (typeof rid !== 'string' || !rid) return
         if (typeof pid !== 'string' || !pid) return
 
         const room = rooms.get(rid)
         if (!room) return
 
-        // Auth: only the current presenter (who must own this socket) may end the presentation.
-        if (room.currentSlide?.peerId !== pid) return
+        // Auth: only the active presenter owning this socket may end the presentation.
+        if (room.currentSlide == null || room.currentSlide.peerId !== pid) return
         if (peerSockets.get(pid) !== socket.id) return
 
         room.currentSlide = null
-        socket.to(rid).emit('presentationEnded', { peerId: pid })
+        // Use io.to() — consistent with handleLeave; works even if the socket
+        // is mid-disconnect when stopPresentation fires.
+        io.to(rid).emit('presentationEnded', { peerId: pid })
         console.log(`[presentation] Peer ${pid} ended presentation in room ${rid}`)
       },
     )
@@ -517,13 +528,16 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       if (!room) return
 
       // If the leaving peer was the presenter, clear the slide state and notify.
+      // Use io.to() instead of socket.to() — handleLeave may be called from a
+      // grace-window setTimeout after the socket has already disconnected and
+      // left the room, in which case socket.to() would be a no-op.
       if (room.currentSlide?.peerId === peerId) {
         room.currentSlide = null
-        socket.to(roomId).emit('presentationEnded', { peerId })
+        io.to(roomId).emit('presentationEnded', { peerId })
       }
 
       room.removePeer(peerId)
-      socket.to(roomId).emit('peerLeft', { peerId })
+      io.to(roomId).emit('peerLeft', { peerId })
       socket.leave(roomId)
 
       // Only clear the global peerSockets entry if this socket is still the
