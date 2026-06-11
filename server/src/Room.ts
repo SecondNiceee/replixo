@@ -7,12 +7,16 @@ import type {
   ProducedPayload,
   ConsumedPayload,
   ExistingPeerPayload,
+  SlideState,
 } from './types'
 
 export class Room {
   id: string
   private router!: Router
   private peers: Map<string, Peer> = new Map()
+
+  // The presenter's current slide state. Null when no presentation is active.
+  currentSlide: SlideState | null = null
 
   private constructor(id: string) {
     this.id = id

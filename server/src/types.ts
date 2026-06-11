@@ -108,6 +108,36 @@ export interface PeerLeftPayload {
   peerId: string
 }
 
+// ---------------------------------------------------------------------------
+// Presentation / slide sync
+// ---------------------------------------------------------------------------
+
+// Shared slide state stored on the Room and sent to joining peers.
+export interface SlideState {
+  peerId: string
+  slide: number  // 0-based index
+  total: number  // total slides/pages
+}
+
+// Client → server
+export interface PresentationSlidePayload {
+  roomId: string
+  peerId: string
+  slide: number   // 0-based index
+  total: number   // total number of slides/pages
+}
+
+// Server → client (broadcast)
+export interface PresentationSlideChangedPayload {
+  peerId: string
+  slide: number
+  total: number
+}
+
+export interface PresentationEndedPayload {
+  peerId: string
+}
+
 export interface ProducerClosedPayload {
   peerId: string
   producerId: string
