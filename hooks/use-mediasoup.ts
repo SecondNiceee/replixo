@@ -756,7 +756,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     socket.on(
       "presentationSlideChanged",
       ({ peerId: presenterPeerId, slide, total }: { peerId: string; slide: number; total: number }) => {
-        dispatch({ type: "SET_SLIDE", slide: { peerId: presenterPeerId, slide, total } })
+        // Basic sanity check — server already validates, but guard the reducer too.
+        if (
+          typeof presenterPeerId !== "string" || !presenterPeerId ||
+          typeof slide !== "number" || !Number.isFinite(slide) || slide < 0 ||
+          typeof total !== "number" || !Number.isFinite(total) || total < 1 ||
+          slide >= total
+        ) return
+        dispatch({ type: "SET_SLIDE", slide: { peerId: presenterPeerId, slide: Math.floor(slide), total: Math.floor(total) } })
       },
     )
 
@@ -1102,9 +1109,17 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const notifySlideChange = useCallback((slide: number, total: number) => {
     const socket = socketRef.current
     if (!socket) return
-    socket.emit("presentationSlide", { roomId, peerId: peerId.current, slide, total })
+    // Validate before emitting — mirrors server-side validation.
+    if (
+      !Number.isFinite(slide) || slide < 0 ||
+      !Number.isFinite(total) || total < 1 ||
+      Math.floor(slide) >= Math.floor(total)
+    ) return
+    const s = Math.floor(slide)
+    const t = Math.floor(total)
+    socket.emit("presentationSlide", { roomId, peerId: peerId.current, slide: s, total: t })
     // Update local state immediately so the presenter sees their own progress.
-    dispatch({ type: "SET_SLIDE", slide: { peerId: peerId.current, slide, total } })
+    dispatch({ type: "SET_SLIDE", slide: { peerId: peerId.current, slide: s, total: t } })
   }, [roomId])
 
   // Publish a canvas-captured stream as the presentation video track.
@@ -1112,10 +1127,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const sendTransport = sendTransportRef.current
     if (!sendTransport) return
 
-    // Replace any existing presentation first.
-    if (presentationVideoProducerRef.current) {
-      stopPresentation()
-    }
+    // Tear down any existing presentation synchronously before producing a new
+    // one. stopPresentation is synchronous (no awaits), so there is no race.
+    stopPresentation()
 
     presentationStreamRef.current = stream
     const videoTrack = stream.getVideoTracks()[0]

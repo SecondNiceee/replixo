@@ -373,47 +373,50 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     // and broadcasts it to every other peer in the room.
     // -----------------------------------------------------------------------
 
-    // Sliding-window rate-limit: max 10 slide-change events per second per peer.
-    let slideEventCount = 0
-    let slideWindowStart = Date.now()
-    const SLIDE_RATE_LIMIT = 10
-    const SLIDE_RATE_WINDOW_MS = 1000
-
     socket.on(
       'presentationSlide',
-      (payload: PresentationSlidePayload) => {
-        // --- Input validation ---
-        if (!payload || typeof payload !== 'object') return
-        const { roomId: rid, peerId: pid, slide, total } = payload
+      (() => {
+        // Sliding-window rate-limit: max 10 accepted events per second per socket.
+        // Declared inside an IIFE so the counters are scoped only to this handler.
+        const SLIDE_RATE_LIMIT = 10
+        const SLIDE_RATE_WINDOW_MS = 1000
+        let slideEventCount = 0
+        let slideWindowStart = Date.now()
 
-        if (typeof rid !== 'string' || !rid) return
-        if (typeof pid !== 'string' || !pid) return
-        if (
-          typeof slide !== 'number' || !Number.isFinite(slide) || slide < 0 ||
-          typeof total !== 'number' || !Number.isFinite(total) || total < 1
-        ) return
+        return (payload: PresentationSlidePayload) => {
+          // --- Input validation ---
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, slide, total } = payload
 
-        const slideIndex = Math.floor(slide)
-        const totalPages = Math.floor(total)
-        if (slideIndex >= totalPages) return
+          if (typeof rid !== 'string' || !rid) return
+          if (typeof pid !== 'string' || !pid) return
+          if (
+            typeof slide !== 'number' || !Number.isFinite(slide) || slide < 0 ||
+            typeof total !== 'number' || !Number.isFinite(total) || total < 1
+          ) return
 
-        // --- Auth: sender must own this peerId in this room ---
-        const room = rooms.get(rid)
-        if (!room) return
-        if (!room.hasPeer(pid)) return
-        if (peerSockets.get(pid) !== socket.id) return
+          const slideIndex = Math.floor(slide)
+          const totalPages = Math.floor(total)
+          if (slideIndex >= totalPages) return
 
-        // --- Rate limit ---
-        const now = Date.now()
-        if (now - slideWindowStart > SLIDE_RATE_WINDOW_MS) {
-          slideEventCount = 0
-          slideWindowStart = now
+          // --- Auth: sender must own this peerId in this room ---
+          const room = rooms.get(rid)
+          if (!room) return
+          if (!room.hasPeer(pid)) return
+          if (peerSockets.get(pid) !== socket.id) return
+
+          // --- Rate limit (fixed: > not >=, so exactly LIMIT events pass) ---
+          const now = Date.now()
+          if (now - slideWindowStart > SLIDE_RATE_WINDOW_MS) {
+            slideEventCount = 0
+            slideWindowStart = now
+          }
+          if (++slideEventCount > SLIDE_RATE_LIMIT) return
+
+          room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
+          socket.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
         }
-        if (++slideEventCount >= SLIDE_RATE_LIMIT) return
-
-        room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
-        socket.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
-      },
+      })(),
     )
 
     // -----------------------------------------------------------------------
