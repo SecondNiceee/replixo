@@ -121,10 +121,16 @@ export default function RoomPage({
     setPresentationFile(null)
   }, [stopPresentation])
 
-  // Clear local file state if isPresenting was cancelled externally
-  // (e.g. the server closed the producer or the user left and rejoined).
+  // Clear local file state only when isPresenting transitions true → false
+  // (server closed the producer, or user left and rejoined).
+  // We use a ref to track the previous value so we don't fire on mount
+  // (isPresenting starts as false, which would clear a file that was just set).
+  const wasPresentingRef = useRef(false)
   useEffect(() => {
-    if (!isPresenting) setPresentationFile(null)
+    if (wasPresentingRef.current && !isPresenting) {
+      setPresentationFile(null)
+    }
+    wasPresentingRef.current = isPresenting
   }, [isPresenting])
 
   const handleCopyCode = useCallback(() => {
@@ -421,7 +427,7 @@ export default function RoomPage({
                 "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
                 isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
               )}
-              aria-label="Выбрать микрофон"
+              aria-label="Выбрать ��икрофон"
             >
               <ChevronDown className="size-3" />
             </DropdownMenuTrigger>

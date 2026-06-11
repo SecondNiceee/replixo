@@ -64,18 +64,39 @@ export function PresentationViewer({
     }
   }, [remoteStream])
 
-  const slide = currentSlide?.slide ?? 0
+  // Optimistic slide index: updated immediately on arrow click so the canvas
+  // re-renders without waiting for the server round-trip (notifySlideChange
+  // emits to the server which echoes back via SET_SLIDE, which can take 50-200ms).
+  // We sync it back to the authoritative currentSlide whenever the server acks.
+  const serverSlide = currentSlide?.slide ?? 0
   const total = currentSlide?.total ?? 0
+  const [optimisticSlide, setOptimisticSlide] = useState(serverSlide)
+
+  // Keep optimistic in sync when server delivers an authoritative update.
+  useEffect(() => {
+    setOptimisticSlide(serverSlide)
+  }, [serverSlide])
+
+  // Use optimistic for presenter (instant feedback), server value for viewers.
+  const slide = isPresenter ? optimisticSlide : serverSlide
 
   const goNext = useCallback(() => {
     if (!isPresenter || !onSlideChange || total === 0) return
-    if (slide + 1 < total) onSlideChange(slide + 1, total)
-  }, [isPresenter, onSlideChange, slide, total])
+    const next = optimisticSlide + 1
+    if (next < total) {
+      setOptimisticSlide(next)
+      onSlideChange(next, total)
+    }
+  }, [isPresenter, onSlideChange, optimisticSlide, total])
 
   const goPrev = useCallback(() => {
     if (!isPresenter || !onSlideChange || total === 0) return
-    if (slide > 0) onSlideChange(slide - 1, total)
-  }, [isPresenter, onSlideChange, slide, total])
+    const prev = optimisticSlide - 1
+    if (prev >= 0) {
+      setOptimisticSlide(prev)
+      onSlideChange(prev, total)
+    }
+  }, [isPresenter, onSlideChange, optimisticSlide, total])
 
   // Keyboard navigation for the presenter only.
   useEffect(() => {
@@ -411,9 +432,12 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
           if (signal.aborted) break
 
+          // scale: 1 — container is already 1280×720; scale:2 would produce
+          // 2560×1440 canvases (×4 memory) for no visible benefit on a 1280px
+          // capture canvas.
           const snap = await html2canvas(container, {
             useCORS: true,
-            scale: 2,
+            scale: 1,
             width: 1280,
             height: 720,
           })
@@ -426,7 +450,9 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         pptxCanvasesRef.current = canvases
         loadedRef.current = true
         setLoadingMsg(null)
-        onLoadedRef.current(total)
+        // Report the number of canvases actually rendered, not previewer.slideCount,
+        // so the slide counter is never ahead of what was processed.
+        onLoadedRef.current(canvases.length)
         paintCanvas(canvases[0])
       } catch (err) {
         if (signal.aborted) return
