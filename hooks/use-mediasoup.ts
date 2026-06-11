@@ -677,6 +677,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               sendTransportRef.current = null
               recvTransportRef.current = null
               consumersRef.current.clear()
+              // Clear stale slide state — the fresh joinRoom response will
+              // restore it if a presentation is still active.
+              dispatch({ type: "SET_SLIDE", slide: null })
               doJoinSequence()
             }
           },
@@ -738,7 +741,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         pendingClosedProducersRef.current.add(producerId)
         return
       }
-      const source = (target.appData as Record<string, unknown>)?.source === "screen" ? "screen" : "media"
+      const rawSource = (target.appData as Record<string, unknown>)?.source
+      const source: MediaSource =
+        rawSource === "screen" ? "screen"
+        : rawSource === "presentation" ? "presentation"
+        : "media"
       target.close()
       consumersRef.current.delete(target.id)
       dispatch({
@@ -811,7 +818,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // -------------------------------------------------------------------------
   // Leave
   // -------------------------------------------------------------------------
+  // Stable ref so leave() can call stopPresentation() without a dep-cycle
+  // (leave is declared before stopPresentation in the file).
+  const stopPresentationRef = useRef<(() => void) | null>(null)
+
   const leave = useCallback(() => {
+    // Stop any active presentation before leaving so canvas capture is released
+    // and presentationEnded is sent to the server before the socket closes.
+    stopPresentationRef.current?.()
+
     const socket = socketRef.current
     if (socket) {
       socket.emit("leaveRoom", { roomId, peerId: peerId.current })
@@ -1103,6 +1118,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     presentationStreamRef.current = null
     dispatch({ type: "STOP_PRESENTING" })
   }, [roomId])
+
+  // Wire the ref so leave() can call stopPresentation() without a dep-cycle.
+  stopPresentationRef.current = stopPresentation
 
   // Notify the server (and all other peers) that the current slide changed.
   // Call this whenever the presenter navigates to a different slide/page.

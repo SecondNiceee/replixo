@@ -523,13 +523,16 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       if (!room) return
 
       // If the leaving peer was the presenter, clear the slide state and notify.
+      // Use io.to() instead of socket.to() — handleLeave may be called from a
+      // grace-window setTimeout after the socket has already disconnected and
+      // left the room, in which case socket.to() would be a no-op.
       if (room.currentSlide?.peerId === peerId) {
         room.currentSlide = null
-        socket.to(roomId).emit('presentationEnded', { peerId })
+        io.to(roomId).emit('presentationEnded', { peerId })
       }
 
       room.removePeer(peerId)
-      socket.to(roomId).emit('peerLeft', { peerId })
+      io.to(roomId).emit('peerLeft', { peerId })
       socket.leave(roomId)
 
       // Only clear the global peerSockets entry if this socket is still the
