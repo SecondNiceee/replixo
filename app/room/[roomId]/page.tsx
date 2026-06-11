@@ -94,20 +94,21 @@ export default function RoomPage({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return
-      // Reset so the same file can be re-selected
+      // Reset value so the same file can be re-selected later.
       e.target.value = ""
-      setPresentationFile(file)
-
-      // Give React a tick to mount the canvas before capturing
-      await new Promise((r) => setTimeout(r, 0))
 
       const canvas = presentationCanvasRef.current
       if (!canvas) return
-      // Ensure canvas has dimensions before capture
-      canvas.width = canvas.width || 1280
-      canvas.height = canvas.height || 720
+
+      // Capture the stream from the offscreen canvas first, then set the file.
+      // The canvas is always mounted (fixed off-screen), so captureStream is
+      // safe to call before PresenterCanvas has drawn anything — the stream
+      // will carry live frames as soon as rendering starts.
       const stream = canvas.captureStream(30)
       await startPresentation(stream)
+
+      // Set the file last so PresenterCanvas mounts with an active producer.
+      setPresentationFile(file)
     },
     [startPresentation],
   )
@@ -367,27 +368,24 @@ export default function RoomPage({
 
             {/* Filmstrip — camera tiles */}
             <div className="flex shrink-0 gap-2 overflow-x-auto lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
-              {[
+              <VideoTile
+                stream={localStream ?? undefined}
+                speakingStream={localStream ?? undefined}
+                displayName={displayName}
+                isMuted={isMicMuted}
+                isCamOff={isCamOff}
+                isLocal
+                className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
+              />
+              {allPeers.map((peer) => (
                 <VideoTile
-                  key="local"
-                  stream={localStream ?? undefined}
-                  speakingStream={localStream ?? undefined}
-                  displayName={displayName}
-                  isMuted={isMicMuted}
-                  isCamOff={isCamOff}
-                  isLocal
+                  key={peer.peerId}
+                  stream={peer.videoStream}
+                  audioStream={peer.audioStream}
+                  displayName={peer.displayName}
                   className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
-                />,
-                ...allPeers.map((peer) => (
-                  <VideoTile
-                    key={peer.peerId}
-                    stream={peer.videoStream}
-                    audioStream={peer.audioStream}
-                    displayName={peer.displayName}
-                    className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
-                  />
-                )),
-              ]}
+                />
+              ))}
             </div>
           </main>
         ) : (
@@ -412,17 +410,14 @@ export default function RoomPage({
             {isMicMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-12 w-6 rounded-l-none px-1",
-                  isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
-                )}
-                aria-label="Выбрать микрофон"
-              >
-                <ChevronDown className="size-3" />
-              </Button>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+                isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+              )}
+              aria-label="Выбрать микрофон"
+            >
+              <ChevronDown className="size-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" side="top">
               {micDevices.length === 0 && (
@@ -471,17 +466,14 @@ export default function RoomPage({
             {isScreenSharing ? <MonitorOff className="size-5" /> : <MonitorUp className="size-5" />}
           </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-12 w-6 rounded-l-none px-1",
-                  isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
-                )}
-                aria-label="Качество демонстрации экрана"
-              >
-                <ChevronDown className="size-3" />
-              </Button>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+                isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+              )}
+              aria-label="Качество демонстрации экрана"
+            >
+              <ChevronDown className="size-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" side="top">
               <DropdownMenuGroup>
