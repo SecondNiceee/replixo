@@ -21,7 +21,8 @@ export interface PresentationViewerProps {
   onStop?: () => void
   /**
    * For the presenter: the canvas we render slides into and capture.
-   * The parent creates the canvas, calls captureStream(), then startPresentation().
+   * The parent creates the canvas offscreen, calls captureStream(), then
+   * startPresentation().
    */
   canvasRef?: React.RefObject<HTMLCanvasElement | null>
   /** For viewers: the MediaStream captured from the presenter's canvas. */
@@ -45,11 +46,16 @@ export function PresentationViewer({
 }: PresentationViewerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Wire viewer stream into <video> and autoplay.
+  // Wire viewer stream into <video> and autoplay only when there are tracks.
   useEffect(() => {
     const video = videoRef.current
-    if (!video || !remoteStream) return
+    if (!video) return
+    if (!remoteStream || remoteStream.getTracks().length === 0) {
+      video.srcObject = null
+      return
+    }
     video.srcObject = remoteStream
+    // play() is a no-op if already playing; catch DOMException on autoplay block.
     video.play().catch(() => {
       // Autoplay may be blocked — the EnableSoundBanner in the parent handles it.
     })
@@ -76,7 +82,7 @@ export function PresentationViewer({
     if (!isPresenter) return
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
-      if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable) return
       if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " ") {
         e.preventDefault()
         goNext()
@@ -105,7 +111,7 @@ export function PresentationViewer({
               onLoaded={(t) => onSlideChange?.(0, t)}
             />
           ) : null
-        ) : remoteStream ? (
+        ) : remoteStream && remoteStream.getTracks().length > 0 ? (
           <video
             ref={videoRef}
             autoPlay
@@ -170,7 +176,7 @@ export function PresentationViewer({
           </button>
         </div>
 
-        {/* Spacer */}
+        {/* Spacer to keep arrows centred */}
         <div className="w-28" />
       </div>
     </div>
@@ -179,9 +185,19 @@ export function PresentationViewer({
 
 // ---------------------------------------------------------------------------
 // PresenterCanvas
+//
 // Renders PDF pages (pdfjs-dist) or PPTX slides (pptx-preview + html2canvas-pro)
-// into the offscreen canvas (passed via canvasRef so the parent can captureStream)
-// and also draws a live preview into a local visible canvas.
+// into the offscreen canvas supplied by the parent (for captureStream) and into
+// a local visible preview canvas so the presenter sees what they are sharing.
+//
+// Design decisions:
+//  - All async loaders are wrapped in useCallback so they never form stale
+//    closures over paintCanvas / renderPdfPage etc.
+//  - A single AbortController guards the *load* lifecycle; a separate
+//    renderAbortRef guards individual page renders (so navigating quickly
+//    cancels the previous render without aborting the whole document).
+//  - The PDF LoadingTask is stored in a ref so we can call destroy() on it
+//    even before the promise resolves.
 // ---------------------------------------------------------------------------
 
 interface PresenterCanvasProps {
@@ -197,22 +213,31 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   const [loadingMsg, setLoadingMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Stable mutable refs — avoid re-creating callbacks on every render.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfLoadingTaskRef = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pptxPreviewerRef = useRef<any>(null)
+  // Pre-rendered canvases for each PPTX slide (instant navigation).
+  const pptxCanvasesRef = useRef<HTMLCanvasElement[]>([])
+
   const fileTypeRef = useRef<"pdf" | "pptx" | null>(null)
   const loadedRef = useRef(false)
-  // Abort signal so in-flight loads are cancelled when the file changes.
-  const abortRef = useRef<AbortController | null>(null)
-  // Keep a stable reference to onLoaded so the effect dep array stays clean.
+
+  // Guards the whole file-load lifecycle.
+  const loadAbortRef = useRef<AbortController | null>(null)
+  // Guards individual PDF page renders so rapid navigation cancels the
+  // previous render without touching the document.
+  const renderAbortRef = useRef<AbortController | null>(null)
+
+  // Stable ref to onLoaded so we never need it in effect dep arrays.
   const onLoadedRef = useRef(onLoaded)
   onLoadedRef.current = onLoaded
 
   // -----------------------------------------------------------------------
-  // Paint a source canvas into both the offscreen capture canvas and the
-  // visible preview canvas.
+  // paintCanvas — draw a source canvas into both the offscreen capture canvas
+  // and the visible preview canvas.
   // -----------------------------------------------------------------------
   const paintCanvas = useCallback(
     (source: HTMLCanvasElement) => {
@@ -232,35 +257,180 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   )
 
   // -----------------------------------------------------------------------
-  // PDF helpers
+  // renderPdfPage — render a single PDF page number (0-based) into canvas.
+  // Uses its own AbortController so navigation can cancel a slow render.
   // -----------------------------------------------------------------------
   const renderPdfPage = useCallback(
     async (pageIndex: number, signal: AbortSignal) => {
       const pdf = pdfDocRef.current
       if (!pdf || signal.aborted) return
-      const page = await pdf.getPage(pageIndex + 1)
-      if (signal.aborted) return
+      try {
+        const page = await pdf.getPage(pageIndex + 1)
+        if (signal.aborted) return
 
-      const viewport = page.getViewport({ scale: 2 })
-      const tmp = document.createElement("canvas")
-      tmp.width = viewport.width
-      tmp.height = viewport.height
-      await page.render({ canvasContext: tmp.getContext("2d")!, viewport }).promise
-      if (signal.aborted) return
-      paintCanvas(tmp)
+        const viewport = page.getViewport({ scale: 2 })
+        const tmp = document.createElement("canvas")
+        tmp.width = viewport.width
+        tmp.height = viewport.height
+        await page.render({ canvasContext: tmp.getContext("2d")!, viewport }).promise
+        if (signal.aborted) return
+
+        paintCanvas(tmp)
+      } catch (err) {
+        if (signal.aborted) return
+        setError("Ошибка рендеринга страницы: " + (err instanceof Error ? err.message : String(err)))
+      }
     },
     [paintCanvas],
   )
 
   // -----------------------------------------------------------------------
-  // PPTX helpers
+  // renderPptxSlide — paint a pre-rendered PPTX canvas (instant).
   // -----------------------------------------------------------------------
   const renderPptxSlide = useCallback(
     (index: number) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canvases: HTMLCanvasElement[] | undefined = (pptxPreviewerRef.current as any)?._v0Canvases
-      const c = canvases?.[index]
+      const c = pptxCanvasesRef.current[index]
       if (c) paintCanvas(c)
+    },
+    [paintCanvas],
+  )
+
+  // -----------------------------------------------------------------------
+  // loadPdf
+  // -----------------------------------------------------------------------
+  const loadPdf = useCallback(
+    async (f: File, signal: AbortSignal) => {
+      setLoadingMsg("Загрузка PDF…")
+      setError(null)
+      try {
+        const pdfjsLib = await import("pdfjs-dist")
+        if (signal.aborted) return
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.min.mjs",
+          import.meta.url,
+        ).toString()
+
+        const buf = await f.arrayBuffer()
+        if (signal.aborted) return
+
+        const loadingTask = pdfjsLib.getDocument({ data: buf })
+        pdfLoadingTaskRef.current = loadingTask
+
+        // If aborted before the task even started resolving, cancel it now.
+        if (signal.aborted) {
+          void loadingTask.destroy()
+          pdfLoadingTaskRef.current = null
+          return
+        }
+
+        // Destroy the task if aborted while the promise is in-flight.
+        signal.addEventListener("abort", () => {
+          void loadingTask.destroy()
+          pdfLoadingTaskRef.current = null
+        }, { once: true })
+
+        const pdf = await loadingTask.promise
+        if (signal.aborted) return
+
+        pdfDocRef.current = pdf
+        pdfLoadingTaskRef.current = null
+        loadedRef.current = true
+        setLoadingMsg(null)
+        onLoadedRef.current(pdf.numPages)
+        await renderPdfPage(0, signal)
+      } catch (err) {
+        if (signal.aborted) return
+        setLoadingMsg(null)
+        setError("Ошибка PDF: " + (err instanceof Error ? err.message : String(err)))
+      }
+    },
+    [renderPdfPage],
+  )
+
+  // -----------------------------------------------------------------------
+  // loadPptx
+  //
+  // Uses pptx-preview: init(dom, options) → PPTXPreviewer instance.
+  //   previewer.load(ArrayBuffer)  → Promise<PPTX>
+  //   previewer.slideCount         → number
+  //   previewer.renderSingleSlide(i)
+  //   previewer.destroy()
+  //
+  // Every slide is pre-rendered via html2canvas-pro so navigation is instant
+  // and doesn't depend on DOM visibility tricks.
+  // -----------------------------------------------------------------------
+  const loadPptx = useCallback(
+    async (f: File, signal: AbortSignal) => {
+      setLoadingMsg("Загрузка PPTX…")
+      setError(null)
+      let container: HTMLDivElement | null = null
+      try {
+        const [pptxMod, html2canvasMod] = await Promise.all([
+          import("pptx-preview"),
+          import("html2canvas-pro"),
+        ])
+        if (signal.aborted) return
+        const html2canvas = html2canvasMod.default
+
+        const buf = await f.arrayBuffer()
+        if (signal.aborted) return
+
+        // Mount an invisible container so pptx-preview can render into the DOM.
+        container = document.createElement("div")
+        container.style.cssText =
+          "position:fixed;left:-9999px;top:0;width:1280px;height:720px;" +
+          "background:#fff;overflow:hidden;z-index:-1;"
+        document.body.appendChild(container)
+
+        const previewer = pptxMod.init(container, { width: 1280, height: 720, mode: "slide" })
+        pptxPreviewerRef.current = previewer
+
+        await previewer.load(buf)
+        if (signal.aborted) return
+
+        const total: number = previewer.slideCount
+        if (total === 0) throw new Error("Не найдено слайдов в файле")
+
+        const canvases: HTMLCanvasElement[] = []
+
+        for (let i = 0; i < total; i++) {
+          if (signal.aborted) break
+          setLoadingMsg(`Обработка слайда ${i + 1} / ${total}…`)
+          previewer.renderSingleSlide(i)
+
+          // Wait two animation frames — one for the DOM to receive the new
+          // slide, one for the browser to actually paint it before snapshot.
+          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+          if (signal.aborted) break
+
+          const snap = await html2canvas(container, {
+            useCORS: true,
+            scale: 2,
+            width: 1280,
+            height: 720,
+          })
+          canvases.push(snap)
+        }
+
+        if (signal.aborted) return
+        if (canvases.length === 0) throw new Error("Не удалось обработать слайды")
+
+        pptxCanvasesRef.current = canvases
+        loadedRef.current = true
+        setLoadingMsg(null)
+        onLoadedRef.current(total)
+        paintCanvas(canvases[0])
+      } catch (err) {
+        if (signal.aborted) return
+        setLoadingMsg(null)
+        setError("Ошибка PPTX: " + (err instanceof Error ? err.message : String(err)))
+      } finally {
+        // Always remove the container from DOM — even on error or abort.
+        if (container && document.body.contains(container)) {
+          document.body.removeChild(container)
+        }
+      }
     },
     [paintCanvas],
   )
@@ -271,21 +441,28 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   useEffect(() => {
     if (!file) return
 
-    // Cancel any previous in-flight load.
-    abortRef.current?.abort()
-    const abort = new AbortController()
-    abortRef.current = abort
+    // Cancel the previous in-flight load.
+    loadAbortRef.current?.abort()
+    renderAbortRef.current?.abort()
 
-    // Tear down previous PPTX previewer instance.
+    const abort = new AbortController()
+    loadAbortRef.current = abort
+
+    // Tear down previous documents.
+    if (pdfLoadingTaskRef.current) {
+      void pdfLoadingTaskRef.current.destroy()
+      pdfLoadingTaskRef.current = null
+    }
+    pdfDocRef.current = null
+
     if (pptxPreviewerRef.current) {
       try { pptxPreviewerRef.current.destroy() } catch { /* ignore */ }
       pptxPreviewerRef.current = null
     }
+    pptxCanvasesRef.current = []
 
-    // Reset state.
-    loadedRef.current = false
-    pdfDocRef.current = null
     fileTypeRef.current = null
+    loadedRef.current = false
     setError(null)
 
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
@@ -301,144 +478,43 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
     return () => {
       abort.abort()
     }
-  }, [file]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [file, loadPdf, loadPptx])
 
   // -----------------------------------------------------------------------
-  // PDF loader
-  // -----------------------------------------------------------------------
-  async function loadPdf(f: File, signal: AbortSignal) {
-    setLoadingMsg("Загрузка PDF…")
-    try {
-      const pdfjsLib = await import("pdfjs-dist")
-      if (signal.aborted) return
-
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString()
-
-      const buf = await f.arrayBuffer()
-      if (signal.aborted) return
-
-      // Keep the loading task so we can destroy it on abort/cleanup.
-      const loadingTask = pdfjsLib.getDocument({ data: buf })
-      if (signal.aborted) {
-        void loadingTask.destroy()
-        return
-      }
-
-      const pdf = await loadingTask.promise
-      if (signal.aborted) {
-        void loadingTask.destroy()
-        return
-      }
-
-      pdfDocRef.current = pdf
-      loadedRef.current = true
-      setLoadingMsg(null)
-      onLoadedRef.current(pdf.numPages)
-      // Render first page immediately.
-      await renderPdfPage(0, signal)
-    } catch (err) {
-      if (signal.aborted) return
-      setLoadingMsg(null)
-      setError("Ошибка PDF: " + (err instanceof Error ? err.message : String(err)))
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // PPTX loader — uses pptx-preview's class-based API:
-  //   init(dom, options) → PPTXPreviewer
-  //   previewer.load(ArrayBuffer) → Promise
-  //   previewer.renderSingleSlide(index)
-  //   previewer.slideCount
-  //   previewer.destroy()
-  // We pre-render every slide to an off-screen canvas via html2canvas-pro so
-  // that navigation is instant and doesn't depend on DOM visibility tricks.
-  // -----------------------------------------------------------------------
-  async function loadPptx(f: File, signal: AbortSignal) {
-    setLoadingMsg("Загрузка PPTX…")
-    let container: HTMLDivElement | null = null
-    try {
-      const [pptxMod, html2canvasMod] = await Promise.all([
-        import("pptx-preview"),
-        import("html2canvas-pro"),
-      ])
-      if (signal.aborted) return
-      const html2canvas = html2canvasMod.default
-
-      const buf = await f.arrayBuffer()
-      if (signal.aborted) return
-
-      // Mount an off-screen container for the previewer.
-      container = document.createElement("div")
-      container.style.cssText =
-        "position:fixed;left:-9999px;top:0;width:1280px;height:720px;" +
-        "background:#fff;overflow:hidden;z-index:-1;"
-      document.body.appendChild(container)
-
-      const previewer = pptxMod.init(container, { width: 1280, height: 720, mode: "slide" })
-      pptxPreviewerRef.current = previewer
-
-      await previewer.load(buf)
-      if (signal.aborted) return
-
-      const total = previewer.slideCount
-      if (total === 0) throw new Error("Не найдено слайдов в файле")
-
-      const canvases: HTMLCanvasElement[] = []
-
-      for (let i = 0; i < total; i++) {
-        if (signal.aborted) break
-        setLoadingMsg(`Обработка слайда ${i + 1} / ${total}…`)
-        previewer.renderSingleSlide(i)
-        // Small yield so the DOM paints before snapshot.
-        await new Promise<void>((r) => requestAnimationFrame(() => r()))
-        if (signal.aborted) break
-        const snap = await html2canvas(container, {
-          useCORS: true,
-          scale: 2,
-          width: 1280,
-          height: 720,
-        })
-        canvases.push(snap)
-      }
-
-      if (signal.aborted) return
-
-      loadedRef.current = true
-      setLoadingMsg(null)
-      onLoadedRef.current(total)
-      // Paint the first slide into both canvases immediately.
-      paintCanvas(canvases[0])
-
-      // Store canvases for fast navigation later.
-      // We reuse pptxPreviewerRef slot for slide canvases.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(pptxPreviewerRef.current as any)._v0Canvases = canvases
-    } catch (err) {
-      if (signal.aborted) return
-      setLoadingMsg(null)
-      setError("Ошибка PPTX: " + (err instanceof Error ? err.message : String(err)))
-    } finally {
-      if (container && document.body.contains(container)) {
-        document.body.removeChild(container)
-      }
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // Re-render whenever slideIndex changes (after the file is loaded).
+  // Re-render the correct slide whenever slideIndex changes (post-load).
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!loadedRef.current) return
-    const abort = abortRef.current ?? new AbortController()
+
+    // Cancel any in-flight page render before starting a new one.
+    renderAbortRef.current?.abort()
+    const abort = new AbortController()
+    renderAbortRef.current = abort
+
     if (fileTypeRef.current === "pdf") {
       renderPdfPage(slideIndex, abort.signal)
     } else if (fileTypeRef.current === "pptx") {
       renderPptxSlide(slideIndex)
     }
+
+    return () => { abort.abort() }
   }, [slideIndex, renderPdfPage, renderPptxSlide])
+
+  // -----------------------------------------------------------------------
+  // Cleanup on unmount
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    return () => {
+      loadAbortRef.current?.abort()
+      renderAbortRef.current?.abort()
+      if (pdfLoadingTaskRef.current) {
+        void pdfLoadingTaskRef.current.destroy()
+      }
+      if (pptxPreviewerRef.current) {
+        try { pptxPreviewerRef.current.destroy() } catch { /* ignore */ }
+      }
+    }
+  }, [])
 
   // -----------------------------------------------------------------------
   // Render
@@ -464,7 +540,7 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         style={{ background: "#ffffff" }}
       />
       {loadingMsg && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70 rounded-2xl">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl bg-black/70">
           <div className="size-7 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           <span className="text-sm text-white/80">{loadingMsg}</span>
         </div>

@@ -100,15 +100,18 @@ export default function RoomPage({
       const canvas = presentationCanvasRef.current
       if (!canvas) return
 
-      // Capture the stream from the offscreen canvas first, then set the file.
-      // The canvas is always mounted (fixed off-screen), so captureStream is
-      // safe to call before PresenterCanvas has drawn anything — the stream
-      // will carry live frames as soon as rendering starts.
-      const stream = canvas.captureStream(30)
-      await startPresentation(stream)
-
-      // Set the file last so PresenterCanvas mounts with an active producer.
-      setPresentationFile(file)
+      try {
+        // Capture stream from offscreen canvas first — it is always mounted so
+        // captureStream is safe before PresenterCanvas draws anything; frames
+        // start flowing as soon as the first slide is rendered.
+        const stream = canvas.captureStream(30)
+        await startPresentation(stream)
+        // Set file after stream is established so PresenterCanvas mounts with
+        // an active producer and never races against an unstarted transport.
+        setPresentationFile(file)
+      } catch (err) {
+        console.error("[Replixo] startPresentation failed:", err)
+      }
     },
     [startPresentation],
   )
@@ -457,11 +460,13 @@ export default function RoomPage({
           <Button
             variant="outline"
             onClick={toggleScreenShare}
+            disabled={isPresenting && !isScreenSharing}
             className={cn(
               "size-12 rounded-full rounded-r-none border-r-0",
               isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
             )}
             aria-label={isScreenSharing ? "Остановить демонстрацию экрана" : "Демонстрация экрана"}
+            title={isPresenting && !isScreenSharing ? "Завершите презентацию перед демонстрацией экрана" : undefined}
           >
             {isScreenSharing ? <MonitorOff className="size-5" /> : <MonitorUp className="size-5" />}
           </Button>
@@ -493,16 +498,18 @@ export default function RoomPage({
           </DropdownMenu>
         </div>
 
-        {/* Presentation button */}
+        {/* Presentation button — disabled while screen share is active */}
         <Button
           variant="outline"
           size="icon"
           onClick={isPresenting ? handleStopPresentation : handleOpenFilePicker}
+          disabled={isScreenSharing && !isPresenting}
           className={cn(
             "size-12 rounded-full",
             isPresenting && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
           )}
           aria-label={isPresenting ? "Завершить презентацию" : "Открыть презентацию (PDF / PPTX)"}
+          title={isScreenSharing && !isPresenting ? "Остановите демонстрацию экрана перед запуском презентации" : undefined}
         >
           <FileText className="size-5" />
         </Button>
