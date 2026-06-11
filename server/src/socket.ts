@@ -13,6 +13,7 @@ import type {
   ResumeConsumerPayload,
   CloseProducerPayload,
   PauseProducerPayload,
+  PresentationSlidePayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           ack(callback, {
             rtpCapabilities: room.getRtpCapabilities(),
             existingPeers,
+            currentSlide: room.currentSlide ?? null,
           })
         } catch (e) {
           err(callback as Callback<never>, (e as Error).message)
@@ -364,6 +366,48 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     )
 
     // -----------------------------------------------------------------------
+    // presentationSlide  (presenter changed the current slide)
+    //
+    // The client emits this every time the visible slide/page index changes.
+    // The server stores the state on the Room (so latecomers get it on join)
+    // and broadcasts it to every other peer in the room.
+    // -----------------------------------------------------------------------
+    socket.on(
+      'presentationSlide',
+      (payload: PresentationSlidePayload) => {
+        const { roomId, peerId, slide, total } = payload
+        const room = rooms.get(roomId)
+        if (!room) return
+
+        room.currentSlide = { peerId, slide, total }
+
+        socket.to(roomId).emit('presentationSlideChanged', { peerId, slide, total })
+        console.log(`[presentation] Peer ${peerId} moved to slide ${slide + 1}/${total} in room ${roomId}`)
+      },
+    )
+
+    // -----------------------------------------------------------------------
+    // presentationEnded  (presenter closed the file / stopped presenting)
+    //
+    // Clears the Room's slide state and notifies everyone in the room.
+    // -----------------------------------------------------------------------
+    socket.on(
+      'presentationEnded',
+      ({ roomId, peerId }: { roomId: string; peerId: string }) => {
+        const room = rooms.get(roomId)
+        if (!room) return
+
+        // Only the current presenter may clear the state.
+        if (room.currentSlide?.peerId === peerId) {
+          room.currentSlide = null
+        }
+
+        socket.to(roomId).emit('presentationEnded', { peerId })
+        console.log(`[presentation] Peer ${peerId} ended presentation in room ${roomId}`)
+      },
+    )
+
+    // -----------------------------------------------------------------------
     // rejoinProbe — client checks whether the server still has the peer after
     // a socket.io reconnect. Returns null if the peer is still in the room,
     // or an error string if it was evicted (so the client can do a full rejoin).
@@ -438,6 +482,12 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
 
       const room = rooms.get(roomId)
       if (!room) return
+
+      // If the leaving peer was the presenter, clear the slide state and notify.
+      if (room.currentSlide?.peerId === peerId) {
+        room.currentSlide = null
+        socket.to(roomId).emit('presentationEnded', { peerId })
+      }
 
       room.removePeer(peerId)
       socket.to(roomId).emit('peerLeft', { peerId })

@@ -108,6 +108,25 @@ export interface PeerLeftPayload {
   peerId: string
 }
 
+// Slide sync — client → server
+export interface PresentationSlidePayload {
+  roomId: string
+  peerId: string
+  slide: number   // 0-based index
+  total: number   // total number of slides/pages
+}
+
+// Server → client (broadcast)
+export interface PresentationSlideChangedPayload {
+  peerId: string
+  slide: number
+  total: number
+}
+
+export interface PresentationEndedPayload {
+  peerId: string
+}
+
 export interface ProducerClosedPayload {
   peerId: string
   producerId: string

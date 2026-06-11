@@ -65,6 +65,12 @@ export const SCREEN_QUALITY_PRESETS: Record<ScreenQuality, ScreenQualityPreset> 
   },
 }
 
+export interface SlideState {
+  peerId: string
+  slide: number
+  total: number
+}
+
 interface State {
   status: RoomStatus
   error: string | null
@@ -77,6 +83,8 @@ interface State {
   // whether the user has ever enabled mic/cam (i.e. track exists)
   hasMic: boolean
   hasCam: boolean
+  // active slide state from any presenter (null = no presentation)
+  currentSlide: SlideState | null
 }
 
 type Action =
@@ -92,6 +100,7 @@ type Action =
   | { type: "TOGGLE_CAM"; isOff: boolean; hasCam?: boolean }
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
   | { type: "SET_PRESENTING"; isPresenting: boolean }
+  | { type: "SET_SLIDE"; slide: SlideState | null }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -161,6 +170,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, isScreenSharing: action.isSharing }
     case "SET_PRESENTING":
       return { ...state, isPresenting: action.isPresenting }
+    case "SET_SLIDE":
+      return { ...state, currentSlide: action.slide }
     default:
       return state
   }
@@ -201,6 +212,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     isPresenting: false,
     hasMic: false,
     hasCam: false,
+    currentSlide: null,
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -608,6 +620,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             displayName: string
             producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
           }>
+          currentSlide?: SlideState | null
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -617,6 +630,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           await device.load({ routerRtpCapabilities: data.rtpCapabilities as RTCRtpCapabilities })
           dispatch({ type: "CONNECTED", localStream })
           hasJoinedRef.current = true
+
+          // If a presentation is already in progress, sync the slide state.
+          if (data.currentSlide) {
+            dispatch({ type: "SET_SLIDE", slide: data.currentSlide })
+          }
 
           for (const p of data.existingPeers) {
             dispatch({ type: "PEER_JOINED", peerId: p.peerId, displayName: p.displayName })
@@ -722,6 +740,24 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         kind: target.kind as "audio" | "video",
       })
     })
+
+    // -----------------------------------------------------------------------
+    // Slide sync — server broadcasts these when the presenter changes slide
+    // or stops presenting.
+    // -----------------------------------------------------------------------
+    socket.on(
+      "presentationSlideChanged",
+      ({ peerId: presenterPeerId, slide, total }: { peerId: string; slide: number; total: number }) => {
+        dispatch({ type: "SET_SLIDE", slide: { peerId: presenterPeerId, slide, total } })
+      },
+    )
+
+    socket.on(
+      "presentationEnded",
+      () => {
+        dispatch({ type: "SET_SLIDE", slide: null })
+      },
+    )
   }, [roomId, displayName, state.status, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
@@ -1035,10 +1071,23 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       })
       producer.close()
     }
+    // Notify the server so it clears currentSlide and broadcasts to other peers.
+    socket?.emit("presentationEnded", { roomId, peerId: peerId.current })
     presentationVideoProducerRef.current = null
     presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
     presentationStreamRef.current = null
     dispatch({ type: "SET_PRESENTING", isPresenting: false })
+    dispatch({ type: "SET_SLIDE", slide: null })
+  }, [roomId])
+
+  // Notify the server (and all other peers) that the current slide changed.
+  // Call this whenever the presenter navigates to a different slide/page.
+  const notifySlideChange = useCallback((slide: number, total: number) => {
+    const socket = socketRef.current
+    if (!socket) return
+    socket.emit("presentationSlide", { roomId, peerId: peerId.current, slide, total })
+    // Update local state immediately so the presenter sees their own progress.
+    dispatch({ type: "SET_SLIDE", slide: { peerId: peerId.current, slide, total } })
   }, [roomId])
 
   // Publish a canvas-captured stream as the presentation video track.
@@ -1101,5 +1150,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     setScreenQuality,
     switchMic,
     leave,
+    // Presentation slide sync
+    currentSlide: state.currentSlide,
+    notifySlideChange,
+    startPresentation,
+    stopPresentation,
+    isPresenting: state.isPresenting,
   }
 }
