@@ -7,13 +7,8 @@ import type {
   ProducedPayload,
   ConsumedPayload,
   ExistingPeerPayload,
+  SlideState,
 } from './types'
-
-export interface SlideState {
-  peerId: string
-  slide: number
-  total: number
-}
 
 export class Room {
   id: string

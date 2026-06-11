@@ -101,6 +101,7 @@ type Action =
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
   | { type: "SET_PRESENTING"; isPresenting: boolean }
   | { type: "SET_SLIDE"; slide: SlideState | null }
+  | { type: "STOP_PRESENTING" }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -160,7 +161,12 @@ function reducer(state: State, action: Action): State {
     case "PEER_LEFT": {
       const peers = new Map(state.peers)
       peers.delete(action.peerId)
-      return { ...state, peers }
+      // If the leaving peer was the presenter, clear slide state immediately.
+      // The server also emits presentationEnded, but handling it here makes the
+      // reducer the single source of truth and avoids a two-event race.
+      const currentSlide =
+        state.currentSlide?.peerId === action.peerId ? null : state.currentSlide
+      return { ...state, peers, currentSlide }
     }
     case "TOGGLE_MIC":
       return { ...state, isMicMuted: action.isMuted, hasMic: action.hasMic ?? state.hasMic }
@@ -170,6 +176,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, isScreenSharing: action.isSharing }
     case "SET_PRESENTING":
       return { ...state, isPresenting: action.isPresenting }
+    case "STOP_PRESENTING":
+      return { ...state, isPresenting: false, currentSlide: null }
     case "SET_SLIDE":
       return { ...state, currentSlide: action.slide }
     default:
@@ -1076,8 +1084,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     presentationVideoProducerRef.current = null
     presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
     presentationStreamRef.current = null
-    dispatch({ type: "SET_PRESENTING", isPresenting: false })
-    dispatch({ type: "SET_SLIDE", slide: null })
+    dispatch({ type: "STOP_PRESENTING" })
   }, [roomId])
 
   // Notify the server (and all other peers) that the current slide changed.
