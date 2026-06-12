@@ -1,10 +1,4 @@
-import dynamic from "next/dynamic"
-
-// Load the entire room UI only in the browser.
-// ssr: false ensures mediasoup-client (and all other browser-only deps)
-// are never evaluated during server-side rendering, which prevents the
-// "Cannot access 'X' before initialization" TDZ crash from Turbopack.
-const RoomClient = dynamic(() => import("./room-client"), { ssr: false })
+import RoomLoader from "./room-loader"
 
 export default async function RoomPage({
   params,
@@ -16,5 +10,5 @@ export default async function RoomPage({
   const { roomId } = await params
   const { create } = await searchParams
 
-  return <RoomClient roomId={roomId} create={create === "true"} />
+  return <RoomLoader roomId={roomId} create={create === "true"} />
 }
