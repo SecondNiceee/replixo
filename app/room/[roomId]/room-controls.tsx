@@ -1,0 +1,190 @@
+"use client"
+
+import {
+  Mic, MicOff, Video, VideoOff, PhoneOff,
+  Check, ChevronDown, MonitorUp, MonitorOff, FileText,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
+import type { ScreenQuality } from "@/hooks/use-mediasoup"
+
+const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
+  { value: "auto", label: "Авто" },
+  { value: "720p", label: "720p" },
+  { value: "1080p", label: "1080p (Full HD)" },
+]
+
+interface RoomControlsProps {
+  isMicMuted: boolean
+  isCamOff: boolean
+  isScreenSharing: boolean
+  isPresenting: boolean
+  screenQuality: ScreenQuality
+  micDevices: MediaDeviceInfo[]
+  selectedMicLabel: string | null
+  onToggleMic: () => void
+  onToggleCam: () => void
+  onToggleScreenShare: () => void
+  onSetScreenQuality: (q: ScreenQuality) => void
+  onSwitchMic: (deviceId: string) => void
+  onSelectMicLabel: (label: string) => void
+  onPresentationAction: () => void
+  onLeave: () => void
+}
+
+export function RoomControls({
+  isMicMuted,
+  isCamOff,
+  isScreenSharing,
+  isPresenting,
+  screenQuality,
+  micDevices,
+  selectedMicLabel,
+  onToggleMic,
+  onToggleCam,
+  onToggleScreenShare,
+  onSetScreenQuality,
+  onSwitchMic,
+  onSelectMicLabel,
+  onPresentationAction,
+  onLeave,
+}: RoomControlsProps) {
+  return (
+    <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
+      {/* Mic + device picker */}
+      <div className="flex items-center">
+        <Button
+          variant="outline"
+          onClick={onToggleMic}
+          className={cn(
+            "size-12 rounded-full rounded-r-none border-r-0",
+            isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+          )}
+          aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
+        >
+          {isMicMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+              isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+            )}
+            aria-label="Выбрать микрофон"
+          >
+            <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" side="top">
+            {micDevices.length === 0 && (
+              <DropdownMenuItem disabled>Нет доступных микрофонов</DropdownMenuItem>
+            )}
+            {micDevices.map((d) => (
+              <DropdownMenuItem
+                key={d.deviceId}
+                onSelect={async () => {
+                  onSelectMicLabel(d.label)
+                  await onSwitchMic(d.deviceId)
+                }}
+                className={cn(selectedMicLabel === d.label && "font-medium")}
+              >
+                {d.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Camera */}
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={onToggleCam}
+        className={cn(
+          "size-12 rounded-full",
+          isCamOff && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+        )}
+        aria-label={isCamOff ? "Включить камеру" : "Выключить камеру"}
+      >
+        {isCamOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+      </Button>
+
+      {/* Screen share + quality picker */}
+      <div className="flex items-center">
+        <Button
+          variant="outline"
+          onClick={onToggleScreenShare}
+          disabled={isPresenting && !isScreenSharing}
+          className={cn(
+            "size-12 rounded-full rounded-r-none border-r-0",
+            isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+          )}
+          aria-label={isScreenSharing ? "Остановить демонстрацию экрана" : "Демонстрация экрана"}
+          title={isPresenting && !isScreenSharing ? "Завершите презентацию перед демонстрацией экрана" : undefined}
+        >
+          {isScreenSharing ? <MonitorOff className="size-5" /> : <MonitorUp className="size-5" />}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className={cn(
+              "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+              isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+            )}
+            aria-label="Качество демонстрации экрана"
+          >
+            <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" side="top">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Качество экрана</DropdownMenuLabel>
+              {SCREEN_QUALITY_OPTIONS.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onSelect={() => onSetScreenQuality(opt.value)}
+                  className="flex items-center justify-between gap-4"
+                >
+                  <span className={cn(screenQuality === opt.value && "font-medium")}>{opt.label}</span>
+                  {screenQuality === opt.value && <Check className="size-3.5 text-foreground" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Presentation */}
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={onPresentationAction}
+        disabled={isScreenSharing && !isPresenting}
+        className={cn(
+          "size-12 rounded-full",
+          isPresenting && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+        )}
+        aria-label={isPresenting ? "Завершить презентацию" : "Открыть презентацию (PDF / PPTX)"}
+        title={isScreenSharing && !isPresenting ? "Остановите демонстрацию экрана перед запуском презентации" : undefined}
+      >
+        <FileText className="size-5" />
+      </Button>
+
+      {/* Leave */}
+      <Button
+        variant="destructive"
+        size="icon"
+        onClick={onLeave}
+        className="size-12 rounded-full"
+        aria-label="Покинуть комнату"
+      >
+        <PhoneOff className="size-5" />
+      </Button>
+    </footer>
+  )
+}
