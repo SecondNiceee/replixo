@@ -240,8 +240,17 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   const pdfLoadingTaskRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pptxPreviewerRef = useRef<any>(null)
-  // Pre-rendered canvases for each PPTX slide (instant navigation).
-  const pptxCanvasesRef = useRef<HTMLCanvasElement[]>([])
+  // The offscreen container pptx-preview renders into. Kept alive for the whole
+  // document lifetime so we can render slides lazily on demand.
+  const pptxContainerRef = useRef<HTMLDivElement | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const html2canvasRef = useRef<any>(null)
+  // Sparse cache of rendered PPTX slides (index → canvas). Filled lazily.
+  const pptxCanvasesRef = useRef<(HTMLCanvasElement | undefined)[]>([])
+  const pptxTotalRef = useRef(0)
+  // Serializes slide renders — pptx-preview reuses a single container, so two
+  // concurrent renders would clobber each other.
+  const pptxLockRef = useRef<Promise<unknown>>(Promise.resolve())
 
   const fileTypeRef = useRef<"pdf" | "pptx" | null>(null)
   const loadedRef = useRef(false)
@@ -310,14 +319,80 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   )
 
   // -----------------------------------------------------------------------
-  // renderPptxSlide — paint a pre-rendered PPTX canvas (instant).
+  // renderOnePptxSlide — render slide `index` into an offscreen canvas using
+  // the still-mounted pptx-preview container + html2canvas. Cached in
+  // pptxCanvasesRef so subsequent visits are instant. Renders are serialized
+  // through pptxLockRef because the container is shared/single.
+  // -----------------------------------------------------------------------
+  const renderOnePptxSlide = useCallback(
+    async (index: number, signal: AbortSignal): Promise<HTMLCanvasElement | null> => {
+      const cached = pptxCanvasesRef.current[index]
+      if (cached) return cached
+
+      const run = async (): Promise<HTMLCanvasElement | null> => {
+        const previewer = pptxPreviewerRef.current
+        const container = pptxContainerRef.current
+        const html2canvas = html2canvasRef.current
+        if (!previewer || !container || !html2canvas || signal.aborted) return null
+
+        // Re-check the cache inside the lock — a queued render for the same
+        // index may have completed while we waited.
+        const already = pptxCanvasesRef.current[index]
+        if (already) return already
+
+        previewer.renderSingleSlide(index)
+
+        // Wait for the slide DOM to actually paint (poll with 300ms deadline).
+        await new Promise<void>((resolve) => {
+          const deadline = Date.now() + 300
+          const check = () => {
+            if (container.children.length > 0 || Date.now() >= deadline) {
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            } else {
+              requestAnimationFrame(check)
+            }
+          }
+          requestAnimationFrame(check)
+        })
+        if (signal.aborted) return null
+
+        const snap = await html2canvas(container, {
+          useCORS: true,
+          scale: 1,
+          width: 1280,
+          height: 720,
+        })
+        if (signal.aborted) return null
+
+        pptxCanvasesRef.current[index] = snap
+        return snap
+      }
+
+      // Chain onto the lock so renders never overlap on the shared container.
+      const next = pptxLockRef.current.then(run, run)
+      pptxLockRef.current = next.catch(() => {})
+      return next
+    },
+    [],
+  )
+
+  // -----------------------------------------------------------------------
+  // renderPptxSlide — paint slide `index`, rendering it lazily if not cached.
+  // Also prefetches the neighbouring slide so forward/back nav feels instant.
   // -----------------------------------------------------------------------
   const renderPptxSlide = useCallback(
-    (index: number) => {
-      const c = pptxCanvasesRef.current[index]
-      if (c) paintCanvas(c)
+    async (index: number, signal: AbortSignal) => {
+      if (index < 0 || index >= pptxTotalRef.current) return
+      const canvas = await renderOnePptxSlide(index, signal)
+      if (!canvas || signal.aborted) return
+      paintCanvas(canvas)
+
+      // Prefetch next + previous slides in the background (don't await, don't
+      // paint). Errors are swallowed — they'll retry on actual navigation.
+      void renderOnePptxSlide(index + 1, signal)
+      if (index > 0) void renderOnePptxSlide(index - 1, signal)
     },
-    [paintCanvas],
+    [paintCanvas, renderOnePptxSlide],
   )
 
   // -----------------------------------------------------------------------
@@ -381,31 +456,36 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
   //   previewer.renderSingleSlide(i)
   //   previewer.destroy()
   //
-  // Every slide is pre-rendered via html2canvas-pro so navigation is instant
-  // and doesn't depend on DOM visibility tricks.
+  // Slides are rendered LAZILY: load() only parses the deck and renders the
+  // first slide. The offscreen container + previewer are kept alive so any
+  // slide can be rendered on demand (see renderPptxSlide / renderOnePptxSlide).
+  // This avoids freezing the UI on large decks by html2canvas-ing every slide
+  // up front.
   // -----------------------------------------------------------------------
   const loadPptx = useCallback(
     async (f: File, signal: AbortSignal) => {
       setLoadingMsg("Загрузка PPTX…")
       setError(null)
-      let container: HTMLDivElement | null = null
       try {
         const [pptxMod, html2canvasMod] = await Promise.all([
           import("pptx-preview"),
           import("html2canvas-pro"),
         ])
         if (signal.aborted) return
-        const html2canvas = html2canvasMod.default
+        html2canvasRef.current = html2canvasMod.default
 
         const buf = await f.arrayBuffer()
         if (signal.aborted) return
 
         // Mount an invisible container so pptx-preview can render into the DOM.
-        container = document.createElement("div")
+        // Kept alive for the document's lifetime (torn down on file change /
+        // unmount) so we can lazily render any slide later.
+        const container = document.createElement("div")
         container.style.cssText =
           "position:fixed;left:-9999px;top:0;width:1280px;height:720px;" +
           "background:#fff;overflow:hidden;z-index:-1;"
         document.body.appendChild(container)
+        pptxContainerRef.current = container
 
         // pptx-preview types declare number but the runtime renderer requires
         // CSS strings. Cast to avoid the TS mismatch.
@@ -419,70 +499,29 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         const total: number = previewer.slideCount
         if (total === 0) throw new Error("Не найдено слайдов в файле")
 
-        const canvases: HTMLCanvasElement[] = []
-
-        for (let i = 0; i < total; i++) {
-          if (signal.aborted) break
-          setLoadingMsg(`Обработка слайда ${i + 1} / ${total}…`)
-          previewer.renderSingleSlide(i)
-
-          // Wait for the slide DOM to actually paint.
-          // Two rAFs are not always enough for heavier slides — poll for
-          // at least one child inside the container with a 300 ms deadline.
-          await new Promise<void>((resolve) => {
-            const deadline = Date.now() + 300
-            const check = () => {
-              if (container!.children.length > 0 || Date.now() >= deadline) {
-                requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-              } else {
-                requestAnimationFrame(check)
-              }
-            }
-            requestAnimationFrame(check)
-          })
-          if (signal.aborted) break
-
-          // scale: 1 — container is already 1280×720; scale:2 would produce
-          // 2560×1440 canvases (×4 memory) for no visible benefit on a 1280px
-          // capture canvas.
-          const snap = await html2canvas(container, {
-            useCORS: true,
-            scale: 1,
-            width: 1280,
-            height: 720,
-          })
-          canvases.push(snap)
-        }
-
-        if (signal.aborted) return
-        if (canvases.length === 0) throw new Error("Не удалось обработать слайды")
-
-        pptxCanvasesRef.current = canvases
+        pptxTotalRef.current = total
+        pptxCanvasesRef.current = new Array(total)
+        fileTypeRef.current = "pptx"
         loadedRef.current = true
+
+        // Render only the first slide before reporting ready.
+        const first = await renderOnePptxSlide(0, signal)
+        if (signal.aborted) return
+        if (!first) throw new Error("Не удалось обработать первый слайд")
+
         setLoadingMsg(null)
-        // Report the number of canvases actually rendered, not previewer.slideCount,
-        // so the slide counter is never ahead of what was processed.
-        onLoadedRef.current(canvases.length)
-        paintCanvas(canvases[0])
+        onLoadedRef.current(total)
+        paintCanvas(first)
+
+        // Warm the second slide in the background.
+        void renderOnePptxSlide(1, signal)
       } catch (err) {
         if (signal.aborted) return
         setLoadingMsg(null)
         setError("Ошибка PPTX: " + (err instanceof Error ? err.message : String(err)))
-      } finally {
-        // Always remove the container from DOM — even on error or abort.
-        // Also destroy the previewer if it was created, to release memory.
-        try {
-          if (pptxPreviewerRef.current) {
-            pptxPreviewerRef.current.destroy()
-            pptxPreviewerRef.current = null
-          }
-        } catch { /* ignore */ }
-        if (container && document.body.contains(container)) {
-          document.body.removeChild(container)
-        }
       }
     },
-    [paintCanvas],
+    [paintCanvas, renderOnePptxSlide],
   )
 
   // -----------------------------------------------------------------------
@@ -509,7 +548,13 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
       try { pptxPreviewerRef.current.destroy() } catch { /* ignore */ }
       pptxPreviewerRef.current = null
     }
+    if (pptxContainerRef.current && document.body.contains(pptxContainerRef.current)) {
+      document.body.removeChild(pptxContainerRef.current)
+    }
+    pptxContainerRef.current = null
     pptxCanvasesRef.current = []
+    pptxTotalRef.current = 0
+    pptxLockRef.current = Promise.resolve()
 
     fileTypeRef.current = null
     loadedRef.current = false
@@ -544,7 +589,7 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
     if (fileTypeRef.current === "pdf") {
       renderPdfPage(slideIndex, abort.signal)
     } else if (fileTypeRef.current === "pptx") {
-      renderPptxSlide(slideIndex)
+      void renderPptxSlide(slideIndex, abort.signal)
     }
 
     return () => { abort.abort() }
@@ -562,6 +607,9 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
       }
       if (pptxPreviewerRef.current) {
         try { pptxPreviewerRef.current.destroy() } catch { /* ignore */ }
+      }
+      if (pptxContainerRef.current && document.body.contains(pptxContainerRef.current)) {
+        document.body.removeChild(pptxContainerRef.current)
       }
     }
   }, [])
