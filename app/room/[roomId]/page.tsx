@@ -1,4 +1,4 @@
-import RoomLoader from "./room-loader"
+import RoomClient from "./room-client"
 
 export default async function RoomPage({
   params,
@@ -10,5 +10,5 @@ export default async function RoomPage({
   const { roomId } = await params
   const { create } = await searchParams
 
-  return <RoomLoader roomId={roomId} create={create === "true"} />
+  return <RoomClient roomId={roomId} create={create === "true"} />
 }
