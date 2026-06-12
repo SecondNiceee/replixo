@@ -237,8 +237,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     hasCam: false,
     currentSlide: null,
   })
-  // Keep statusRef in sync — used inside callbacks to avoid stale closures.
-  statusRef.current = state.status
 
   const socketRef = useRef<Socket | null>(null)
   const deviceRef = useRef<DeviceType | null>(null)
@@ -267,6 +265,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const hasJoinedRef = useRef(false)
   // mirrors state.status in a ref so join() can read it without being a dep
   const statusRef = useRef<RoomStatus>("idle")
+  // Keep statusRef in sync — used inside callbacks to avoid stale closures.
+  statusRef.current = state.status
   // guards against firing several overlapping ICE restarts for one transport
   const iceRestartingRef = useRef<Set<string>>(new Set())
   // per-transport retry timers — used to keep retrying an ICE restart until the
