@@ -10,7 +10,8 @@ const nextConfig = {
   // server build entirely so Turbopack / webpack never tries to parse it
   // on the Node side (which causes the "Cannot access 'X' before
   // initialization" TDZ error).
-  serverExternalPackages: ["mediasoup-client"],
+  // These are all browser-only bundles — prevent the server from evaluating them.
+  serverExternalPackages: ["mediasoup-client", "pdfjs-dist", "pptx-preview", "html2canvas-pro"],
   webpack(config, { isServer }) {
     if (isServer) {
       // Replace mediasoup-client with an empty module on the server so any
