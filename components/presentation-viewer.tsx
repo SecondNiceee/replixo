@@ -340,20 +340,19 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         const already = pptxCanvasesRef.current[index]
         if (already) return already
 
-        previewer.renderSingleSlide(index)
+        // renderSingleSlide may return a Promise — always await it so the slide
+        // DOM is fully populated before we snapshot.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const renderResult: any = previewer.renderSingleSlide(index)
+        if (renderResult && typeof renderResult.then === "function") {
+          await renderResult
+        }
+        if (signal.aborted) return null
 
-        // Wait for the slide DOM to actually paint (poll with 300ms deadline).
-        await new Promise<void>((resolve) => {
-          const deadline = Date.now() + 300
-          const check = () => {
-            if (container.children.length > 0 || Date.now() >= deadline) {
-              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-            } else {
-              requestAnimationFrame(check)
-            }
-          }
-          requestAnimationFrame(check)
-        })
+        // Two rAFs ensure all synchronous DOM mutations have been painted.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
         if (signal.aborted) return null
 
         const snap = await html2canvas(container, {
