@@ -331,10 +331,9 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         const pdfjsLib = await import("pdfjs-dist")
         if (signal.aborted) return
 
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url,
-        ).toString()
+        // Use a static public path — Turbopack does not support
+        // new URL("pkg/...", import.meta.url) for node_modules files.
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs"
 
         const buf = await f.arrayBuffer()
         if (signal.aborted) return
@@ -427,9 +426,20 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
           setLoadingMsg(`Обработка слайда ${i + 1} / ${total}…`)
           previewer.renderSingleSlide(i)
 
-          // Wait two animation frames — one for the DOM to receive the new
-          // slide, one for the browser to actually paint it before snapshot.
-          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+          // Wait for the slide DOM to actually paint.
+          // Two rAFs are not always enough for heavier slides — poll for
+          // at least one child inside the container with a 300 ms deadline.
+          await new Promise<void>((resolve) => {
+            const deadline = Date.now() + 300
+            const check = () => {
+              if (container!.children.length > 0 || Date.now() >= deadline) {
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+              } else {
+                requestAnimationFrame(check)
+              }
+            }
+            requestAnimationFrame(check)
+          })
           if (signal.aborted) break
 
           // scale: 1 — container is already 1280×720; scale:2 would produce
@@ -460,6 +470,13 @@ function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCan
         setError("Ошибка PPTX: " + (err instanceof Error ? err.message : String(err)))
       } finally {
         // Always remove the container from DOM — even on error or abort.
+        // Also destroy the previewer if it was created, to release memory.
+        try {
+          if (pptxPreviewerRef.current) {
+            pptxPreviewerRef.current.destroy()
+            pptxPreviewerRef.current = null
+          }
+        } catch { /* ignore */ }
         if (container && document.body.contains(container)) {
           document.body.removeChild(container)
         }

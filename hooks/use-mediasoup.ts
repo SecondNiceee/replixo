@@ -2,8 +2,11 @@
 
 import { useEffect, useRef, useCallback, useReducer, useState } from "react"
 import { io, Socket } from "socket.io-client"
-import { Device } from "mediasoup-client"
-import type { Transport, Producer, Consumer } from "mediasoup-client/lib/types"
+// mediasoup-client is a browser-only CJS bundle — never import it statically
+// at the module level or it will be evaluated during Next.js SSR and trigger
+// a TDZ "Cannot access 'X' before initialization" crash. We import it lazily
+// inside the join() callback which only ever runs in the browser.
+import type { Device as DeviceType, Transport, Producer, Consumer } from "mediasoup-client/lib/types"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -226,7 +229,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   statusRef.current = state.status
 
   const socketRef = useRef<Socket | null>(null)
-  const deviceRef = useRef<Device | null>(null)
+  const deviceRef = useRef<DeviceType | null>(null)
   const sendTransportRef = useRef<Transport | null>(null)
   const recvTransportRef = useRef<Transport | null>(null)
   const peerId = useRef<string>(getOrCreatePeerId())
@@ -459,9 +462,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const createTransport = useCallback(
     (
       socket: Socket,
-      device: Device,
+      device: DeviceType,
       direction: "send" | "recv",
-    ): Promise<ReturnType<Device["createSendTransport"]> | ReturnType<Device["createRecvTransport"]>> => {
+    ): Promise<ReturnType<DeviceType["createSendTransport"]> | ReturnType<DeviceType["createRecvTransport"]>> => {
       return new Promise((resolve, reject) => {
         socket.emit(
           "createWebRtcTransport",
@@ -518,7 +521,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             })
 
             if (direction === "send") {
-              (transport as ReturnType<Device["createSendTransport"]>).on(
+              (transport as ReturnType<DeviceType["createSendTransport"]>).on(
                 "produce",
                 ({ kind, rtpParameters, appData }, callback, errback) => {
                   socket.emit(
@@ -544,7 +547,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const setupTransports = useCallback(
     async (
       socket: Socket,
-      device: Device,
+      device: DeviceType,
       existingPeers: Array<{
         peerId: string
         displayName: string
@@ -557,8 +560,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         createTransport(socket, device, "recv"),
       ])
 
-      sendTransportRef.current = sendTransport as ReturnType<Device["createSendTransport"]>
-      recvTransportRef.current = recvTransport as ReturnType<Device["createRecvTransport"]>
+      sendTransportRef.current = sendTransport as ReturnType<DeviceType["createSendTransport"]>
+      recvTransportRef.current = recvTransport as ReturnType<DeviceType["createRecvTransport"]>
 
       // Consume existing peers — recv transport is guaranteed ready now
       for (const peer of existingPeers) {
@@ -614,6 +617,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // the server evicts a peer during a long network drop.
     // -----------------------------------------------------------------------
     const doJoinSequence = async () => {
+      const { Device } = await import("mediasoup-client")
       const device = new Device()
       deviceRef.current = device
 
@@ -888,7 +892,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         const track = micStream.getAudioTracks()[0]
         stream.addTrack(track)
         if (sendTransport) {
-          const producer = await (sendTransport as ReturnType<Device["createSendTransport"]>).produce({ track })
+          const producer = await (sendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({ track })
           audioProducerRef.current = producer
         }
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
@@ -951,7 +955,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         await producer.replaceTrack({ track: newTrack })
       } else if (!producer && sendTransport) {
         // Track was never published — publish now
-        const newProducer = await (sendTransport as ReturnType<Device["createSendTransport"]>).produce({ track: newTrack })
+        const newProducer = await (sendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({ track: newTrack })
         audioProducerRef.current = newProducer
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
       }
