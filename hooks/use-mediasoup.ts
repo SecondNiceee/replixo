@@ -2,11 +2,23 @@
 
 import { useEffect, useRef, useCallback, useReducer, useState } from "react"
 import { io, Socket } from "socket.io-client"
-// mediasoup-client is a browser-only CJS bundle — never import it statically
-// at the module level or it will be evaluated during Next.js SSR and trigger
-// a TDZ "Cannot access 'X' before initialization" crash. We import it lazily
-// inside the join() callback which only ever runs in the browser.
-import type { Device as DeviceType, Transport, Producer, Consumer } from "mediasoup-client/lib/types"
+// mediasoup-client is a CJS bundle with internal circular dependencies that
+// cause a TDZ crash ("Cannot access 'X' before initialization") when Turbopack
+// tries to statically analyse it — even via `import type`.
+// We avoid ALL static imports from mediasoup-client and instead:
+//   1. Use local minimal shim types below (compile-time only, zero runtime cost).
+//   2. Load the real module lazily with `await import("mediasoup-client")` inside
+//      the async join() callback that only ever runs in the browser.
+
+// Minimal shim types — mirrors what we actually use from mediasoup-client.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DeviceType = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Transport = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Producer = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Consumer = any
 
 // ---------------------------------------------------------------------------
 // Types
