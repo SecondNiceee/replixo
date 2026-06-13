@@ -263,6 +263,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // whether an initial join has completed. Distinguishes a first connect from
   // a socket.io reconnection after a transient network drop.
   const hasJoinedRef = useRef(false)
+  // set once this session was kicked (same peerId opened elsewhere). Prevents
+  // any reconnect/rejoin so we don't ping-pong kick the other tab.
+  const kickedRef = useRef(false)
   // mirrors state.status in a ref so join() can read it without being a dep
   const statusRef = useRef<RoomStatus>("idle")
   // Keep statusRef in sync — used inside callbacks to avoid stale closures.
@@ -675,6 +678,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     }
 
     socket.on("connect", async () => {
+      // If this session was kicked (peerId opened elsewhere), never rejoin.
+      if (kickedRef.current) {
+        socket.disconnect()
+        return
+      }
       // -----------------------------------------------------------------------
       // RECONNECT path — socket.io re-established the signaling channel after a
       // transient network drop.
@@ -714,11 +722,29 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       await doJoinSequence()
     })
 
-    // Kicked because this peerId reconnected from another tab/device.
-    // The new session will take over — just reload to re-join cleanly.
+    // Kicked because this same peerId connected from another tab/device.
+    // The peerId is shared across tabs (persisted in localStorage), so the
+    // NEW session takes over and this (older) one must stop cleanly.
+    //
+    // We MUST NOT reload/rejoin here — doing so would rejoin with the same
+    // peerId, kick the new tab, which would reload and kick us back… an
+    // infinite mutual-reconnection loop. Instead we tear everything down,
+    // disable reconnection, and surface a clear message.
     socket.on("kicked", () => {
+      kickedRef.current = true
+      hasJoinedRef.current = false
+      // Stop socket.io from auto-reconnecting after this disconnect.
+      socket.io.opts.reconnection = false
       socket.disconnect()
-      window.location.reload()
+      sendTransportRef.current?.close()
+      recvTransportRef.current?.close()
+      sendTransportRef.current = null
+      recvTransportRef.current = null
+      consumersRef.current.clear()
+      dispatch({
+        type: "ERROR",
+        error: "Вы открыли эту комнату в другой вкладке или на другом устройстве. Здесь сеанс завершён.",
+      })
     })
 
     // A peer joined the room (may not have produced media yet)
