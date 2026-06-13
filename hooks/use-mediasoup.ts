@@ -1104,15 +1104,36 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           videoTrack.contentHint = "detail"
         }
         // Fixed-quality presets pin the resolution and bitrate; Auto lets
-        // WebRTC adapt to bandwidth on its own.
+        // WebRTC adapt to bandwidth on its own but with a sensible floor/ceiling
+        // and high network priority so the screen never collapses to a tiny
+        // bitrate and recovers quickly after a dip.
         const encoding: RTCRtpEncodingParameters = preset.maxBitrate
-          ? { maxBitrate: preset.maxBitrate, scaleResolutionDownBy: 1 }
-          : {}
+          ? {
+              maxBitrate: preset.maxBitrate,
+              scaleResolutionDownBy: 1,
+              // Screen share should win the bandwidth fight against the camera.
+              networkPriority: "high",
+              priority: "high",
+            }
+          : {
+              // Auto: don't let the encoder starve the screen. Keep a healthy
+              // ceiling and a floor so text stays legible, with high priority.
+              maxBitrate: 4_000_000,
+              scaleResolutionDownBy: 1,
+              networkPriority: "high",
+              priority: "high",
+            }
         const producer = await sendTransport.produce({
           track: videoTrack,
           encodings: [encoding],
           codecOptions: {
-            videoGoogleStartBitrate: preset.maxBitrate ? 2000 : 1000,
+            // Start high so the screen is sharp immediately instead of ramping
+            // up from a blurry low-bitrate state, and allow a high ceiling.
+            videoGoogleStartBitrate: preset.maxBitrate ? 2500 : 2000,
+            videoGoogleMaxBitrate: preset.maxBitrate
+              ? Math.round(preset.maxBitrate / 1000)
+              : 4000,
+            videoGoogleMinBitrate: 600,
           },
           appData: { source: "screen" },
         })
