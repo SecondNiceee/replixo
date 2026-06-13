@@ -36,6 +36,26 @@ export interface RemotePeer {
 
 export type MediaSource = "media" | "screen" | "presentation"
 
+// Normalise an untrusted `appData.source` value (string | unknown) into one of
+// our known MediaSource variants, defaulting to "media".
+function normalizeSource(raw: unknown): MediaSource {
+  return raw === "screen" ? "screen" : raw === "presentation" ? "presentation" : "media"
+}
+
+// The RemotePeer field that a given (source, kind) pair maps to.
+type StreamKey =
+  | "presentationStream"
+  | "screenStream"
+  | "screenAudioStream"
+  | "videoStream"
+  | "audioStream"
+
+function streamKeyFor(source: MediaSource, kind: "video" | "audio"): StreamKey {
+  if (source === "presentation") return "presentationStream"
+  if (source === "screen") return kind === "video" ? "screenStream" : "screenAudioStream"
+  return kind === "video" ? "videoStream" : "audioStream"
+}
+
 export type RoomStatus =
   | "idle"
   | "connecting"
@@ -138,16 +158,7 @@ function reducer(state: State, action: Action): State {
     case "PEER_STREAM": {
       const peers = new Map(state.peers)
       const existing = peers.get(action.peerId) ?? { peerId: action.peerId, displayName: action.displayName }
-      const key =
-        action.source === "presentation"
-          ? "presentationStream"
-          : action.source === "screen"
-            ? action.kind === "video"
-              ? "screenStream"
-              : "screenAudioStream"
-            : action.kind === "video"
-              ? "videoStream"
-              : "audioStream"
+      const key = streamKeyFor(action.source, action.kind)
       peers.set(action.peerId, {
         ...existing,
         [key]: action.stream,
@@ -158,16 +169,7 @@ function reducer(state: State, action: Action): State {
       const peers = new Map(state.peers)
       const existing = peers.get(action.peerId)
       if (!existing) return state
-      const key =
-        action.source === "presentation"
-          ? "presentationStream"
-          : action.source === "screen"
-            ? action.kind === "video"
-              ? "screenStream"
-              : "screenAudioStream"
-            : action.kind === "video"
-              ? "videoStream"
-              : "audioStream"
+      const key = streamKeyFor(action.source, action.kind)
       const updated = { ...existing }
       delete updated[key]
       peers.set(action.peerId, updated)
