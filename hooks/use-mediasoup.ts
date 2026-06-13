@@ -106,6 +106,25 @@ export interface SlideState {
   total: number
 }
 
+// Camera simulcast layers. Publishing three spatial layers lets the SFU drop
+// to a lower layer per-receiver when their downlink is weak (e.g. a peer in
+// another city on a poor connection) instead of freezing/stalling the single
+// high-bitrate stream for everyone. Bitrates are conservative so the call
+// survives on modest uplinks; WebRTC ramps up when bandwidth allows.
+const CAMERA_ENCODINGS = [
+  { rid: "low", maxBitrate: 150_000, scaleResolutionDownBy: 4, scalabilityMode: "L1T3" },
+  { rid: "mid", maxBitrate: 500_000, scaleResolutionDownBy: 2, scalabilityMode: "L1T3" },
+  { rid: "high", maxBitrate: 1_500_000, scaleResolutionDownBy: 1, scalabilityMode: "L1T3" },
+]
+
+// Codec preference / per-layer config passed alongside the simulcast encodings.
+const CAMERA_PRODUCE_OPTIONS = {
+  encodings: CAMERA_ENCODINGS,
+  codecOptions: {
+    videoGoogleStartBitrate: 300,
+  },
+} as const
+
 interface State {
   status: RoomStatus
   error: string | null
@@ -1020,9 +1039,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
         const track = camStream.getVideoTracks()[0]
         stream.addTrack(track)
-        // Publish the track if transport is ready
+        // Publish the track if transport is ready.
+        // Camera uses simulcast so weak/remote receivers can drop to a lower
+        // spatial layer instead of stalling the whole stream.
         if (sendTransport) {
-          const producer = await sendTransport.produce({ track })
+          const producer = await sendTransport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
           videoProducerRef.current = producer
         }
         dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })

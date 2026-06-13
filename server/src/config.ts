@@ -29,17 +29,25 @@ export const listenIps: TransportListenIp[] = [
 // relay the media path silently fails and the remote person "can't be heard".
 //
 // We therefore ALWAYS ship a TURN relay. If the operator provides their own
-// (TURN_URL), we use it; otherwise we fall back to the free public OpenRelay
-// TURN servers, which work over UDP/TCP/TLS on ports 80/443 so they survive
-// restrictive mobile and corporate firewalls.
-const customTurn = process.env.TURN_URL
-  ? [
-      {
-        urls: process.env.TURN_URL,
-        username: process.env.TURN_USERNAME ?? '',
-        credential: process.env.TURN_CREDENTIAL ?? '',
-      },
-    ]
+// (TURN_URL — may be a comma-separated list of urls), we use it; otherwise we
+// fall back to the free public OpenRelay TURN servers, which work over
+// UDP/TCP/TLS on ports 80/443 so they survive restrictive mobile and corporate
+// firewalls.
+//
+// IMPORTANT for cross-city / cross-ISP calls: the free fallback is rate-limited
+// and shared, so it can stutter under load. For reliable production calls set
+// your own TURN_URL (e.g. a coturn instance or a Metered/Twilio account).
+const customTurnUrls = (process.env.TURN_URL ?? '')
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean)
+
+const customTurn = customTurnUrls.length > 0
+  ? customTurnUrls.map((urls) => ({
+      urls,
+      username: process.env.TURN_USERNAME ?? '',
+      credential: process.env.TURN_CREDENTIAL ?? '',
+    }))
   : []
 
 const fallbackTurn = [
@@ -49,12 +57,17 @@ const fallbackTurn = [
     credential: 'openrelayproject',
   },
   {
+    urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
     urls: 'turn:openrelay.metered.ca:443',
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
   {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
