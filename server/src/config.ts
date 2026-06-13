@@ -28,43 +28,27 @@ export const listenIps: TransportListenIp[] = [
 // behind symmetric NAT (CGNAT), which STUN cannot traverse. Without a TURN
 // relay the media path silently fails and the remote person "can't be heard".
 //
-// We therefore ALWAYS ship a TURN relay. If the operator provides their own
-// (TURN_URL), we use it; otherwise we fall back to the free public OpenRelay
-// TURN servers, which work over UDP/TCP/TLS on ports 80/443 so they survive
-// restrictive mobile and corporate firewalls.
-const customTurn = process.env.TURN_URL
-  ? [
-      {
-        urls: process.env.TURN_URL,
-        username: process.env.TURN_USERNAME ?? '',
-        credential: process.env.TURN_CREDENTIAL ?? '',
-      },
-    ]
-  : []
+// We therefore ship the operator's own TURN relay. TURN_URL may be a single
+// url or a comma-separated list (e.g. UDP + TCP/TLS variants of the same
+// coturn instance). All entries share the same TURN_USERNAME / TURN_CREDENTIAL.
+const customTurnUrls = (process.env.TURN_URL ?? '')
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean)
 
-const fallbackTurn = [
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-]
+const customTurn = customTurnUrls.length > 0
+  ? customTurnUrls.map((urls) => ({
+      urls,
+      username: process.env.TURN_USERNAME ?? '',
+      credential: process.env.TURN_CREDENTIAL ?? '',
+    }))
+  : []
 
 export const iceServers = [
   { urls: process.env.STUN_URL ?? 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // Prefer a custom TURN if configured, otherwise use the public fallback.
-  ...(customTurn.length > 0 ? customTurn : fallbackTurn),
+  // The operator's own TURN relay (set via TURN_URL / TURN_USERNAME / TURN_CREDENTIAL).
+  ...customTurn,
 ]
 
 // ---------------------------------------------------------------------------

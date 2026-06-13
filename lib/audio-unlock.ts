@@ -28,6 +28,10 @@ interface AudioNodes {
 }
 const streamNodes = new Map<MediaStream, AudioNodes>()
 
+// Desired volume (0..1) per stream, applied to the gain node when it exists.
+// Stored separately so a volume set before the node is created still applies.
+const streamVolumes = new Map<MediaStream, number>()
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === "undefined") return null
   if (!sharedAudioContext) {
@@ -108,6 +112,9 @@ function connectStreamToContext(stream: MediaStream) {
   try {
     const source = ctx.createMediaStreamSource(stream)
     const gain = ctx.createGain()
+    // Apply any volume that was requested before the node existed.
+    const desired = streamVolumes.get(stream)
+    gain.gain.value = desired ?? 1
     source.connect(gain)
     gain.connect(ctx.destination)
     streamNodes.set(stream, { source, gain })
@@ -129,6 +136,22 @@ function disconnectStreamFromContext(stream: MediaStream) {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+// Set per-stream playback volume (0..1). Works on both the iOS AudioContext
+// path (via the gain node) and is a no-op-safe store otherwise. Returns true
+// if the stream is routed through the AudioContext (i.e. the <audio> element's
+// own .volume will be ignored and this is the only thing that changes volume).
+export function setStreamVolume(stream: MediaStream | undefined | null, volume: number): boolean {
+  if (!stream) return false
+  const clamped = Math.max(0, Math.min(1, volume))
+  streamVolumes.set(stream, clamped)
+  const nodes = streamNodes.get(stream)
+  if (nodes) {
+    nodes.gain.gain.value = clamped
+    return true
+  }
+  return false
+}
 
 // Register an audio element (and optionally a raw MediaStream for iOS routing).
 export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream) {
@@ -153,7 +176,10 @@ export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream)
 
   return () => {
     audioElements.delete(el)
-    if (stream) disconnectStreamFromContext(stream)
+    if (stream) {
+      disconnectStreamFromContext(stream)
+      streamVolumes.delete(stream)
+    }
   }
 }
 

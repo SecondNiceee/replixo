@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { MicOff, VideoOff, User, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
-import { registerAudioElement } from "@/lib/audio-unlock"
+import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
 
 interface VideoTileProps {
   stream?: MediaStream
@@ -71,12 +71,21 @@ export function VideoTile({
   }, [audioStream, isLocal])
 
   // Apply per-user local mute / volume to the remote audio element.
+  // On desktop this controls the <audio> element directly. On iOS the audio is
+  // routed through an AudioContext gain node (the element is force-muted), so
+  // we must also drive the gain node via setStreamVolume — otherwise the
+  // volume slider has no audible effect on mobile Safari.
   useEffect(() => {
+    if (isLocal) return
+    const effective = localMuted ? 0 : volume
     const audio = audioRef.current
-    if (!audio || isLocal) return
-    audio.volume = volume
-    audio.muted = localMuted
-  }, [volume, localMuted, isLocal])
+    if (audio) {
+      audio.volume = volume
+      audio.muted = localMuted
+    }
+    // Drive the AudioContext gain node (iOS path / no-op safe elsewhere).
+    setStreamVolume(audioStream, effective)
+  }, [volume, localMuted, isLocal, audioStream])
 
   return (
     <div
