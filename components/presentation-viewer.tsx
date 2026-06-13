@@ -493,10 +493,11 @@ export function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: Prese
         document.body.appendChild(container)
         pptxContainerRef.current = container
 
-        // pptx-preview types declare number but the runtime renderer requires
-        // CSS strings. Cast to avoid the TS mismatch.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const previewer = pptxMod.init(container, { width: "1280px" as any, height: "720px" as any, mode: "slide" })
+        // width/height MUST be numbers: pptx-preview computes its render scale
+        // as `viewPort.width / pptx.width` and appends "px" itself. Passing CSS
+        // strings ("1280px") makes that division NaN, so every slide is rendered
+        // with transform: scale(NaN) and becomes invisible (blank capture).
+        const previewer = pptxMod.init(container, { width: 1280, height: 720, mode: "slide" })
         pptxPreviewerRef.current = previewer
 
         await previewer.load(buf)
