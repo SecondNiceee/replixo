@@ -60,22 +60,43 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     wasPresentingRef.current = isPresenting
   }, [isPresenting])
 
+  // Whether we've already called startPresentation for the current file.
+  // Guards against onLoaded firing multiple times (e.g. from React Strict Mode).
+  const presentationStartedRef = useRef(false)
+
   const handleFileSelected = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
       if (!file) return
       e.target.value = ""
+      presentationStartedRef.current = false
+      // Just set the file — PresenterCanvas will render the first slide into the
+      // offscreen canvas, then call onLoaded. We start the stream capture there
+      // so the first frame is already painted before viewers receive it.
+      setPresentationFile(file)
+    },
+    [],
+  )
+
+  // Called by PresenterCanvas once the first slide is painted into the canvas.
+  const handlePresentationLoaded = useCallback(
+    async (total: number) => {
+      if (presentationStartedRef.current) return
+      presentationStartedRef.current = true
       const canvas = presentationCanvasRef.current
       if (!canvas) return
       try {
         const stream = canvas.captureStream(30)
         await startPresentation(stream)
-        setPresentationFile(file)
+        // notifySlideChange so all peers get slide 0 / total immediately.
+        notifySlideChange(0, total)
       } catch (err) {
         console.error("[Replixo] startPresentation failed:", err)
+        setPresentationFile(null)
+        presentationStartedRef.current = false
       }
     },
-    [startPresentation],
+    [startPresentation, notifySlideChange],
   )
 
   const handleStopPresentation = useCallback(() => {
@@ -142,6 +163,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         presentationFile={presentationFile}
         presentationCanvasRef={presentationCanvasRef}
         onSlideChange={notifySlideChange}
+        onPresentationLoaded={handlePresentationLoaded}
         onStopPresentation={handleStopPresentation}
       />
 
