@@ -4,6 +4,7 @@ import { VideoTile } from "@/components/video-tile"
 import { PresentationViewer } from "@/components/presentation-viewer"
 import { cn } from "@/lib/utils"
 import type { RefObject } from "react"
+import type { SlideState } from "@/hooks/use-mediasoup"
 
 interface Peer {
   peerId: string
@@ -24,10 +25,11 @@ interface RoomVideoGridProps {
   isScreenSharing: boolean
   isPresenting: boolean
   peers: Map<string, Peer>
-  currentSlide: number | null
+  currentSlide: SlideState | null
   presentationFile: File | null
   presentationCanvasRef: RefObject<HTMLCanvasElement | null>
-  onSlideChange: (slide: number) => void
+  onSlideChange: (slide: number, total: number) => void
+  onPresentationLoaded: (total: number) => void
   onStopPresentation: () => void
 }
 
@@ -44,13 +46,14 @@ export function RoomVideoGrid({
   presentationFile,
   presentationCanvasRef,
   onSlideChange,
+  onPresentationLoaded,
   onStopPresentation,
 }: RoomVideoGridProps) {
   const allPeers = [...peers.values()]
   const presentingPeer = allPeers.find((p) => p.presentationStream)
   const remoteScreens = allPeers.filter((p) => p.screenStream)
 
-  const hasPresentation = isPresenting || !!presentingPeer || currentSlide !== null
+  const hasPresentation = isPresenting || !!presentingPeer || (currentSlide !== null && currentSlide !== undefined)
   const hasScreenShare = (isScreenSharing && localScreenStream) || remoteScreens.length > 0
 
   const totalTiles =
@@ -97,6 +100,7 @@ export function RoomVideoGrid({
             isPresenter={isPresenting}
             currentSlide={currentSlide}
             onSlideChange={onSlideChange}
+            onPresentationLoaded={onPresentationLoaded}
             onStop={onStopPresentation}
             canvasRef={isPresenting ? presentationCanvasRef : undefined}
             remoteStream={presentingPeer?.presentationStream}

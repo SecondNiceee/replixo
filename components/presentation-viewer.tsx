@@ -17,6 +17,12 @@ export interface PresentationViewerProps {
   currentSlide: SlideState | null
   /** Called when presenter navigates: (slideIndex, total). */
   onSlideChange?: (slide: number, total: number) => void
+  /**
+   * Called once after the file is fully loaded and the first slide is painted
+   * into the offscreen canvas. The parent uses this to start captureStream()
+   * so viewers receive a non-blank first frame.
+   */
+  onPresentationLoaded?: (total: number) => void
   /** Called when the presenter clicks "Завершить". */
   onStop?: () => void
   /**
@@ -39,6 +45,7 @@ export function PresentationViewer({
   isPresenter,
   currentSlide,
   onSlideChange,
+  onPresentationLoaded,
   onStop,
   canvasRef,
   remoteStream,
@@ -129,7 +136,7 @@ export function PresentationViewer({
               canvasRef={canvasRef}
               file={file ?? null}
               slideIndex={slide}
-              onLoaded={(t) => onSlideChange?.(0, t)}
+              onLoaded={(t) => onPresentationLoaded?.(t)}
             />
           ) : null
         ) : remoteStream && remoteStream.getTracks().length > 0 ? (
