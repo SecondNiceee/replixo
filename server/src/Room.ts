@@ -102,6 +102,22 @@ export class Room {
       appData: { direction },
     })
 
+    // Raise the bandwidth-estimation ceiling so a high-bitrate screen share is
+    // not artificially throttled. Without this the transport's estimated
+    // outgoing bitrate can stay low and the shared screen degrades over time.
+    try {
+      await transport.setMaxIncomingBitrate(8_000_000)
+    } catch {
+      // Older mediasoup builds may not support it on every transport; ignore.
+    }
+    if (direction === 'recv') {
+      try {
+        await transport.setMaxOutgoingBitrate(8_000_000)
+      } catch {
+        // Optional API; ignore if unavailable.
+      }
+    }
+
     transport.on('dtlsstatechange', (dtlsState) => {
       if (dtlsState === 'closed') transport.close()
     })

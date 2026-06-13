@@ -99,7 +99,9 @@ export const webRtcTransportOptions = {
   enableUdp: true,
   enableTcp: true,
   preferUdp: true,
-  initialAvailableOutgoingBitrate: 3_000_000,
-  minimumAvailableOutgoingBitrate: 100_000,
+  // Start the bandwidth estimator high so screen shares are crisp from the
+  // first second instead of ramping up from a blurry low-bitrate state.
+  initialAvailableOutgoingBitrate: 6_000_000,
+  minimumAvailableOutgoingBitrate: 300_000,
   maxSctpMessageSize: 262144,
 }
