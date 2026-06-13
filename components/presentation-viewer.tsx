@@ -136,7 +136,7 @@ export function PresentationViewer({
               canvasRef={canvasRef}
               file={file ?? null}
               slideIndex={slide}
-              onLoaded={(t) => onPresentationLoaded?.(t)}
+              onLoaded={() => {}}
             />
           ) : null
         ) : remoteStream && remoteStream.getTracks().length > 0 ? (
@@ -197,7 +197,7 @@ export function PresentationViewer({
                 "flex size-8 items-center justify-center rounded-full transition-colors",
                 canGoForward ? "text-white hover:bg-white/15" : "cursor-default text-white/20",
               )}
-              aria-label="Следующий слайд"
+              aria-label="��ледующий слайд"
             >
               <ChevronRight className="size-5" />
             </button>
@@ -236,7 +236,7 @@ interface PresenterCanvasProps {
   onLoaded: (total: number) => void
 }
 
-function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCanvasProps) {
+export function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: PresenterCanvasProps) {
   const previewRef = useRef<HTMLCanvasElement>(null)
   const [loadingMsg, setLoadingMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

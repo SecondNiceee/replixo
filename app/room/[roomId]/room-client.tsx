@@ -10,6 +10,7 @@ import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
+import { PresenterCanvas } from "@/components/presentation-viewer"
 
 interface RoomClientProps {
   roomId: string
@@ -132,6 +133,20 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         height={720}
         aria-hidden
       />
+      {/* PresenterCanvas is mounted as soon as a file is selected so it can
+          render slide 0 into the offscreen canvas and call onLoaded — which
+          triggers startPresentation(). Without this, isPresenting stays false
+          and PresentationViewer never mounts, so onLoaded never fires. */}
+      {presentationFile && !isPresenting && (
+        <div className="pointer-events-none fixed left-[-9999px] top-0" aria-hidden>
+          <PresenterCanvas
+            canvasRef={presentationCanvasRef}
+            file={presentationFile}
+            slideIndex={0}
+            onLoaded={handlePresentationLoaded}
+          />
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
