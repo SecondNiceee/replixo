@@ -91,10 +91,37 @@ export function RoomVideoGrid({
     </div>
   )
 
-  // Presentation layout
+  // Compact floating thumbnails used during presentation/PDF so the document
+  // can take almost the full screen. The tiles overlay the bottom of the
+  // viewer instead of consuming a side column.
+  const floatingTiles = (
+    <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center gap-2 overflow-x-auto px-2">
+      <VideoTile
+        stream={localStream ?? undefined}
+        speakingStream={localStream ?? undefined}
+        displayName={displayName}
+        isMuted={isMicMuted}
+        isCamOff={isCamOff}
+        isLocal
+        className="pointer-events-auto aspect-video h-20 w-auto shrink-0 shadow-lg sm:h-24"
+      />
+      {allPeers.map((peer) => (
+        <VideoTile
+          key={peer.peerId}
+          stream={peer.videoStream}
+          audioStream={peer.audioStream}
+          displayName={peer.displayName}
+          className="pointer-events-auto aspect-video h-20 w-auto shrink-0 shadow-lg sm:h-24"
+        />
+      ))}
+    </div>
+  )
+
+  // Presentation layout — document fills almost the entire screen, with
+  // participants shown as small floating thumbnails over the bottom.
   if (hasPresentation) {
     return (
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden p-3 lg:flex-row">
+      <main className="relative flex flex-1 flex-col overflow-hidden p-1 sm:p-2">
         <div className="min-h-0 flex-1">
           <PresentationViewer
             isPresenter={isPresenting}
@@ -107,7 +134,7 @@ export function RoomVideoGrid({
             file={presentationFile}
           />
         </div>
-        {sidebarTiles}
+        {floatingTiles}
       </main>
     )
   }
