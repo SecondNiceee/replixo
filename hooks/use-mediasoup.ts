@@ -1117,6 +1117,26 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           appData: { source: "screen" },
         })
         screenVideoProducerRef.current = producer
+
+        // Keep the shared screen SHARP over time. By default the encoder
+        // prefers to maintain frame-rate and quietly drops resolution when
+        // bandwidth dips — which makes text/slides progressively blurrier the
+        // longer you share. For screen content we want the opposite: keep the
+        // resolution crisp and sacrifice frame-rate instead. This is set on the
+        // RTCRtpSender directly because it is a sender-level (not per-encoding)
+        // preference.
+        try {
+          const sender = producer.rtpSender
+          if (sender) {
+            const params = sender.getParameters()
+            // @ts-expect-error - degradationPreference is valid but missing in some TS DOM libs
+            params.degradationPreference = "maintain-resolution"
+            await sender.setParameters(params)
+          }
+        } catch {
+          // Not all browsers expose degradationPreference; ignore if unsupported.
+        }
+
         // User clicked the browser's native "Stop sharing" control
         videoTrack.onended = () => stopScreenShare()
       }
