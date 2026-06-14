@@ -291,11 +291,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const statusRef = useRef<RoomStatus>("idle")
   // Keep statusRef in sync — used inside callbacks to avoid stale closures.
   statusRef.current = state.status
-  // Keep mic/cam state refs in sync with the reducer.
-  isMicMutedRef.current = state.isMicMuted
-  hasMicRef.current = state.hasMic
-  isCamOffRef.current = state.isCamOff
-  hasCamRef.current = state.hasCam
   // guards against firing several overlapping ICE restarts for one transport
   const iceRestartingRef = useRef<Set<string>>(new Set())
   // per-transport retry timers — used to keep retrying an ICE restart until the
@@ -307,6 +302,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const hasMicRef = useRef(false)
   const isCamOffRef = useRef(true)
   const hasCamRef = useRef(false)
+  // Keep mic/cam state refs in sync with the reducer.
+  isMicMutedRef.current = state.isMicMuted
+  hasMicRef.current = state.hasMic
+  isCamOffRef.current = state.isCamOff
+  hasCamRef.current = state.hasCam
 
   // -------------------------------------------------------------------------
   // Restart ICE on a transport whose network path broke (transient drop / VPN
