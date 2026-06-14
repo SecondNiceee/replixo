@@ -291,11 +291,22 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const statusRef = useRef<RoomStatus>("idle")
   // Keep statusRef in sync — used inside callbacks to avoid stale closures.
   statusRef.current = state.status
+  // Keep mic/cam state refs in sync with the reducer.
+  isMicMutedRef.current = state.isMicMuted
+  hasMicRef.current = state.hasMic
+  isCamOffRef.current = state.isCamOff
+  hasCamRef.current = state.hasCam
   // guards against firing several overlapping ICE restarts for one transport
   const iceRestartingRef = useRef<Set<string>>(new Set())
   // per-transport retry timers — used to keep retrying an ICE restart until the
   // transport reports "connected" again (mobile networks often need several).
   const iceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Mirrors of mic/cam state in refs — readable inside async callbacks without
+  // stale-closure issues. Updated in sync with every TOGGLE_MIC / TOGGLE_CAM dispatch.
+  const isMicMutedRef = useRef(true)
+  const hasMicRef = useRef(false)
+  const isCamOffRef = useRef(true)
+  const hasCamRef = useRef(false)
 
   // -------------------------------------------------------------------------
   // Restart ICE on a transport whose network path broke (transient drop / VPN
@@ -353,6 +364,32 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           }
           try {
             await transport.restartIce({ iceParameters: iceParameters as RTCIceParameters })
+
+            // After ICE renegotiation on the SEND transport, re-sync the paused
+            // state of every active producer with the server. The server's
+            // internal producerPaused flag may have drifted during the outage
+            // (e.g. VPN toggle, phone switching towers). Without this step, a
+            // muted user becomes audible again on the remote side after recovery.
+            if (transport === sendTransportRef.current) {
+              const syncSocket = socketRef.current
+              if (syncSocket) {
+                for (const producer of [
+                  audioProducerRef.current,
+                  videoProducerRef.current,
+                  screenVideoProducerRef.current,
+                  screenAudioProducerRef.current,
+                ]) {
+                  if (!producer || producer.closed) continue
+                  syncSocket.emit("pauseProducer", {
+                    roomId,
+                    peerId: peerId.current,
+                    producerId: producer.id,
+                    paused: producer.paused,
+                  })
+                }
+              }
+            }
+
             // Verify it actually recovered; if not, keep retrying.
             scheduleRetry()
           } catch (e) {
@@ -644,7 +681,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       // built-in retry logic — we do not want to flip the UI to "error" just
       // because the network hiccupped for a moment.
       if (!hasJoinedRef.current) {
-        dispatch({ type: "ERROR", error: `Не удалось подключиться к серверу: ${e.message}` })
+        dispatch({ type: "ERROR", error: `Не удалось подключ��ться к серверу: ${e.message}` })
       }
     })
 
@@ -720,17 +757,88 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               restartIceForTransport(sendTransportRef.current)
               restartIceForTransport(recvTransportRef.current)
             } else {
-              // Server evicted the peer — tear down stale state and rejoin.
+              // Server evicted the peer (long network drop > pingTimeout).
+              // Tear down all stale mediasoup state and do a full rejoin.
+              // We keep the localStream tracks alive so the user does not need
+              // to re-grant camera/mic permission — we just re-publish them.
               hasJoinedRef.current = false
+
+              // Null out producer refs BEFORE closing transports so any
+              // in-flight produce callbacks don't try to use a closed transport.
+              const prevAudioProducer = audioProducerRef.current
+              const prevVideoProducer = videoProducerRef.current
+              audioProducerRef.current = null
+              videoProducerRef.current = null
+              screenVideoProducerRef.current = null
+              screenAudioProducerRef.current = null
+
+              prevAudioProducer?.close()
+              prevVideoProducer?.close()
+
               sendTransportRef.current?.close()
               recvTransportRef.current?.close()
               sendTransportRef.current = null
               recvTransportRef.current = null
               consumersRef.current.clear()
+
               // Clear stale slide state — the fresh joinRoom response will
               // restore it if a presentation is still active.
               dispatch({ type: "SET_SLIDE", slide: null })
-              doJoinSequence()
+
+              // Re-run the join sequence. After setupTransports resolves the
+              // new send transport is ready and we can re-publish the tracks that
+              // the user had active before the drop.
+              const hadMic = hasMicRef.current
+              const wasUnmuted = !isMicMutedRef.current
+              const hadCam = hasCamRef.current
+              const wasCamOn = !isCamOffRef.current
+
+              await doJoinSequence()
+
+              // Re-publish active tracks on the NEW send transport.
+              const newSendTransport = sendTransportRef.current
+              if (!newSendTransport) return
+
+              if (hadMic) {
+                const audioTrack = localStreamRef.current?.getAudioTracks()[0]
+                if (audioTrack) {
+                  // Ensure track is enabled regardless of previous mute state —
+                  // we'll pause the producer below if the user was muted.
+                  audioTrack.enabled = true
+                  const newAudioProducer = await (newSendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({
+                    track: audioTrack,
+                    codecOptions: { opusFec: true, opusDtx: true },
+                  })
+                  audioProducerRef.current = newAudioProducer
+                  if (!wasUnmuted) {
+                    // Re-apply the muted state the user had before the drop.
+                    audioTrack.enabled = false
+                    newAudioProducer.pause()
+                    socket.emit("pauseProducer", {
+                      roomId,
+                      peerId: peerId.current,
+                      producerId: newAudioProducer.id,
+                      paused: true,
+                    })
+                  }
+                }
+              }
+
+              if (hadCam) {
+                const videoTrack = localStreamRef.current?.getVideoTracks()[0]
+                if (videoTrack) {
+                  videoTrack.enabled = true
+                  const newVideoProducer = await (newSendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({
+                    track: videoTrack,
+                    ...CAMERA_PRODUCE_OPTIONS,
+                  })
+                  videoProducerRef.current = newVideoProducer
+                  if (!wasCamOn) {
+                    videoTrack.enabled = false
+                    newVideoProducer.pause()
+                  }
+                }
+              }
             }
           },
         )
@@ -951,7 +1059,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         const track = micStream.getAudioTracks()[0]
         stream.addTrack(track)
         if (sendTransport) {
-          const producer = await (sendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({ track })
+          // Negotiate FEC + DTX with the router. FEC lets the receiver
+          // reconstruct a lost packet from redundancy in the next packet —
+          // critical on inter-city paths with 2–5 % loss. DTX cuts bitrate
+          // during silence, reducing congestion-driven loss overall.
+          const producer = await (sendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({
+            track,
+            codecOptions: { opusFec: true, opusDtx: true },
+          })
           audioProducerRef.current = producer
         }
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
@@ -1168,6 +1283,79 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           appData: { source: "screen" },
         })
         screenAudioProducerRef.current = producer
+
+        // When the user switches output device mid-stream (e.g. plugs in
+        // headphones while sharing), the browser may silently swap the capture
+        // source. In Chrome the old audio track fires "ended"; in some versions
+        // it simply goes silent. We listen for both signals and call
+        // replaceScreenAudio() which hot-swaps only the audio track on the
+        // existing producer — the video producer and all remote consumers are
+        // untouched, so the stream keeps flowing without any gap.
+        const replaceScreenAudio = async () => {
+          const currentProducer = screenAudioProducerRef.current
+          if (!currentProducer || currentProducer.closed) return
+          // Screen share must still be active.
+          if (!screenVideoProducerRef.current) return
+
+          try {
+            const freshStream = await navigator.mediaDevices.getDisplayMedia({
+              audio: true,
+              video: false,
+            })
+            const freshAudio = freshStream.getAudioTracks()[0]
+            if (!freshAudio) { freshStream.getTracks().forEach((t) => t.stop()); return }
+
+            await currentProducer.replaceTrack({ track: freshAudio })
+
+            // Update our stream ref so the old track is properly stopped.
+            const prevTrack = screenStreamRef.current?.getAudioTracks()[0]
+            if (prevTrack && prevTrack !== freshAudio) {
+              prevTrack.onended = null
+              prevTrack.stop()
+              screenStreamRef.current?.removeTrack(prevTrack)
+            }
+            screenStreamRef.current?.addTrack(freshAudio)
+
+            // Watch the new track too.
+            freshAudio.onended = replaceScreenAudio
+          } catch {
+            // User cancelled or permission denied — the existing stream continues.
+          }
+        }
+
+        audioTrack.onended = replaceScreenAudio
+
+        // Also catch the case where the browser doesn't fire "ended" but the
+        // track goes silent because the capture device changed. The
+        // "devicechange" event fires whenever an audio/video device is added or
+        // removed — use it as a secondary trigger.
+        const onDeviceChange = async () => {
+          const currentAudio = screenStreamRef.current?.getAudioTracks()[0]
+          // Only act if we still have an active screen share.
+          if (!screenAudioProducerRef.current || screenAudioProducerRef.current.closed) {
+            navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
+            return
+          }
+          if (!currentAudio || currentAudio.readyState === "ended") {
+            navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
+            await replaceScreenAudio()
+          }
+        }
+        navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
+
+        // Clean up the devicechange listener when the screen share stops.
+        const origStop = stopScreenShare
+        // We attach a one-time cleanup to the video track's onended instead of
+        // wrapping stopScreenShare (which would create a circular dep). The
+        // video track always ends when sharing stops.
+        const prevVideoOnEnded = videoTrack?.onended ?? null
+        if (videoTrack) {
+          videoTrack.onended = () => {
+            navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
+            if (typeof prevVideoOnEnded === "function") prevVideoOnEnded.call(videoTrack)
+            else origStop()
+          }
+        }
       }
 
       dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
