@@ -752,7 +752,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         socket.emit(
           "rejoinProbe",
           { roomId, peerId: peerId.current },
-          (error: string | null) => {
+          async (error: string | null) => {
             if (!error) {
               restartIceForTransport(sendTransportRef.current)
               restartIceForTransport(recvTransportRef.current)
