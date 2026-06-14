@@ -681,7 +681,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       // built-in retry logic — we do not want to flip the UI to "error" just
       // because the network hiccupped for a moment.
       if (!hasJoinedRef.current) {
-        dispatch({ type: "ERROR", error: `Не удалось подключ��ться к серверу: ${e.message}` })
+        dispatch({ type: "ERROR", error: `Не удалось подключиться к серверу: ${e.message}` })
       }
     })
 
