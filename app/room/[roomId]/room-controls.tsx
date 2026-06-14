@@ -3,6 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff, FileText,
+  ChevronUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,6 +31,8 @@ interface RoomControlsProps {
   screenQuality: ScreenQuality
   micDevices: MediaDeviceInfo[]
   selectedMicLabel: string | null
+  collapsed: boolean
+  onToggleCollapsed: () => void
   onToggleMic: () => void
   onToggleCam: () => void
   onToggleScreenShare: () => void
@@ -48,6 +51,8 @@ export function RoomControls({
   screenQuality,
   micDevices,
   selectedMicLabel,
+  collapsed,
+  onToggleCollapsed,
   onToggleMic,
   onToggleCam,
   onToggleScreenShare,
@@ -58,6 +63,31 @@ export function RoomControls({
   onLeave,
 }: RoomControlsProps) {
   return (
+    <div
+      className={cn(
+        "relative transition-transform duration-300 ease-in-out",
+        collapsed && "translate-y-full",
+      )}
+    >
+      {/* Toggle handle — always visible above the footer */}
+      <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+        <button
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Показать панель управления" : "Скрыть панель управления"}
+          className={cn(
+            "flex h-7 w-14 items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
+            collapsed && "-top-7 translate-y-0",
+          )}
+        >
+          <ChevronUp
+            className={cn(
+              "size-4 text-muted-foreground transition-transform duration-300",
+              collapsed && "rotate-180",
+            )}
+          />
+        </button>
+      </div>
+
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device picker */}
       <div className="flex items-center">
@@ -186,5 +216,6 @@ export function RoomControls({
         <PhoneOff className="size-5" />
       </Button>
     </footer>
+    </div>
   )
 }

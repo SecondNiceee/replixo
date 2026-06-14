@@ -46,6 +46,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
   const { devices: micDevices } = useAudioDevices()
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
+  const [controlsCollapsed, setControlsCollapsed] = useState(false)
 
   // Presentation
   const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -124,7 +125,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* Offscreen canvas for presentation capture */}
       <canvas
         ref={presentationCanvasRef}
@@ -182,6 +183,9 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         onStopPresentation={handleStopPresentation}
       />
 
+      {/* Overflow wrapper: clips the footer when it slides down, and provides
+          the anchor point for the toggle handle that peeks above it */}
+      <div className="relative shrink-0 overflow-visible">
       <RoomControls
         isMicMuted={isMicMuted}
         isCamOff={isCamOff}
@@ -190,6 +194,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         screenQuality={screenQuality}
         micDevices={micDevices}
         selectedMicLabel={selectedMicLabel}
+        collapsed={controlsCollapsed}
+        onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
         onToggleScreenShare={toggleScreenShare}
@@ -199,6 +205,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         onPresentationAction={handlePresentationAction}
         onLeave={handleLeave}
       />
+      </div>
     </div>
   )
 }

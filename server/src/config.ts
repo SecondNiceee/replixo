@@ -72,6 +72,19 @@ export const mediaCodecs = [
     mimeType: 'audio/opus',
     clockRate: 48000,
     channels: 2,
+    // FEC (In-Band Forward Error Correction): Opus embeds a lower-quality copy
+    // of the previous packet inside each packet. If one packet is lost in
+    // transit (common on inter-city paths with 2-5 % packet loss), the receiver
+    // reconstructs it from the redundant data in the NEXT packet — no
+    // retransmission needed, no audible gap. DTX silences the encoder when there
+    // is no speech, cutting uplink bitrate by ~70 % during pauses and reducing
+    // the chance of congestion-driven loss.
+    parameters: {
+      'useinbandfec': 1,
+      'usedtx': 1,
+      'maxplaybackrate': 48000,
+      'maxaveragebitrate': 64000,
+    },
   },
   {
     kind: 'video' as const,
