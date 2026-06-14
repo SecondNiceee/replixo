@@ -63,21 +63,14 @@ export function RoomControls({
   onLeave,
 }: RoomControlsProps) {
   return (
-    <div
-      className={cn(
-        "relative transition-transform duration-300 ease-in-out",
-        collapsed && "translate-y-full",
-      )}
-    >
-      {/* Toggle handle — always visible above the footer */}
-      <div className="absolute -top-8 left-1/2 -translate-x-1/2">
+    <div className="relative">
+      {/* Toggle handle — always visible above the footer, kept outside the
+          collapsing area so it stays on screen when the panel is hidden */}
+      <div className="absolute -top-7 left-1/2 -translate-x-1/2">
         <button
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Показать панель управления" : "Скрыть панель управления"}
-          className={cn(
-            "flex h-7 w-14 items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
-            collapsed && "-top-7 translate-y-0",
-          )}
+          className="flex h-7 w-14 items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
         >
           <ChevronUp
             className={cn(
@@ -88,6 +81,15 @@ export function RoomControls({
         </button>
       </div>
 
+      {/* Collapsing area: animates its height to 0 via the grid-rows 1fr/0fr
+          trick, so the main content above expands to fill the freed space */}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-300 ease-in-out",
+          collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]",
+        )}
+      >
+        <div className="overflow-hidden">
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device picker */}
       <div className="flex items-center">
@@ -216,6 +218,8 @@ export function RoomControls({
         <PhoneOff className="size-5" />
       </Button>
     </footer>
+        </div>
+      </div>
     </div>
   )
 }
