@@ -208,7 +208,7 @@ export function RoomVideoGrid({
 
   // Default camera grid
   return (
-    <main className={cn("grid flex-1 gap-2 p-3", gridClass)}>
+    <main className={cn("grid min-h-0 flex-1 auto-rows-fr gap-2 p-3", gridClass)}>
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
