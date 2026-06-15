@@ -117,7 +117,7 @@ export function RoomChat({ open, onClose, messages, onSend }: RoomChatProps) {
                     <span
                       className={cn(
                         "text-xs font-medium",
-                        m.self ? "text-muted-foreground" : colorForПeer(m.peerId),
+                        m.self ? "text-muted-foreground" : colorForPeer(m.peerId),
                       )}
                     >
                       {m.self ? "Вы" : m.displayName}
