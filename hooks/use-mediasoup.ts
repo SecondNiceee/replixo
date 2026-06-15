@@ -741,6 +741,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
           }>
           currentSlide?: SlideState | null
+          messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number }>
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -754,6 +755,26 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           // If a presentation is already in progress, sync the slide state.
           if (data.currentSlide) {
             dispatch({ type: "SET_SLIDE", slide: data.currentSlide })
+          }
+
+          // Load persisted chat history (oldest first). ADD_MESSAGE dedupes by
+          // id, so re-running this on a full rejoin is harmless. "self" is
+          // derived from our persistent peerId.
+          if (Array.isArray(data.messages)) {
+            for (const m of data.messages) {
+              if (!m || typeof m.id !== "string" || typeof m.text !== "string") continue
+              dispatch({
+                type: "ADD_MESSAGE",
+                message: {
+                  id: m.id,
+                  peerId: m.peerId,
+                  displayName: m.displayName,
+                  text: m.text,
+                  timestamp: m.timestamp,
+                  self: m.peerId === peerId.current,
+                },
+              })
+            }
           }
 
           for (const p of data.existingPeers) {
@@ -1531,7 +1552,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const socket = socketRef.current
     if (!socket) return
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    socket.emit("chatMessage", { roomId, peerId: peerId.current, text: trimmed })
+    // Send our generated id so the server persists + rebroadcasts with the same
+    // id — that keeps our optimistic copy and the stored record in sync and
+    // prevents duplicates when chat history is reloaded later.
+    socket.emit("chatMessage", { roomId, peerId: peerId.current, text: trimmed, id })
     dispatch({
       type: "ADD_MESSAGE",
       message: {

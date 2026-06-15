@@ -148,10 +148,13 @@ export interface ProducerClosedPayload {
 // ---------------------------------------------------------------------------
 
 // Client → server: a peer sends a chat message.
+// `id` is an optional client-generated id reused for persistence + broadcast so
+// the sender's optimistic copy matches the stored record (prevents duplicates).
 export interface ChatMessagePayload {
   roomId: string
   peerId: string
   text: string
+  id?: string
 }
 
 // Server → client (broadcast): a chat message with server-assigned id/timestamp.
