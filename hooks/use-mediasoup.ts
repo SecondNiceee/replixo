@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useReducer, useState } from "react"
 import { io, Socket } from "socket.io-client"
-import { playJoinSound, playLeaveSound, playScreenShareSound } from "@/lib/sounds"
+import { playJoinSound, playLeaveSound, playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
 // mediasoup-client is a CJS bundle with internal circular dependencies that
 // cause a TDZ crash ("Cannot access 'X' before initialization") when Turbopack
 // tries to statically analyse it — even via `import type`.
@@ -516,6 +516,13 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             stream,
           })
 
+          // A remote peer started a demonstration (screen share or slides).
+          // Gate on the video track so we play exactly one sound (screen share
+          // can also carry an audio track, which we ignore here).
+          if (kind === "video" && (source === "screen" || source === "presentation")) {
+            playScreenShareSound()
+          }
+
           // Resume consumer so it actually flows
           socket.emit(
             "resumeConsumer",
@@ -934,14 +941,21 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         rawSource === "screen" ? "screen"
         : rawSource === "presentation" ? "presentation"
         : "media"
+      const closedKind = target.kind as "audio" | "video"
       target.close()
       consumersRef.current.delete(target.id)
       dispatch({
         type: "PEER_PRODUCER_CLOSED",
         peerId: remotePeerId,
         source,
-        kind: target.kind as "audio" | "video",
+        kind: closedKind,
       })
+
+      // A remote peer stopped a demonstration. Gate on the video track so we
+      // play exactly one sound (a screen share's audio track also closes).
+      if (closedKind === "video" && (source === "screen" || source === "presentation")) {
+        playScreenShareStopSound()
+      }
     })
 
     // -----------------------------------------------------------------------
@@ -1008,12 +1022,13 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // -------------------------------------------------------------------------
   // Stable ref so leave() can call stopPresentation() without a dep-cycle
   // (leave is declared before stopPresentation in the file).
-  const stopPresentationRef = useRef<(() => void) | null>(null)
+  const stopPresentationRef = useRef<((options?: { silent?: boolean }) => void) | null>(null)
 
   const leave = useCallback(() => {
     // Stop any active presentation before leaving so canvas capture is released
     // and presentationEnded is sent to the server before the socket closes.
-    stopPresentationRef.current?.()
+    // Silent: we're leaving the room, not ending a demonstration mid-call.
+    stopPresentationRef.current?.({ silent: true })
 
     const socket = socketRef.current
     if (socket) {
@@ -1181,8 +1196,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // -------------------------------------------------------------------------
   // Screen sharing
   // -------------------------------------------------------------------------
-  const stopScreenShare = useCallback(() => {
+  const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
     const socket = socketRef.current
+    // Whether a share was actually running, so we only play the "stopped" sound
+    // for a genuine stop (not e.g. a no-op call or a quality-change restart).
+    const wasSharing = !!screenVideoProducerRef.current
 
     for (const producer of [screenVideoProducerRef.current, screenAudioProducerRef.current]) {
       if (!producer) continue
@@ -1200,9 +1218,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     screenStreamRef.current = null
 
     dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
+    // Snappy descending arpeggio confirming screen sharing has stopped.
+    if (wasSharing && !options?.silent) playScreenShareStopSound()
   }, [roomId])
 
-  const startScreenShare = useCallback(async () => {
+  const startScreenShare = useCallback(async (options?: { silent?: boolean }) => {
     const sendTransport = sendTransportRef.current
     if (!sendTransport) return
 
@@ -1364,8 +1384,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
 
       dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
-      // Bright little arpeggio confirming screen sharing has started.
-      playScreenShareSound()
+      // Snappy ascending arpeggio confirming screen sharing has started.
+      if (!options?.silent) playScreenShareSound()
     } catch {
       // User cancelled the picker or permission denied — silently ignore.
     }
@@ -1386,8 +1406,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       // If a screen share is already running, restart it so the new preset
       // (resolution + bitrate) takes effect immediately.
       if (screenVideoProducerRef.current) {
-        stopScreenShare()
-        await startScreenShare()
+        // Silent restart — it's the same share, not a stop/start the user did.
+        stopScreenShare({ silent: true })
+        await startScreenShare({ silent: true })
       }
     },
     [startScreenShare, stopScreenShare],
@@ -1403,13 +1424,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // fullscreen overlay. Because only the owner controls the canvas (which
   // slide/scroll position), navigation is implicitly owner-only.
   // -------------------------------------------------------------------------
-  const stopPresentation = useCallback(() => {
+  const stopPresentation = useCallback((options?: { silent?: boolean }) => {
     const socket = socketRef.current
     const producer = presentationVideoProducerRef.current
 
     // Guard: nothing to tear down if no presentation is active.
     // Use isPresentingRef (not state) to avoid stale-closure issues in leave().
     if (!isPresentingRef.current && !producer && !presentationStreamRef.current) return
+    const wasPresenting = isPresentingRef.current || !!producer
     isPresentingRef.current = false
 
     if (producer) {
@@ -1432,6 +1454,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
     presentationStreamRef.current = null
     dispatch({ type: "STOP_PRESENTING" })
+    // Snappy descending arpeggio confirming the demonstration has stopped.
+    if (wasPresenting && !options?.silent) playScreenShareStopSound()
   }, [roomId])
 
   // Wire the ref so leave() can call stopPresentation() without a dep-cycle.
@@ -1484,6 +1508,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     videoTrack.onended = () => stopPresentation()
 
     dispatch({ type: "SET_PRESENTING", isPresenting: true })
+    // Snappy ascending arpeggio confirming the demonstration has started.
+    playScreenShareSound()
   }, [stopPresentation])
 
   // -------------------------------------------------------------------------
