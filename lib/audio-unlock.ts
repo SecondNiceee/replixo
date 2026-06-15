@@ -3,13 +3,17 @@
 // ---------------------------------------------------------------------------
 // Centralised remote-audio playback manager.
 //
-// On iOS Safari, <audio srcObject=...> is unreliable — the element is often
-// silenced even after the user has tapped. The workaround is to route every
-// remote stream through an AudioContext:
-//   createMediaStreamSource(stream) → destination → context plays out loud
-// The AudioContext must be created (or resumed) inside a user gesture.
-//
-// On desktop browsers we keep the plain <audio>.play() path as a fallback.
+// Every remote stream is routed through a shared AudioContext on ALL platforms:
+//   createMediaStreamSource(stream) → gain → destination
+// This serves two purposes:
+//   1. Reliable playback on iOS Safari, where <audio srcObject=...> is often
+//      silenced even after a tap.
+//   2. Reliable per-user volume control everywhere — setting <audio>.volume on
+//      a remote WebRTC MediaStream is ignored by several desktop browsers, so
+//      the gain node is the authoritative volume control.
+// The AudioContext must be created/resumed inside a user gesture. The <audio>
+// element stays attached but muted (it satisfies Chrome's remote-MediaStream
+// quirk). If no AudioContext is available we fall back to plain element play().
 // ---------------------------------------------------------------------------
 
 const audioElements = new Set<HTMLAudioElement>()
@@ -44,51 +48,33 @@ function getAudioContext(): AudioContext | null {
   return sharedAudioContext
 }
 
-function resumeContext() {
-  const ctx = getAudioContext()
-  if (ctx && ctx.state === "suspended") {
-    ctx.resume().catch(() => {})
-  }
-}
-
-// ---------------------------------------------------------------------------
-// iOS detection — use AudioContext path on mobile Safari
-// ---------------------------------------------------------------------------
-function isIOS(): boolean {
-  if (typeof navigator === "undefined") return false
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-}
-
 function setBlocked(next: boolean) {
   if (next === blocked) return
   blocked = next
   blockedListeners.forEach((cb) => cb(blocked))
 }
 
-// Try to play every registered audio element. Resolves the blocked state
-// based on whether any element was rejected by the autoplay policy.
+// Resume the shared AudioContext (all remote audio is routed through it) and
+// attempt to play every registered audio element. Because audio now plays via
+// the AudioContext gain graph, the blocked state is derived from whether the
+// context is allowed to run rather than from individual element rejections.
 export function playAll() {
-  // Resume the AudioContext first (unlocks iOS audio in one shot).
-  resumeContext()
-
-  let anyBlocked = false
-  const attempts: Promise<void>[] = []
-
+  // Kick the (muted) elements too — harmless and keeps srcObject "live".
   audioElements.forEach((el) => {
     if (!el.srcObject) return
     const p = el.play()
-    if (p && typeof p.then === "function") {
-      attempts.push(
-        p
-          .then(() => {})
-          .catch(() => {
-            anyBlocked = true
-          }),
-      )
-    }
+    if (p && typeof p.then === "function") p.catch(() => {})
   })
 
-  Promise.allSettled(attempts).then(() => setBlocked(anyBlocked))
+  const ctx = getAudioContext()
+  if (!ctx) {
+    setBlocked(false)
+    return
+  }
+  ctx
+    .resume()
+    .then(() => setBlocked(ctx.state !== "running"))
+    .catch(() => setBlocked(true))
 }
 
 function handleGesture() {
@@ -106,9 +92,10 @@ function bindGestureListeners() {
 // ---------------------------------------------------------------------------
 // iOS AudioContext routing for a MediaStream
 // ---------------------------------------------------------------------------
-function connectStreamToContext(stream: MediaStream) {
+function connectStreamToContext(stream: MediaStream): boolean {
   const ctx = getAudioContext()
-  if (!ctx || streamNodes.has(stream)) return
+  if (!ctx) return false
+  if (streamNodes.has(stream)) return true
   try {
     const source = ctx.createMediaStreamSource(stream)
     const gain = ctx.createGain()
@@ -118,8 +105,10 @@ function connectStreamToContext(stream: MediaStream) {
     source.connect(gain)
     gain.connect(ctx.destination)
     streamNodes.set(stream, { source, gain })
+    return true
   } catch {
     // MediaStream may not have audio tracks yet — ignore
+    return false
   }
 }
 
@@ -153,20 +142,36 @@ export function setStreamVolume(stream: MediaStream | undefined | null, volume: 
   return false
 }
 
-// Register an audio element (and optionally a raw MediaStream for iOS routing).
+// Register an audio element and route its stream through the AudioContext.
+//
+// Routing every remote stream through an AudioContext gain node (on ALL
+// platforms, not just iOS) is the only reliable way to control per-user
+// volume — setting <audio>.volume on a remote WebRTC MediaStream is ignored by
+// several browsers. When routing succeeds the element is kept muted (it stays
+// attached purely to satisfy Chrome's remote-MediaStream quirk and to avoid
+// double playback). If the AudioContext is unavailable we fall back to plain
+// element playback so audio still works.
 export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream) {
   audioElements.add(el)
   bindGestureListeners()
 
-  if (isIOS() && stream) {
-    // On iOS: route stream through AudioContext so it plays reliably.
-    // We still set srcObject so the element exists, but mute it to avoid
-    // double playback — the AudioContext graph is the real audio path.
+  const routed = stream ? connectStreamToContext(stream) : false
+
+  if (routed) {
+    // AudioContext gain graph is the real audio path — mute the element.
     el.muted = true
-    connectStreamToContext(stream)
-    resumeContext()
+    const ctx = getAudioContext()
+    if (ctx) {
+      ctx
+        .resume()
+        .then(() => setBlocked(ctx.state !== "running"))
+        .catch(() => setBlocked(true))
+    }
+    // Muted play keeps the srcObject pipeline alive (harmless if it fails).
+    const p = el.play()
+    if (p && typeof p.then === "function") p.catch(() => {})
   } else {
-    // Desktop / non-iOS path: plain element play().
+    // Fallback: no AudioContext — play through the element directly.
     el.muted = false
     const p = el.play()
     if (p && typeof p.then === "function") {

@@ -1,5 +1,7 @@
 "use client"
 
+import { useState } from "react"
+import { ChevronRight } from "lucide-react"
 import { VideoTile } from "@/components/video-tile"
 import { PresentationViewer } from "@/components/presentation-viewer"
 import { cn } from "@/lib/utils"
@@ -49,6 +51,8 @@ export function RoomVideoGrid({
   onPresentationLoaded,
   onStopPresentation,
 }: RoomVideoGridProps) {
+  const [participantsHidden, setParticipantsHidden] = useState(false)
+
   const allPeers = [...peers.values()]
   const presentingPeer = allPeers.find((p) => p.presentationStream)
   const remoteScreens = allPeers.filter((p) => p.screenStream)
@@ -91,11 +95,10 @@ export function RoomVideoGrid({
     </div>
   )
 
-  // Compact floating thumbnails used during presentation/PDF so the document
-  // can take almost the full screen. The tiles overlay the bottom of the
-  // viewer instead of consuming a side column.
-  const floatingTiles = (
-    <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center gap-2 overflow-x-auto px-2">
+  // Participants shown as a vertical column on the right during a presentation.
+  // Collapsible via a chevron handle (same pattern as the bottom controls bar).
+  const participantsColumn = (
+    <div className="flex h-full w-32 flex-col gap-2 overflow-y-auto overflow-x-hidden pr-0.5 sm:w-40 lg:w-48">
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
@@ -103,7 +106,7 @@ export function RoomVideoGrid({
         isMuted={isMicMuted}
         isCamOff={isCamOff}
         isLocal
-        className="pointer-events-auto aspect-video h-20 w-auto shrink-0 shadow-lg sm:h-24"
+        className="aspect-video w-full shrink-0 shadow-lg"
       />
       {allPeers.map((peer) => (
         <VideoTile
@@ -111,17 +114,17 @@ export function RoomVideoGrid({
           stream={peer.videoStream}
           audioStream={peer.audioStream}
           displayName={peer.displayName}
-          className="pointer-events-auto aspect-video h-20 w-auto shrink-0 shadow-lg sm:h-24"
+          className="aspect-video w-full shrink-0 shadow-lg"
         />
       ))}
     </div>
   )
 
-  // Presentation layout — document fills almost the entire screen, with
-  // participants shown as small floating thumbnails over the bottom.
+  // Presentation layout — document fills the screen, with participants shown as
+  // a collapsible vertical column on the right.
   if (hasPresentation) {
     return (
-      <main className="relative flex flex-1 flex-col overflow-hidden p-1 sm:p-2">
+      <main className="relative flex flex-1 gap-1 overflow-hidden p-1 sm:gap-2 sm:p-2">
         <div className="min-h-0 flex-1">
           <PresentationViewer
             isPresenter={isPresenting}
@@ -134,7 +137,33 @@ export function RoomVideoGrid({
             file={presentationFile}
           />
         </div>
-        {floatingTiles}
+
+        {/* Right participants panel + collapse handle */}
+        <div className="relative flex shrink-0">
+          {/* Toggle handle — always visible on the left edge of the panel */}
+          <button
+            onClick={() => setParticipantsHidden((v) => !v)}
+            aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
+            className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
+          >
+            <ChevronRight
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-300",
+                participantsHidden && "rotate-180",
+              )}
+            />
+          </button>
+
+          {/* Collapsing area: animates width to 0 via the grid-cols 1fr/0fr trick */}
+          <div
+            className={cn(
+              "grid h-full transition-[grid-template-columns] duration-300 ease-in-out",
+              participantsHidden ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
+            )}
+          >
+            <div className="h-full overflow-hidden">{participantsColumn}</div>
+          </div>
+        </div>
       </main>
     )
   }

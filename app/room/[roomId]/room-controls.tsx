@@ -75,7 +75,7 @@ export function RoomControls({
           <ChevronUp
             className={cn(
               "size-4 text-muted-foreground transition-transform duration-300",
-              collapsed && "rotate-180",
+              !collapsed && "rotate-180",
             )}
           />
         </button>
