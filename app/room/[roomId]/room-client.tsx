@@ -10,6 +10,7 @@ import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
+import { RoomChat } from "./room-chat"
 import { PresenterCanvas } from "@/components/presentation-viewer"
 
 interface RoomClientProps {
@@ -42,11 +43,35 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     stopPresentation,
     notifySlideChange,
     currentSlide,
+    messages,
+    sendChatMessage,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
+
+  // Chat panel open state + unread counter. We track how many messages had been
+  // seen the last time the panel was open; anything beyond that is "unread".
+  const [chatOpen, setChatOpen] = useState(false)
+  const [seenCount, setSeenCount] = useState(0)
+  const unreadCount = chatOpen ? 0 : Math.max(0, messages.length - seenCount)
+
+  // While the chat is open, keep marking everything as seen so the badge stays
+  // cleared as new messages stream in.
+  useEffect(() => {
+    if (chatOpen) setSeenCount(messages.length)
+  }, [chatOpen, messages.length])
+
+  const toggleChat = useCallback(() => {
+    setChatOpen((open) => {
+      const next = !open
+      if (next) setSeenCount(messages.length)
+      return next
+    })
+  }, [messages.length])
+
+  const closeChat = useCallback(() => setChatOpen(false), [])
 
   // Presentation
   const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -125,7 +150,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="relative flex h-screen flex-col overflow-hidden bg-background">
       {/* Offscreen canvas for presentation capture */}
       <canvas
         ref={presentationCanvasRef}
@@ -195,6 +220,9 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         micDevices={micDevices}
         selectedMicLabel={selectedMicLabel}
         collapsed={controlsCollapsed}
+        chatOpen={chatOpen}
+        unreadCount={unreadCount}
+        onToggleChat={toggleChat}
         onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
@@ -206,6 +234,13 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         onLeave={handleLeave}
       />
       </div>
+
+      <RoomChat
+        open={chatOpen}
+        onClose={closeChat}
+        messages={messages}
+        onSend={sendChatMessage}
+      />
     </div>
   )
 }
