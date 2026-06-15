@@ -48,6 +48,13 @@ function getAudioContext(): AudioContext | null {
   return sharedAudioContext
 }
 
+// Public accessor so other modules (e.g. UI notification sounds) can reuse the
+// same AudioContext that was unlocked on the first user gesture, instead of
+// creating their own that browsers would keep suspended.
+export function getSharedAudioContext(): AudioContext | null {
+  return getAudioContext()
+}
+
 function setBlocked(next: boolean) {
   if (next === blocked) return
   blocked = next
