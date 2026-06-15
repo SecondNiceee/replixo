@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io'
 import { CLIENT_ORIGIN } from './config'
 import { Room } from './Room'
 import { Peer } from './Peer'
+import { saveMessage, getRoomMessages, deleteRoomMessages } from './db'
 import type {
   JoinRoomPayload,
   CreateTransportPayload,
@@ -63,6 +64,9 @@ function cleanupRoomIfEmpty(roomId: string): void {
     room.close()
     rooms.delete(roomId)
     console.log(`[room] Removed empty room ${roomId}`)
+    // Комната уничтожена — стираем всю историю её чата. Fire-and-forget:
+    // удаление не должно блокировать управляющий поток сокета.
+    void deleteRoomMessages(roomId)
   }
 }
 
@@ -166,10 +170,15 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           // Notify other peers that someone joined, even before they produce media
           socket.to(roomId).emit('peerJoined', { peerId, displayName })
 
+          // Load persisted chat history so the joining peer (or someone who just
+          // reloaded the page) sees prior messages. Empty when persistence is off.
+          const messages = await getRoomMessages(roomId)
+
           ack(callback, {
             rtpCapabilities: room.getRtpCapabilities(),
             existingPeers,
             currentSlide: room.currentSlide ?? null,
+            messages,
           })
         } catch (e) {
           err(callback as Callback<never>, (e as Error).message)
@@ -474,7 +483,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         return (payload: unknown) => {
           // --- Input validation ---
           if (!payload || typeof payload !== 'object') return
-          const { roomId: rid, peerId: pid, text } = payload as ChatMessagePayload
+          const { roomId: rid, peerId: pid, text, id: clientId } = payload as ChatMessagePayload
           if (typeof rid !== 'string' || !rid) return
           if (typeof pid !== 'string' || !pid) return
           if (typeof text !== 'string') return
@@ -497,12 +506,32 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           }
           if (++chatEventCount > CHAT_RATE_LIMIT) return
 
-          socket.to(rid).emit('chatMessage', {
-            id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+          // Reuse the sender's client-generated id when it looks valid so the
+          // optimistic copy and the persisted/broadcast record share one id.
+          // Falls back to a server id otherwise.
+          const id =
+            typeof clientId === 'string' && clientId.length > 0 && clientId.length <= 64
+              ? clientId
+              : `${now}-${Math.random().toString(36).slice(2, 8)}`
+
+          const message = {
+            id,
+            roomId: rid,
             peerId: pid,
             displayName: peer.displayName,
             text: trimmed,
             timestamp: now,
+          }
+
+          // Persist (no-op when DATABASE_URL is unset). Fire-and-forget.
+          void saveMessage(message)
+
+          socket.to(rid).emit('chatMessage', {
+            id: message.id,
+            peerId: message.peerId,
+            displayName: message.displayName,
+            text: message.text,
+            timestamp: message.timestamp,
           })
         }
       })(),

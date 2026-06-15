@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -73,4 +73,23 @@ export const friendship = pgTable(
     updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   },
   (t) => [unique().on(t.requesterId, t.addresseeId)],
+)
+
+// --- Room chat -------------------------------------------------------------
+// Эфемерный чат конференции. Сообщения пишутся mediasoup-сервером и
+// удаляются целиком, когда комната уничтожается (становится пустой).
+// peerId/displayName — это идентичность участника в рамках звонка, а не
+// обязательно зарегистрированный пользователь, поэтому FK на user здесь нет.
+
+export const message = pgTable(
+  'message',
+  {
+    id: text('id').primaryKey(),
+    roomId: text('roomId').notNull(),
+    peerId: text('peerId').notNull(),
+    displayName: text('displayName').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => [index('message_roomId_createdAt_idx').on(t.roomId, t.createdAt)],
 )
