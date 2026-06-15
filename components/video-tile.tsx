@@ -70,21 +70,26 @@ export function VideoTile({
     return unregister
   }, [audioStream, isLocal])
 
-  // Apply per-user local mute / volume to the remote audio element.
-  // On desktop this controls the <audio> element directly. On iOS the audio is
-  // routed through an AudioContext gain node (the element is force-muted), so
-  // we must also drive the gain node via setStreamVolume — otherwise the
-  // volume slider has no audible effect on mobile Safari.
+  // Apply per-user local mute / volume to the remote audio.
+  // Remote audio is routed through an AudioContext gain node on every platform
+  // (see audio-unlock), so the gain node is the authoritative volume control.
+  // setStreamVolume returns true when the stream is routed through the context;
+  // in that case the <audio> element must stay muted to avoid double playback.
+  // If routing is unavailable (no AudioContext) we fall back to controlling the
+  // element's own volume/muted directly.
   useEffect(() => {
     if (isLocal) return
     const effective = localMuted ? 0 : volume
+    const routed = setStreamVolume(audioStream, effective)
     const audio = audioRef.current
     if (audio) {
-      audio.volume = volume
-      audio.muted = localMuted
+      if (routed) {
+        audio.muted = true
+      } else {
+        audio.volume = volume
+        audio.muted = localMuted
+      }
     }
-    // Drive the AudioContext gain node (iOS path / no-op safe elsewhere).
-    setStreamVolume(audioStream, effective)
   }, [volume, localMuted, isLocal, audioStream])
 
   return (
