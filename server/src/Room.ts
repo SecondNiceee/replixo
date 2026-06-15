@@ -8,6 +8,8 @@ import type {
   ConsumedPayload,
   ExistingPeerPayload,
   SlideState,
+  WhiteboardStroke,
+  WhiteboardMode,
 } from './types'
 
 export class Room {
