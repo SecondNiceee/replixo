@@ -167,44 +167,6 @@ export interface ChatMessageBroadcastPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Whiteboard (collaborative drawing)
-// ---------------------------------------------------------------------------
-//
-// A shared canvas everyone can draw on. We sync the strokes (not a video
-// stream): each drawn segment is broadcast as normalized coordinates so it
-// scales to every participant's screen. The Room keeps the full stroke list in
-// memory so latecomers can replay it; it dies with the room (no persistence).
-
-export type WhiteboardMode = 'pen' | 'eraser'
-
-// A single freehand stroke. `points` is a flat list [x0,y0,x1,y1,...] of
-// normalized coordinates in the 0..1 range (relative to a fixed 16:9 surface).
-export interface WhiteboardStroke {
-  id: string
-  color: string
-  width: number
-  mode: WhiteboardMode
-  points: number[]
-}
-
-// Client → server: a batch of new points for one stroke (live drawing).
-export interface WhiteboardPointsPayload {
-  roomId: string
-  peerId: string
-  id: string
-  color: string
-  width: number
-  mode: WhiteboardMode
-  points: number[]
-}
-
-// Snapshot sent to a joining peer.
-export interface WhiteboardState {
-  active: boolean
-  strokes: WhiteboardStroke[]
-}
-
-// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
