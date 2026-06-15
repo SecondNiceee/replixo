@@ -14,6 +14,7 @@ import type {
   CloseProducerPayload,
   PauseProducerPayload,
   PresentationSlidePayload,
+  ChatMessagePayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -415,7 +416,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           if (++slideEventCount > SLIDE_RATE_LIMIT) return
 
           room.currentSlide = { peerId: pid, slide: slideIndex, total: totalPages }
-          // Use io.to() for reliability — socket.to() is a no-op if the socket
+          // Use io.to() for reliability �� socket.to() is a no-op if the socket
           // has already left the room (e.g. mid-disconnect race).
           io.to(rid).emit('presentationSlideChanged', { peerId: pid, slide: slideIndex, total: totalPages })
         }
@@ -449,6 +450,62 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         io.to(rid).emit('presentationEnded', { peerId: pid })
         console.log(`[presentation] Peer ${pid} ended presentation in room ${rid}`)
       },
+    )
+
+    // -----------------------------------------------------------------------
+    // chatMessage  (a peer sent a text message to the room)
+    //
+    // The client emits this whenever a participant sends a message. The server
+    // validates + authenticates the sender, rate-limits, assigns a canonical
+    // id/timestamp and broadcasts to every OTHER peer in the room. The sender
+    // adds its own message optimistically (mirrors the slide-sync pattern), so
+    // we use socket.to() — not io.to() — to avoid echoing it back.
+    // -----------------------------------------------------------------------
+    socket.on(
+      'chatMessage',
+      (() => {
+        // Sliding-window rate-limit: max 5 messages per 2 seconds per socket.
+        const CHAT_RATE_LIMIT = 5
+        const CHAT_RATE_WINDOW_MS = 2000
+        const MAX_TEXT_LENGTH = 2000
+        let chatEventCount = 0
+        let chatWindowStart = Date.now()
+
+        return (payload: unknown) => {
+          // --- Input validation ---
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, text } = payload as ChatMessagePayload
+          if (typeof rid !== 'string' || !rid) return
+          if (typeof pid !== 'string' || !pid) return
+          if (typeof text !== 'string') return
+
+          const trimmed = text.trim().slice(0, MAX_TEXT_LENGTH)
+          if (!trimmed) return
+
+          // --- Auth: sender must own this peerId in this room ---
+          const room = rooms.get(rid)
+          if (!room) return
+          const peer = room.getPeer(pid)
+          if (!peer) return
+          if (peerSockets.get(pid) !== socket.id) return
+
+          // --- Rate limit ---
+          const now = Date.now()
+          if (now - chatWindowStart > CHAT_RATE_WINDOW_MS) {
+            chatEventCount = 0
+            chatWindowStart = now
+          }
+          if (++chatEventCount > CHAT_RATE_LIMIT) return
+
+          socket.to(rid).emit('chatMessage', {
+            id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+            peerId: pid,
+            displayName: peer.displayName,
+            text: trimmed,
+            timestamp: now,
+          })
+        }
+      })(),
     )
 
     // -----------------------------------------------------------------------

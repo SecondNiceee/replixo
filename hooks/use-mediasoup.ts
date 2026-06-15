@@ -107,6 +107,16 @@ export interface SlideState {
   total: number
 }
 
+export interface ChatMessage {
+  id: string
+  peerId: string
+  displayName: string
+  text: string
+  timestamp: number
+  // true when this message was sent by the local user
+  self: boolean
+}
+
 // Camera simulcast layers. Publishing three spatial layers lets the SFU drop
 // to a lower layer per-receiver when their downlink is weak (e.g. a peer in
 // another city on a poor connection) instead of freezing/stalling the single
@@ -140,6 +150,8 @@ interface State {
   hasCam: boolean
   // active slide state from any presenter (null = no presentation)
   currentSlide: SlideState | null
+  // chat messages, oldest first
+  messages: ChatMessage[]
 }
 
 type Action =
@@ -157,6 +169,7 @@ type Action =
   | { type: "SET_PRESENTING"; isPresenting: boolean }
   | { type: "SET_SLIDE"; slide: SlideState | null }
   | { type: "STOP_PRESENTING" }
+  | { type: "ADD_MESSAGE"; message: ChatMessage }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -217,6 +230,14 @@ function reducer(state: State, action: Action): State {
       return { ...state, isPresenting: false, currentSlide: null }
     case "SET_SLIDE":
       return { ...state, currentSlide: action.slide }
+    case "ADD_MESSAGE": {
+      // Guard against duplicate ids (e.g. a re-emitted broadcast).
+      if (state.messages.some((m) => m.id === action.message.id)) return state
+      // Cap history so a long-running room can't grow memory unbounded.
+      const next = [...state.messages, action.message]
+      const messages = next.length > 500 ? next.slice(next.length - 500) : next
+      return { ...state, messages }
+    }
     default:
       return state
   }
@@ -258,6 +279,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     hasMic: false,
     hasCam: false,
     currentSlide: null,
+    messages: [],
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -982,6 +1004,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         dispatch({ type: "SET_SLIDE", slide: null })
       },
     )
+
+    // -----------------------------------------------------------------------
+    // Chat — a remote peer sent a message. The server only broadcasts to
+    // OTHER peers, so anything arriving here is from someone else (self:false).
+    // -----------------------------------------------------------------------
+    socket.on(
+      "chatMessage",
+      (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number }) => {
+        if (!msg || typeof msg.id !== "string" || typeof msg.text !== "string") return
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: {
+            id: msg.id,
+            peerId: msg.peerId,
+            displayName: msg.displayName,
+            text: msg.text,
+            timestamp: msg.timestamp,
+            self: false,
+          },
+        })
+      },
+    )
   }, [roomId, displayName, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
@@ -1479,6 +1523,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     dispatch({ type: "SET_SLIDE", slide: { peerId: peerId.current, slide: s, total: t } })
   }, [roomId])
 
+  // Send a chat message: emit to the server (which broadcasts to other peers)
+  // and add it locally right away so the sender sees it immediately.
+  const sendChatMessage = useCallback((text: string) => {
+    const trimmed = text.trim().slice(0, 2000)
+    if (!trimmed) return
+    const socket = socketRef.current
+    if (!socket) return
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    socket.emit("chatMessage", { roomId, peerId: peerId.current, text: trimmed })
+    dispatch({
+      type: "ADD_MESSAGE",
+      message: {
+        id,
+        peerId: peerId.current,
+        displayName,
+        text: trimmed,
+        timestamp: Date.now(),
+        self: true,
+      },
+    })
+  }, [roomId, displayName])
+
   // Publish a canvas-captured stream as the presentation video track.
   const startPresentation = useCallback(async (stream: MediaStream) => {
     const sendTransport = sendTransportRef.current
@@ -1547,5 +1613,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     startPresentation,
     stopPresentation,
     isPresenting: state.isPresenting,
+    // Chat
+    messages: state.messages,
+    sendChatMessage,
   }
 }
