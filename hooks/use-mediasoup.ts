@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useReducer, useState } from "react"
 import { io, Socket } from "socket.io-client"
+import { playJoinSound, playLeaveSound, playScreenShareSound } from "@/lib/sounds"
 // mediasoup-client is a CJS bundle with internal circular dependencies that
 // cause a TDZ crash ("Cannot access 'X' before initialization") when Turbopack
 // tries to statically analyse it — even via `import type`.
@@ -879,6 +880,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // A peer joined the room (may not have produced media yet)
     socket.on("peerJoined", ({ peerId: joinedPeerId, displayName: joinedName }) => {
       dispatch({ type: "PEER_JOINED", peerId: joinedPeerId, displayName: joinedName })
+      // Pleasant chime announcing someone entered the room.
+      playJoinSound()
     })
 
     // New remote producer appeared
@@ -906,6 +909,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     socket.on("peerLeft", ({ peerId: leftPeerId }) => {
       dispatch({ type: "PEER_LEFT", peerId: leftPeerId })
+      // Soft descending chime announcing someone left the room.
+      playLeaveSound()
     })
 
     // A remote producer was closed (e.g. peer stopped screen sharing)
@@ -1359,6 +1364,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
 
       dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
+      // Bright little arpeggio confirming screen sharing has started.
+      playScreenShareSound()
     } catch {
       // User cancelled the picker or permission denied — silently ignore.
     }
