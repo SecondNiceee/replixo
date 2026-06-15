@@ -144,6 +144,26 @@ export interface ProducerClosedPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
+// Client → server: a peer sends a chat message.
+export interface ChatMessagePayload {
+  roomId: string
+  peerId: string
+  text: string
+}
+
+// Server → client (broadcast): a chat message with server-assigned id/timestamp.
+export interface ChatMessageBroadcastPayload {
+  id: string
+  peerId: string
+  displayName: string
+  text: string
+  timestamp: number
+}
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
