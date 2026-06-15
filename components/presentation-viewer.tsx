@@ -150,6 +150,39 @@ export function PresentationViewer({
         ) : (
           <EmptySlate label="Ожидание презентации…" />
         )}
+
+        {/* Large side navigation arrows — presenter only. Overlaid on the slide
+            so it is obvious the deck can be paged forward/back. */}
+        {isPresenter && total > 0 && (
+          <>
+            <button
+              onClick={goPrev}
+              disabled={!canGoBack}
+              className={cn(
+                "absolute left-3 top-1/2 z-20 flex size-12 -translate-y-1/2 items-center justify-center rounded-full backdrop-blur-sm transition-all",
+                canGoBack
+                  ? "bg-black/50 text-white hover:scale-105 hover:bg-black/70"
+                  : "cursor-default bg-black/20 text-white/30",
+              )}
+              aria-label="Предыдущий слайд"
+            >
+              <ChevronLeft className="size-6" />
+            </button>
+            <button
+              onClick={goNext}
+              disabled={!canGoForward}
+              className={cn(
+                "absolute right-3 top-1/2 z-20 flex size-12 -translate-y-1/2 items-center justify-center rounded-full backdrop-blur-sm transition-all",
+                canGoForward
+                  ? "bg-black/50 text-white hover:scale-105 hover:bg-black/70"
+                  : "cursor-default bg-black/20 text-white/30",
+              )}
+              aria-label="Следующий слайд"
+            >
+              <ChevronRight className="size-6" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Controls bar */}
@@ -176,8 +209,8 @@ export function PresentationViewer({
               onClick={goPrev}
               disabled={!canGoBack}
               className={cn(
-                "flex size-8 items-center justify-center rounded-full transition-colors",
-                canGoBack ? "text-white hover:bg-white/15" : "cursor-default text-white/20",
+                "flex size-9 items-center justify-center rounded-full transition-colors",
+                canGoBack ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
               )}
               aria-label="Предыдущий слайд"
             >
@@ -194,10 +227,10 @@ export function PresentationViewer({
               onClick={goNext}
               disabled={!canGoForward}
               className={cn(
-                "flex size-8 items-center justify-center rounded-full transition-colors",
-                canGoForward ? "text-white hover:bg-white/15" : "cursor-default text-white/20",
+                "flex size-9 items-center justify-center rounded-full transition-colors",
+                canGoForward ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
               )}
-              aria-label="��ледующий слайд"
+              aria-label="Следующий слайд"
             >
               <ChevronRight className="size-5" />
             </button>
@@ -514,7 +547,7 @@ export function PresenterCanvas({ canvasRef, file, slideIndex, onLoaded }: Prese
         // Render only the first slide before reporting ready.
         const first = await renderOnePptxSlide(0, signal)
         if (signal.aborted) return
-        if (!first) throw new Error("Не удалось обработать первый слайд")
+        if (!first) throw new Error("Не удалос�� обработать первый слайд")
 
         setLoadingMsg(null)
         onLoadedRef.current(total)
