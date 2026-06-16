@@ -47,6 +47,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     currentSlide,
     messages,
     sendChatMessage,
+    readMarkers,
+    markChatRead,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -68,6 +70,22 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   useEffect(() => {
     if (chatOpen) setSeenCount(messages.length)
   }, [chatOpen, messages.length])
+
+  // Persist a read receipt to the server (and DB) whenever the chat panel is
+  // open and the tab is visible. We mark up to the newest message's timestamp,
+  // which broadcasts to peers so their messages flip to "read". Re-runs when new
+  // messages arrive while the panel is open, and when the tab becomes visible.
+  useEffect(() => {
+    if (!chatOpen || messages.length === 0) return
+    const markLatest = () => {
+      if (document.hidden) return
+      const last = messages[messages.length - 1]
+      if (last) markChatRead(last.timestamp)
+    }
+    markLatest()
+    document.addEventListener("visibilitychange", markLatest)
+    return () => document.removeEventListener("visibilitychange", markLatest)
+  }, [chatOpen, messages, markChatRead])
 
   // Play a gentle chime for incoming messages when the user can't see them —
   // i.e. the chat panel is closed OR the browser tab is in the background.
@@ -276,6 +294,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         messages={messages}
         onSend={sendChatMessage}
         unreadFromIndex={unreadFromIndex}
+        readMarkers={readMarkers}
+        peerIds={Array.from(peers.keys())}
       />
     </div>
   )
