@@ -155,6 +155,13 @@ interface State {
   // peerId -> timestamp (ms) of the latest message that peer has read.
   // Used to render "delivered/read" checkmarks on the local user's messages.
   readMarkers: Record<string, number>
+  // Shared whiteboard (tldraw). `whiteboardOpen` mirrors the room-wide flag so
+  // the board appears/disappears for everyone at once. `whiteboardSnapshot` is
+  // the latest full document snapshot used to seed the canvas when it mounts
+  // (initial join or a peer opening it mid-session). Live edits flow separately
+  // as incremental diffs through a ref-based subscription, not through state.
+  whiteboardOpen: boolean
+  whiteboardSnapshot: string | null
 }
 
 type Action =
@@ -174,6 +181,7 @@ type Action =
   | { type: "STOP_PRESENTING" }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "SET_READ_MARKER"; peerId: string; ts: number }
+  | { type: "SET_WHITEBOARD"; open: boolean; snapshot?: string | null }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -248,6 +256,16 @@ function reducer(state: State, action: Action): State {
       if (action.ts <= prev) return state
       return { ...state, readMarkers: { ...state.readMarkers, [action.peerId]: action.ts } }
     }
+    case "SET_WHITEBOARD": {
+      // Only overwrite the snapshot when one is explicitly provided; toggling
+      // the board closed/open without a payload preserves the last snapshot.
+      return {
+        ...state,
+        whiteboardOpen: action.open,
+        whiteboardSnapshot:
+          action.snapshot !== undefined ? action.snapshot : state.whiteboardSnapshot,
+      }
+    }
     default:
       return state
   }
@@ -291,6 +309,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     currentSlide: null,
     messages: [],
     readMarkers: {},
+    whiteboardOpen: false,
+    whiteboardSnapshot: null,
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -311,6 +331,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // currently selected screen-share quality preset
   const screenQualityRef = useRef<ScreenQuality>("auto")
   const [screenQuality, setScreenQualityState] = useState<ScreenQuality>("auto")
+  // Live whiteboard diff subscribers. The socket "whiteboardChange" handler
+  // fans incoming remote diffs out to every registered listener (the mounted
+  // Whiteboard component). Kept in a ref so handlers stay stable and the join
+  // effect never needs to re-run when the board mounts/unmounts.
+  const whiteboardListenersRef = useRef<Set<(changes: unknown) => void>>(new Set())
+
   // consumerId -> Consumer
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
   // producerIds that were closed before we finished consuming them (race guard)
@@ -754,6 +780,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           currentSlide?: SlideState | null
           messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number }>
           readMarkers?: Array<{ peerId: string; ts: number }>
+          whiteboardOpen?: boolean
+          whiteboardSnapshot?: string | null
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -768,6 +796,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           if (data.currentSlide) {
             dispatch({ type: "SET_SLIDE", slide: data.currentSlide })
           }
+
+          // Restore the shared whiteboard: if it's open for the room, mount it
+          // with the latest persisted snapshot so we see the current drawing.
+          dispatch({
+            type: "SET_WHITEBOARD",
+            open: !!data.whiteboardOpen,
+            snapshot: data.whiteboardSnapshot ?? null,
+          })
 
           // Load persisted chat history (oldest first). ADD_MESSAGE dedupes by
           // id, so re-running this on a full rejoin is harmless. "self" is
@@ -1076,6 +1112,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     socket.on("chatRead", (payload: { peerId: string; ts: number }) => {
       if (!payload || typeof payload.peerId !== "string" || typeof payload.ts !== "number") return
       dispatch({ type: "SET_READ_MARKER", peerId: payload.peerId, ts: payload.ts })
+    })
+
+    // -----------------------------------------------------------------------
+    // Shared whiteboard (tldraw)
+    //
+    // whiteboardOpened/Closed toggle the room-wide board for everyone. The
+    // "opened" event carries the current snapshot so a peer who just turned the
+    // board on locally and everyone else all converge on the same drawing.
+    // whiteboardChange relays a remote peer's incremental store diff, which we
+    // fan out to the mounted Whiteboard component via the listener registry.
+    // -----------------------------------------------------------------------
+    socket.on("whiteboardOpened", (payload: { peerId: string; snapshot: string | null }) => {
+      dispatch({ type: "SET_WHITEBOARD", open: true, snapshot: payload?.snapshot ?? null })
+    })
+
+    socket.on("whiteboardClosed", () => {
+      dispatch({ type: "SET_WHITEBOARD", open: false })
+    })
+
+    socket.on("whiteboardChange", (payload: { peerId: string; changes: unknown }) => {
+      if (!payload || payload.changes == null) return
+      whiteboardListenersRef.current.forEach((fn) => fn(payload.changes))
     })
   }, [roomId, displayName, setupTransports, consumeProducer])
 
@@ -1610,6 +1668,48 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     dispatch({ type: "SET_READ_MARKER", peerId: peerId.current, ts })
   }, [roomId])
 
+  // -------------------------------------------------------------------------
+  // Shared whiteboard senders + subscription.
+  //
+  // open/close flip the room-wide board for everyone (optimistic locally, the
+  // server broadcasts to the others). sendWhiteboardChange relays an incremental
+  // tldraw diff while drawing; sendWhiteboardSnapshot persists a full snapshot
+  // (debounced by the Whiteboard component). subscribeWhiteboardChange lets the
+  // canvas register for incoming remote diffs and returns an unsubscribe.
+  // -------------------------------------------------------------------------
+  const openWhiteboard = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket) return
+    socket.emit("whiteboardOpen", { roomId, peerId: peerId.current })
+    dispatch({ type: "SET_WHITEBOARD", open: true })
+  }, [roomId])
+
+  const closeWhiteboard = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket) return
+    socket.emit("whiteboardClose", { roomId, peerId: peerId.current })
+    dispatch({ type: "SET_WHITEBOARD", open: false })
+  }, [roomId])
+
+  const sendWhiteboardChange = useCallback((changes: unknown) => {
+    const socket = socketRef.current
+    if (!socket || changes == null) return
+    socket.emit("whiteboardChange", { roomId, peerId: peerId.current, changes })
+  }, [roomId])
+
+  const sendWhiteboardSnapshot = useCallback((snapshot: string) => {
+    const socket = socketRef.current
+    if (!socket || typeof snapshot !== "string") return
+    socket.emit("whiteboardSnapshot", { roomId, peerId: peerId.current, snapshot })
+  }, [roomId])
+
+  const subscribeWhiteboardChange = useCallback((fn: (changes: unknown) => void) => {
+    whiteboardListenersRef.current.add(fn)
+    return () => {
+      whiteboardListenersRef.current.delete(fn)
+    }
+  }, [])
+
   // Publish a canvas-captured stream as the presentation video track.
   const startPresentation = useCallback(async (stream: MediaStream) => {
     const sendTransport = sendTransportRef.current
@@ -1684,6 +1784,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Read receipts
     readMarkers: state.readMarkers,
     markChatRead,
+    // Shared whiteboard (tldraw)
+    whiteboardOpen: state.whiteboardOpen,
+    whiteboardSnapshot: state.whiteboardSnapshot,
+    openWhiteboard,
+    closeWhiteboard,
+    sendWhiteboardChange,
+    sendWhiteboardSnapshot,
+    subscribeWhiteboardChange,
     localPeerId: peerId.current,
   }
 }
