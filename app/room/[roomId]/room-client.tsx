@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { useState, useCallback, useRef, useEffect } from "react"
+import dynamic from "next/dynamic"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
@@ -14,6 +15,20 @@ import { RoomChat } from "./room-chat"
 import { PresenterCanvas } from "@/components/presentation-viewer"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
+
+// tldraw is a heavy, browser-only dependency — load it lazily and skip SSR so
+// it only ships/initialises when the board is actually opened.
+const Whiteboard = dynamic(
+  () => import("@/components/whiteboard").then((m) => m.Whiteboard),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Загрузка доски…
+      </div>
+    ),
+  },
+)
 
 interface RoomClientProps {
   roomId: string
@@ -49,6 +64,13 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     sendChatMessage,
     readMarkers,
     markChatRead,
+    whiteboardOpen,
+    whiteboardSnapshot,
+    openWhiteboard,
+    closeWhiteboard,
+    sendWhiteboardChange,
+    sendWhiteboardSnapshot,
+    subscribeWhiteboardChange,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -182,6 +204,14 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     }
   }, [isPresenting, handleStopPresentation])
 
+  const toggleWhiteboard = useCallback(() => {
+    if (whiteboardOpen) {
+      closeWhiteboard()
+    } else {
+      openWhiteboard()
+    }
+  }, [whiteboardOpen, closeWhiteboard, openWhiteboard])
+
   const handleLeave = useCallback(() => {
     leave()
     router.push("/")
@@ -243,22 +273,33 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         participantCount={peers.size + 1}
       />
 
-      <RoomVideoGrid
-        localStream={localStream}
-        localScreenStream={localScreenStream}
-        displayName={displayName}
-        isMicMuted={isMicMuted}
-        isCamOff={isCamOff}
-        isScreenSharing={isScreenSharing}
-        isPresenting={isPresenting}
-        peers={peers}
-        currentSlide={currentSlide}
-        presentationFile={presentationFile}
-        presentationCanvasRef={presentationCanvasRef}
-        onSlideChange={notifySlideChange}
-        onPresentationLoaded={handlePresentationLoaded}
-        onStopPresentation={handleStopPresentation}
-      />
+      {whiteboardOpen ? (
+        <div className="relative min-h-0 flex-1">
+          <Whiteboard
+            initialSnapshot={whiteboardSnapshot}
+            onChange={sendWhiteboardChange}
+            onSnapshot={sendWhiteboardSnapshot}
+            subscribeRemote={subscribeWhiteboardChange}
+          />
+        </div>
+      ) : (
+        <RoomVideoGrid
+          localStream={localStream}
+          localScreenStream={localScreenStream}
+          displayName={displayName}
+          isMicMuted={isMicMuted}
+          isCamOff={isCamOff}
+          isScreenSharing={isScreenSharing}
+          isPresenting={isPresenting}
+          peers={peers}
+          currentSlide={currentSlide}
+          presentationFile={presentationFile}
+          presentationCanvasRef={presentationCanvasRef}
+          onSlideChange={notifySlideChange}
+          onPresentationLoaded={handlePresentationLoaded}
+          onStopPresentation={handleStopPresentation}
+        />
+      )}
 
       {/* Overflow wrapper: clips the footer when it slides down, and provides
           the anchor point for the toggle handle that peeks above it */}
@@ -274,6 +315,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         collapsed={controlsCollapsed}
         chatOpen={chatOpen}
         unreadCount={unreadCount}
+        whiteboardOpen={whiteboardOpen}
+        onToggleWhiteboard={toggleWhiteboard}
         onToggleChat={toggleChat}
         onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
         onToggleMic={toggleMic}

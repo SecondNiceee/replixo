@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff, FileText,
-  ChevronUp, MessageSquare,
+  ChevronUp, MessageSquare, Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,6 +34,8 @@ interface RoomControlsProps {
   collapsed: boolean
   chatOpen: boolean
   unreadCount: number
+  whiteboardOpen: boolean
+  onToggleWhiteboard: () => void
   onToggleChat: () => void
   onToggleCollapsed: () => void
   onToggleMic: () => void
@@ -57,6 +59,8 @@ export function RoomControls({
   collapsed,
   chatOpen,
   unreadCount,
+  whiteboardOpen,
+  onToggleWhiteboard,
   onToggleChat,
   onToggleCollapsed,
   onToggleMic,
@@ -211,6 +215,20 @@ export function RoomControls({
         title={isScreenSharing && !isPresenting ? "Остановите демонстрацию экрана перед запуском презентации" : undefined}
       >
         <FileText className="size-5" />
+      </Button>
+
+      {/* Whiteboard */}
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={onToggleWhiteboard}
+        className={cn(
+          "size-12 rounded-full",
+          whiteboardOpen && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+        )}
+        aria-label={whiteboardOpen ? "Закрыть доску" : "Открыть совместную доску"}
+      >
+        <Pencil className="size-5" />
       </Button>
 
       {/* Chat */}
