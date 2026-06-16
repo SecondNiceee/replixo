@@ -152,15 +152,77 @@ export async function getRoomReadMarkers(roomId: string): Promise<ReadMarker[]> 
 /**
  * Удалить всю историю чата комнаты. Вызывается при уничтожении комнаты
  * (когда она опустела), чтобы чат стирался вместе с ней. Заодно стираем
- * отметки прочтения — они привязаны к этой же комнате.
+ * отметки прочтения и доску — они привязаны к этой же комнате.
  */
 export async function deleteRoomMessages(roomId: string): Promise<void> {
   if (!pool) return
   try {
     await pool.query(`DELETE FROM "message" WHERE "roomId" = $1`, [roomId])
     await pool.query(`DELETE FROM "message_read" WHERE "roomId" = $1`, [roomId])
+    await pool.query(`DELETE FROM "whiteboard" WHERE "roomId" = $1`, [roomId])
     console.log(`[db] Удалена история чата комнаты ${roomId}`)
   } catch (e) {
     console.error('[db] deleteRoomMessages failed:', (e as Error).message)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Совместная доска (tldraw)
+// ---------------------------------------------------------------------------
+
+export interface StoredWhiteboard {
+  snapshot: string | null
+  open: boolean
+}
+
+/**
+ * Сохранить/обновить снапшот доски комнаты и/или флаг "открыта". Передавай
+ * только те поля, которые меняются. Вызывается дебаунсенно во время рисования,
+ * поэтому пишем upsert одной строкой на комнату.
+ */
+export async function saveWhiteboard(
+  roomId: string,
+  fields: { snapshot?: string | null; open?: boolean },
+): Promise<void> {
+  if (!pool) return
+  try {
+    const hasSnapshot = Object.prototype.hasOwnProperty.call(fields, 'snapshot')
+    const hasOpen = Object.prototype.hasOwnProperty.call(fields, 'open')
+    await pool.query(
+      `INSERT INTO "whiteboard" ("roomId", "snapshot", "open", "updatedAt")
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT ("roomId") DO UPDATE SET
+         "snapshot" = CASE WHEN $4 THEN EXCLUDED."snapshot" ELSE "whiteboard"."snapshot" END,
+         "open"     = CASE WHEN $5 THEN EXCLUDED."open"     ELSE "whiteboard"."open"     END,
+         "updatedAt" = now()`,
+      [
+        roomId,
+        hasSnapshot ? fields.snapshot ?? null : null,
+        hasOpen ? fields.open ?? false : false,
+        hasSnapshot,
+        hasOpen,
+      ],
+    )
+  } catch (e) {
+    console.error('[db] saveWhiteboard failed:', (e as Error).message)
+  }
+}
+
+/** Получить снапшот и флаг "открыта" доски комнаты. */
+export async function getWhiteboard(roomId: string): Promise<StoredWhiteboard> {
+  if (!pool) return { snapshot: null, open: false }
+  try {
+    const { rows } = await pool.query(
+      `SELECT "snapshot", "open" FROM "whiteboard" WHERE "roomId" = $1`,
+      [roomId],
+    )
+    if (rows.length === 0) return { snapshot: null, open: false }
+    return {
+      snapshot: (rows[0].snapshot as string | null) ?? null,
+      open: Boolean(rows[0].open),
+    }
+  } catch (e) {
+    console.error('[db] getWhiteboard failed:', (e as Error).message)
+    return { snapshot: null, open: false }
   }
 }

@@ -18,6 +18,13 @@ export class Room {
   // The presenter's current slide state. Null when no presentation is active.
   currentSlide: SlideState | null = null
 
+  // Shared whiteboard (tldraw) state. `whiteboardOpen` is broadcast so the board
+  // opens/closes for everyone at once. `whiteboardSnapshot` keeps the latest
+  // full document snapshot in memory so a peer joining mid-session can load the
+  // current drawing immediately (it is also persisted to the DB, debounced).
+  whiteboardOpen = false
+  whiteboardSnapshot: string | null = null
+
   private constructor(id: string) {
     this.id = id
   }
