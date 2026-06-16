@@ -152,6 +152,9 @@ interface State {
   currentSlide: SlideState | null
   // chat messages, oldest first
   messages: ChatMessage[]
+  // peerId -> timestamp (ms) of the latest message that peer has read.
+  // Used to render "delivered/read" checkmarks on the local user's messages.
+  readMarkers: Record<string, number>
 }
 
 type Action =
@@ -170,6 +173,7 @@ type Action =
   | { type: "SET_SLIDE"; slide: SlideState | null }
   | { type: "STOP_PRESENTING" }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
+  | { type: "SET_READ_MARKER"; peerId: string; ts: number }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -238,6 +242,12 @@ function reducer(state: State, action: Action): State {
       const messages = next.length > 500 ? next.slice(next.length - 500) : next
       return { ...state, messages }
     }
+    case "SET_READ_MARKER": {
+      // Read markers only move forward; ignore stale/out-of-order updates.
+      const prev = state.readMarkers[action.peerId] ?? 0
+      if (action.ts <= prev) return state
+      return { ...state, readMarkers: { ...state.readMarkers, [action.peerId]: action.ts } }
+    }
     default:
       return state
   }
@@ -280,6 +290,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     hasCam: false,
     currentSlide: null,
     messages: [],
+    readMarkers: {},
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -742,6 +753,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           }>
           currentSlide?: SlideState | null
           messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number }>
+          readMarkers?: Array<{ peerId: string; ts: number }>
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -774,6 +786,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   self: m.peerId === peerId.current,
                 },
               })
+            }
+          }
+
+          // Seed read markers so checkmarks on existing messages are correct
+          // immediately (others may already have read our prior messages).
+          if (Array.isArray(data.readMarkers)) {
+            for (const r of data.readMarkers) {
+              if (!r || typeof r.peerId !== "string" || typeof r.ts !== "number") continue
+              dispatch({ type: "SET_READ_MARKER", peerId: r.peerId, ts: r.ts })
             }
           }
 
@@ -1047,6 +1068,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         })
       },
     )
+
+    // -----------------------------------------------------------------------
+    // Chat read receipts — a remote peer advanced its read marker. We store it
+    // so the local user's own messages can flip to "read".
+    // -----------------------------------------------------------------------
+    socket.on("chatRead", (payload: { peerId: string; ts: number }) => {
+      if (!payload || typeof payload.peerId !== "string" || typeof payload.ts !== "number") return
+      dispatch({ type: "SET_READ_MARKER", peerId: payload.peerId, ts: payload.ts })
+    })
   }, [roomId, displayName, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
@@ -1569,6 +1599,17 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     })
   }, [roomId, displayName])
 
+  // Report that the local user has read the chat up to `ts` (ms). Tells the
+  // server (which broadcasts to others so their messages flip to "read") and
+  // records our own marker locally for completeness.
+  const markChatRead = useCallback((ts: number) => {
+    if (!Number.isFinite(ts) || ts <= 0) return
+    const socket = socketRef.current
+    if (!socket) return
+    socket.emit("chatRead", { roomId, peerId: peerId.current, ts })
+    dispatch({ type: "SET_READ_MARKER", peerId: peerId.current, ts })
+  }, [roomId])
+
   // Publish a canvas-captured stream as the presentation video track.
   const startPresentation = useCallback(async (stream: MediaStream) => {
     const sendTransport = sendTransportRef.current
@@ -1640,5 +1681,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Chat
     messages: state.messages,
     sendChatMessage,
+    // Read receipts
+    readMarkers: state.readMarkers,
+    markChatRead,
+    localPeerId: peerId.current,
   }
 }

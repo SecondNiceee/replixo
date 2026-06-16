@@ -88,6 +88,15 @@ export function playScreenShareSound() {
   ])
 }
 
+// Soft two-note chime — a gentle "ping" for an incoming chat message. (~0.25s)
+// Deliberately quiet and short so it never startles during a call.
+export function playMessageSound() {
+  playSequence([
+    { freq: 784.0, at: 0, duration: 0.08, wave: "sine", gain: 0.14 }, // G5
+    { freq: 1046.5, at: 0.07, duration: 0.2, wave: "sine", gain: 0.16 }, // C6
+  ])
+}
+
 // Snappy descending arpeggio — signals demonstration has STOPPED. (~0.35s)
 export function playScreenShareStopSound() {
   playSequence([

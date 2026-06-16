@@ -166,6 +166,19 @@ export interface ChatMessageBroadcastPayload {
   timestamp: number
 }
 
+// Client → server: a peer reports it has read the chat up to `ts` (ms).
+export interface ChatReadPayload {
+  roomId: string
+  peerId: string
+  ts: number
+}
+
+// Server → client (broadcast): a peer's read marker advanced to `ts` (ms).
+export interface ChatReadBroadcastPayload {
+  peerId: string
+  ts: number
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------

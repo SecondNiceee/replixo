@@ -11,6 +11,9 @@ interface RoomChatProps {
   onClose: () => void
   messages: ChatMessage[]
   onSend: (text: string) => void
+  // Index of the first message that was unread when the panel was opened.
+  // Messages at this index and beyond are highlighted as "new". null = none.
+  unreadFromIndex: number | null
 }
 
 // Stable per-name color so each participant's name reads consistently.
@@ -35,7 +38,7 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
-export function RoomChat({ open, onClose, messages, onSend }: RoomChatProps) {
+export function RoomChat({ open, onClose, messages, onSend, unreadFromIndex }: RoomChatProps) {
   const [text, setText] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -108,34 +111,48 @@ export function RoomChat({ open, onClose, messages, onSend }: RoomChatProps) {
             </div>
           ) : (
             <ul className="flex flex-col gap-3">
-              {messages.map((m) => (
-                <li
-                  key={m.id}
-                  className={cn("flex flex-col gap-0.5", m.self ? "items-end" : "items-start")}
-                >
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={cn(
-                        "text-xs font-medium",
-                        m.self ? "text-muted-foreground" : colorForPeer(m.peerId),
-                      )}
-                    >
-                      {m.self ? "Вы" : m.displayName}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground/70">{formatTime(m.timestamp)}</span>
-                  </div>
-                  <div
-                    className={cn(
-                      "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm leading-relaxed",
-                      m.self
-                        ? "rounded-br-sm bg-primary text-primary-foreground"
-                        : "rounded-bl-sm bg-secondary text-secondary-foreground",
+              {messages.map((m, i) => {
+                const hasUnread = unreadFromIndex !== null
+                const isFirstUnread = hasUnread && i === unreadFromIndex
+                const isUnread = hasUnread && i >= (unreadFromIndex as number)
+                return (
+                  <li key={m.id} className="flex flex-col gap-3">
+                    {isFirstUnread && (
+                      <div className="flex items-center gap-2" aria-hidden="true">
+                        <span className="h-px flex-1 bg-primary/40" />
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
+                          Новые сообщения
+                        </span>
+                        <span className="h-px flex-1 bg-primary/40" />
+                      </div>
                     )}
-                  >
-                    {m.text}
-                  </div>
-                </li>
-              ))}
+                    <div className={cn("flex flex-col gap-0.5", m.self ? "items-end" : "items-start")}>
+                      <div className="flex items-baseline gap-2">
+                        <span
+                          className={cn(
+                            "text-xs font-medium",
+                            m.self ? "text-muted-foreground" : colorForPeer(m.peerId),
+                          )}
+                        >
+                          {m.self ? "Вы" : m.displayName}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground/70">{formatTime(m.timestamp)}</span>
+                      </div>
+                      <div
+                        className={cn(
+                          "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm leading-relaxed transition-shadow",
+                          m.self
+                            ? "rounded-br-sm bg-primary text-primary-foreground"
+                            : "rounded-bl-sm bg-secondary text-secondary-foreground",
+                          isUnread && !m.self && "ring-1 ring-primary/50",
+                        )}
+                      >
+                        {m.text}
+                      </div>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>

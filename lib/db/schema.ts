@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, primaryKey } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -92,4 +92,23 @@ export const message = pgTable(
     createdAt: timestamp('createdAt').notNull().defaultNow(),
   },
   (t) => [index('message_roomId_createdAt_idx').on(t.roomId, t.createdAt)],
+)
+
+// --- Read receipts ---------------------------------------------------------
+// Отметка "прочитано" на уровне участника: для каждой пары (комната, участник)
+// храним время самого свежего сообщения, которое участник уже видел
+// (чат открыт и вкладка активна). Отправитель сравнивает это время с временем
+// своих сообщений, чтобы показать галочки "доставлено/прочитано".
+// Стирается вместе с историей чата при уничтожении комнаты.
+
+export const messageRead = pgTable(
+  'message_read',
+  {
+    roomId: text('roomId').notNull(),
+    peerId: text('peerId').notNull(),
+    // Время (createdAt) последнего прочитанного участником сообщения.
+    lastReadAt: timestamp('lastReadAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.roomId, t.peerId] })],
 )

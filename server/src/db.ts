@@ -21,6 +21,12 @@ export interface StoredMessage {
   timestamp: number
 }
 
+// Отметка "прочитано": до какого момента (timestamp, мс) участник прочитал чат.
+export interface ReadMarker {
+  peerId: string
+  ts: number
+}
+
 const connectionString = process.env.DATABASE_URL
 
 // Один пул на весь процесс. Создаётся только если есть строка подключения.
@@ -99,13 +105,60 @@ export async function getRoomMessages(
 }
 
 /**
+ * Сохранить/обновить отметку "прочитано" участника. Храним максимум: время
+ * никогда не откатывается назад (GREATEST), чтобы гонки сообщений не сбрасывали
+ * прогресс прочтения. timestamp — мс, как у сообщений.
+ */
+export async function saveReadMarker(
+  roomId: string,
+  peerId: string,
+  ts: number,
+): Promise<void> {
+  if (!pool) return
+  try {
+    await pool.query(
+      `INSERT INTO "message_read" ("roomId", "peerId", "lastReadAt", "updatedAt")
+       VALUES ($1, $2, to_timestamp($3 / 1000.0), now())
+       ON CONFLICT ("roomId", "peerId") DO UPDATE
+         SET "lastReadAt" = GREATEST("message_read"."lastReadAt", EXCLUDED."lastReadAt"),
+             "updatedAt" = now()`,
+      [roomId, peerId, ts],
+    )
+  } catch (e) {
+    console.error('[db] saveReadMarker failed:', (e as Error).message)
+  }
+}
+
+/**
+ * Получить отметки "прочитано" всех участников комнаты. Используется при входе,
+ * чтобы сразу отрисовать галочки на уже отправленных сообщениях.
+ */
+export async function getRoomReadMarkers(roomId: string): Promise<ReadMarker[]> {
+  if (!pool) return []
+  try {
+    const { rows } = await pool.query(
+      `SELECT "peerId", (EXTRACT(EPOCH FROM "lastReadAt") * 1000)::bigint AS "ts"
+       FROM "message_read"
+       WHERE "roomId" = $1`,
+      [roomId],
+    )
+    return rows.map((r) => ({ peerId: r.peerId as string, ts: Number(r.ts) }))
+  } catch (e) {
+    console.error('[db] getRoomReadMarkers failed:', (e as Error).message)
+    return []
+  }
+}
+
+/**
  * Удалить всю историю чата комнаты. Вызывается при уничтожении комнаты
- * (когда она опустела), чтобы чат стирался вместе с ней.
+ * (когда она опустела), чтобы чат стирался вместе с ней. Заодно стираем
+ * отметки прочтения — они привязаны к этой же комнате.
  */
 export async function deleteRoomMessages(roomId: string): Promise<void> {
   if (!pool) return
   try {
     await pool.query(`DELETE FROM "message" WHERE "roomId" = $1`, [roomId])
+    await pool.query(`DELETE FROM "message_read" WHERE "roomId" = $1`, [roomId])
     console.log(`[db] Удалена история чата комнаты ${roomId}`)
   } catch (e) {
     console.error('[db] deleteRoomMessages failed:', (e as Error).message)
