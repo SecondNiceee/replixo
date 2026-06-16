@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { X, SendHorizonal } from "lucide-react"
+import { X, SendHorizonal, Check, CheckCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
@@ -14,6 +14,11 @@ interface RoomChatProps {
   // Index of the first message that was unread when the panel was opened.
   // Messages at this index and beyond are highlighted as "new". null = none.
   unreadFromIndex: number | null
+  // peerId -> timestamp (ms) of the latest message that peer has read.
+  readMarkers: Record<string, number>
+  // Currently connected remote peer ids, used to decide when a message has
+  // been read by everyone else in the room.
+  peerIds: string[]
 }
 
 // Stable per-name color so each participant's name reads consistently.
@@ -38,7 +43,26 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
-export function RoomChat({ open, onClose, messages, onSend, unreadFromIndex }: RoomChatProps) {
+// A message is "read" once every currently-connected peer has a read marker at
+// or beyond its timestamp. With no other peers in the room it stays "delivered".
+function isReadByEveryone(
+  messageTs: number,
+  peerIds: string[],
+  readMarkers: Record<string, number>,
+): boolean {
+  if (peerIds.length === 0) return false
+  return peerIds.every((id) => (readMarkers[id] ?? 0) >= messageTs)
+}
+
+export function RoomChat({
+  open,
+  onClose,
+  messages,
+  onSend,
+  unreadFromIndex,
+  readMarkers,
+  peerIds,
+}: RoomChatProps) {
   const [text, setText] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -137,6 +161,12 @@ export function RoomChat({ open, onClose, messages, onSend, unreadFromIndex }: R
                           {m.self ? "Вы" : m.displayName}
                         </span>
                         <span className="text-[10px] text-muted-foreground/70">{formatTime(m.timestamp)}</span>
+                        {m.self &&
+                          (isReadByEveryone(m.timestamp, peerIds, readMarkers) ? (
+                            <CheckCheck className="size-3 text-sky-400" aria-label="Прочитано" />
+                          ) : (
+                            <Check className="size-3 text-muted-foreground/70" aria-label="Доставлено" />
+                          ))}
                       </div>
                       <div
                         className={cn(
