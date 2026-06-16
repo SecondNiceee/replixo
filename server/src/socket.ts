@@ -4,7 +4,13 @@ import { Server, Socket } from 'socket.io'
 import { CLIENT_ORIGIN } from './config'
 import { Room } from './Room'
 import { Peer } from './Peer'
-import { saveMessage, getRoomMessages, deleteRoomMessages } from './db'
+import {
+  saveMessage,
+  getRoomMessages,
+  deleteRoomMessages,
+  saveReadMarker,
+  getRoomReadMarkers,
+} from './db'
 import type {
   JoinRoomPayload,
   CreateTransportPayload,
@@ -16,6 +22,7 @@ import type {
   PauseProducerPayload,
   PresentationSlidePayload,
   ChatMessagePayload,
+  ChatReadPayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -173,12 +180,16 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           // Load persisted chat history so the joining peer (or someone who just
           // reloaded the page) sees prior messages. Empty when persistence is off.
           const messages = await getRoomMessages(roomId)
+          // Read markers of every participant so checkmarks render correctly on
+          // already-sent messages right after joining/reloading.
+          const readMarkers = await getRoomReadMarkers(roomId)
 
           ack(callback, {
             rtpCapabilities: room.getRtpCapabilities(),
             existingPeers,
             currentSlide: room.currentSlide ?? null,
             messages,
+            readMarkers,
           })
         } catch (e) {
           err(callback as Callback<never>, (e as Error).message)
@@ -536,6 +547,31 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         }
       })(),
     )
+
+    // -----------------------------------------------------------------------
+    // chatRead  (a peer has read the chat up to a given timestamp)
+    //
+    // Emitted when the recipient has the chat panel open AND the tab visible.
+    // We persist the marker (no-op without DATABASE_URL) and broadcast it to
+    // the OTHER peers so senders can flip their messages to "read".
+    // -----------------------------------------------------------------------
+    socket.on('chatRead', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid, ts } = payload as ChatReadPayload
+      if (typeof rid !== 'string' || !rid) return
+      if (typeof pid !== 'string' || !pid) return
+      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return
+
+      // --- Auth: sender must own this peerId in this room ---
+      const room = rooms.get(rid)
+      if (!room) return
+      if (!room.hasPeer(pid)) return
+      if (peerSockets.get(pid) !== socket.id) return
+
+      // Persist (fire-and-forget) and tell the others.
+      void saveReadMarker(rid, pid, ts)
+      socket.to(rid).emit('chatRead', { peerId: pid, ts })
+    })
 
     // -----------------------------------------------------------------------
     // rejoinProbe — client checks whether the server still has the peer after
