@@ -10,6 +10,8 @@ import {
   deleteRoomMessages,
   saveReadMarker,
   getRoomReadMarkers,
+  getWhiteboard,
+  saveWhiteboard,
 } from './db'
 import type {
   JoinRoomPayload,
@@ -23,6 +25,9 @@ import type {
   PresentationSlidePayload,
   ChatMessagePayload,
   ChatReadPayload,
+  WhiteboardOpenPayload,
+  WhiteboardChangePayload,
+  WhiteboardSnapshotPayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -58,9 +63,18 @@ function clearPendingDisconnect(peerId: string): void {
 
 function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
   if (rooms.has(roomId)) return Promise.resolve(rooms.get(roomId)!)
-  return Room.create(roomId, worker).then((room) => {
+  return Room.create(roomId, worker).then(async (room) => {
     rooms.set(roomId, room)
     console.log(`[room] Created room ${roomId}`)
+    // Hydrate any persisted whiteboard state so a board drawn in a previous
+    // session (e.g. before a server restart) is restored. No-op without DB.
+    try {
+      const wb = await getWhiteboard(roomId)
+      room.whiteboardOpen = wb.open
+      room.whiteboardSnapshot = wb.snapshot
+    } catch {
+      // Ignore — board simply starts empty.
+    }
     return room
   })
 }
@@ -190,6 +204,10 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
             currentSlide: room.currentSlide ?? null,
             messages,
             readMarkers,
+            // Shared whiteboard: whether it's open for everyone and the latest
+            // full snapshot so a mid-session joiner sees the current drawing.
+            whiteboardOpen: room.whiteboardOpen,
+            whiteboardSnapshot: room.whiteboardSnapshot,
           })
         } catch (e) {
           err(callback as Callback<never>, (e as Error).message)
@@ -571,6 +589,87 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       // Persist (fire-and-forget) and tell the others.
       void saveReadMarker(rid, pid, ts)
       socket.to(rid).emit('chatRead', { peerId: pid, ts })
+    })
+
+    // -----------------------------------------------------------------------
+    // Shared whiteboard (tldraw)
+    //
+    // whiteboardOpen / whiteboardClose toggle a room-wide flag so the board
+    // appears/disappears for everyone at once. whiteboardChange relays a peer's
+    // incremental tldraw store diff to the others for live drawing.
+    // whiteboardSnapshot persists the full document (debounced by the client)
+    // and keeps an in-memory copy so mid-session joiners load the current state.
+    // -----------------------------------------------------------------------
+
+    // Helper: validate sender + return the room they legitimately belong to.
+    const authedRoom = (rid: unknown, pid: unknown): Room | null => {
+      if (typeof rid !== 'string' || !rid) return null
+      if (typeof pid !== 'string' || !pid) return null
+      const room = rooms.get(rid)
+      if (!room || !room.hasPeer(pid)) return null
+      if (peerSockets.get(pid) !== socket.id) return null
+      return room
+    }
+
+    socket.on('whiteboardOpen', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid } = payload as WhiteboardOpenPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      room.whiteboardOpen = true
+      void saveWhiteboard(rid, { open: true })
+      // Others open the board too; hand them the current snapshot (may be null).
+      socket.to(rid).emit('whiteboardOpened', { peerId: pid, snapshot: room.whiteboardSnapshot })
+    })
+
+    socket.on('whiteboardClose', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid } = payload as WhiteboardOpenPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      room.whiteboardOpen = false
+      void saveWhiteboard(rid, { open: false })
+      socket.to(rid).emit('whiteboardClosed', { peerId: pid })
+    })
+
+    socket.on(
+      'whiteboardChange',
+      (() => {
+        // Generous sliding-window limit: drawing fires many diffs per second, so
+        // allow up to 240/sec before dropping to guard against a runaway client.
+        const WB_RATE_LIMIT = 240
+        const WB_RATE_WINDOW_MS = 1000
+        let wbEventCount = 0
+        let wbWindowStart = Date.now()
+
+        return (payload: unknown) => {
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, changes } = payload as WhiteboardChangePayload
+          const room = authedRoom(rid, pid)
+          if (!room) return
+          if (changes == null) return
+
+          const now = Date.now()
+          if (now - wbWindowStart > WB_RATE_WINDOW_MS) {
+            wbEventCount = 0
+            wbWindowStart = now
+          }
+          if (++wbEventCount > WB_RATE_LIMIT) return
+
+          socket.to(rid).emit('whiteboardChange', { peerId: pid, changes })
+        }
+      })(),
+    )
+
+    socket.on('whiteboardSnapshot', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid, snapshot } = payload as WhiteboardSnapshotPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      // Cap snapshot size to avoid unbounded memory / DB rows from a bad client.
+      if (typeof snapshot !== 'string' || snapshot.length > 5_000_000) return
+      room.whiteboardSnapshot = snapshot
+      void saveWhiteboard(rid, { snapshot })
     })
 
     // -----------------------------------------------------------------------

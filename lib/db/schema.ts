@@ -112,3 +112,18 @@ export const messageRead = pgTable(
   },
   (t) => [primaryKey({ columns: [t.roomId, t.peerId] })],
 )
+
+// --- Shared whiteboard -----------------------------------------------------
+// Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
+// снапшот документа целиком (JSON-строка от tldraw getSnapshot). Снапшот
+// периодически перезаписывается, пока участники рисуют, и стирается вместе с
+// комнатой, когда она опустела. open — открыта ли доска у всех сейчас.
+
+export const whiteboard = pgTable('whiteboard', {
+  roomId: text('roomId').primaryKey(),
+  // Полный снапшот документа tldraw в виде JSON-строки. null — доска пустая.
+  snapshot: text('snapshot'),
+  // Открыта ли доска у всех участников (синхронизированное состояние комнаты).
+  open: boolean('open').notNull().default(false),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})

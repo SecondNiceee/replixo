@@ -180,6 +180,31 @@ export interface ChatReadBroadcastPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Shared whiteboard (tldraw)
+// ---------------------------------------------------------------------------
+
+// Client → server: open / close the shared board for the whole room.
+export interface WhiteboardOpenPayload {
+  roomId: string
+  peerId: string
+}
+
+// Client → server: incremental tldraw store changes to relay to other peers.
+// `changes` is an opaque serialized diff (added/updated records + removed ids).
+export interface WhiteboardChangePayload {
+  roomId: string
+  peerId: string
+  changes: unknown
+}
+
+// Client → server: a full tldraw snapshot to persist (debounced by the client).
+export interface WhiteboardSnapshotPayload {
+  roomId: string
+  peerId: string
+  snapshot: string
+}
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
