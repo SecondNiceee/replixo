@@ -74,9 +74,15 @@ export function RoomChat({
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, open])
 
-  // Focus the input when the panel opens.
+  // Focus the input when the panel opens. We wait for the slide-in transition
+  // to finish and pass preventScroll so the browser doesn't snap the still
+  // off-screen input into view mid-animation, which made the open feel abrupt.
   useEffect(() => {
-    if (open) inputRef.current?.focus()
+    if (!open) return
+    const id = window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: true })
+    }, 300)
+    return () => window.clearTimeout(id)
   }, [open])
 
   const handleSubmit = useCallback(
@@ -198,7 +204,7 @@ export function RoomChat({
             onChange={(e) => setText(e.target.value)}
             maxLength={2000}
             placeholder="Напишите сообщение…"
-            aria-label="Текст сообщения"
+            aria-label="Текст сообще��ия"
             className="h-10 flex-1 rounded-full border border-input bg-background px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
           />
           <Button
