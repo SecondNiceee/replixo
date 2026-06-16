@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import { Tldraw, getSnapshot, loadSnapshot } from "tldraw"
-import type { Editor, TLRecord } from "tldraw"
-import type { RecordsDiff } from "@tldraw/store"
+import type { Editor, RecordsDiff, TLRecord } from "tldraw"
 import "tldraw/tldraw.css"
+
+// tldraw's incremental store diff. We only relay the opaque diff between peers
+// and hand it straight back to applyDiff/the store listener.
+type StoreDiff = RecordsDiff<TLRecord>
 
 interface WhiteboardProps {
   // Full document snapshot (JSON string) to seed the board on mount, or null
@@ -62,7 +65,7 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     const unlisten = editor.store.listen(
       (entry) => {
-        onChangeRef.current(entry.changes as RecordsDiff<TLRecord>)
+        onChangeRef.current(entry.changes as StoreDiff)
         if (snapshotTimer) clearTimeout(snapshotTimer)
         snapshotTimer = setTimeout(() => {
           try {
@@ -80,7 +83,7 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
     const unsubscribe = subscribeRef.current((changes) => {
       try {
         editor.store.mergeRemoteChanges(() => {
-          editor.store.applyDiff(changes as RecordsDiff<TLRecord>)
+          editor.store.applyDiff(changes as StoreDiff)
         })
       } catch (e) {
         console.error("[Replixo] whiteboard: failed to apply remote changes", e)
