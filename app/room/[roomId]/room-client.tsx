@@ -12,6 +12,8 @@ import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { PresenterCanvas } from "@/components/presentation-viewer"
+import { playMessageSound } from "@/lib/sounds"
+import { cn } from "@/lib/utils"
 
 interface RoomClientProps {
   roomId: string
@@ -55,6 +57,10 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   // seen the last time the panel was open; anything beyond that is "unread".
   const [chatOpen, setChatOpen] = useState(false)
   const [seenCount, setSeenCount] = useState(0)
+  // Index of the first unread message captured at the moment the panel opens.
+  // Messages from this index onward get a subtle highlight inside the chat so
+  // it's easy to spot what arrived while you were away. null = nothing unread.
+  const [unreadFromIndex, setUnreadFromIndex] = useState<number | null>(null)
   const unreadCount = chatOpen ? 0 : Math.max(0, messages.length - seenCount)
 
   // While the chat is open, keep marking everything as seen so the badge stays
@@ -63,13 +69,32 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     if (chatOpen) setSeenCount(messages.length)
   }, [chatOpen, messages.length])
 
+  // Play a gentle chime for incoming messages when the user can't see them —
+  // i.e. the chat panel is closed OR the browser tab is in the background.
+  const prevMsgLenRef = useRef(messages.length)
+  useEffect(() => {
+    const prev = prevMsgLenRef.current
+    if (messages.length > prev) {
+      const arrived = messages.slice(prev)
+      const hasIncoming = arrived.some((m) => !m.self)
+      if (hasIncoming && (!chatOpen || document.hidden)) {
+        playMessageSound()
+      }
+    }
+    prevMsgLenRef.current = messages.length
+  }, [messages, chatOpen])
+
   const toggleChat = useCallback(() => {
     setChatOpen((open) => {
       const next = !open
-      if (next) setSeenCount(messages.length)
+      if (next) {
+        // Freeze the unread boundary so we can highlight what was missed.
+        setUnreadFromIndex(seenCount < messages.length ? seenCount : null)
+        setSeenCount(messages.length)
+      }
       return next
     })
-  }, [messages.length])
+  }, [messages.length, seenCount])
 
   const closeChat = useCallback(() => setChatOpen(false), [])
 
@@ -184,6 +209,15 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
       <EnableSoundBanner />
 
+      {/* Main column. When the chat opens on >=sm screens we add a right margin
+          so the content visibly shrinks beside the panel instead of being
+          covered by it. On mobile the chat overlays full-width as before. */}
+      <div
+        className={cn(
+          "flex h-full min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-300 ease-in-out",
+          chatOpen && "sm:mr-[360px]",
+        )}
+      >
       <RoomHeader
         roomId={roomId}
         displayName={displayName}
@@ -234,12 +268,14 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         onLeave={handleLeave}
       />
       </div>
+      </div>
 
       <RoomChat
         open={chatOpen}
         onClose={closeChat}
         messages={messages}
         onSend={sendChatMessage}
+        unreadFromIndex={unreadFromIndex}
       />
     </div>
   )
