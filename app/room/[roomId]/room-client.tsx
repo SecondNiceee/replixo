@@ -12,9 +12,11 @@ import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
+import { FloatingChatButton } from "./floating-chat-button"
 import { PresenterCanvas } from "@/components/presentation-viewer"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
+import { useChatButtonStore } from "@/stores/chat-button-store"
 
 // tldraw is a heavy, browser-only dependency — load it lazily and skip SSR so
 // it only ships/initialises when the board is actually opened.
@@ -137,6 +139,33 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   }, [messages.length, seenCount])
 
   const closeChat = useCallback(() => setChatOpen(false), [])
+
+  // Global hotkey to toggle the chat. The bound key (KeyboardEvent.code) lives
+  // in the persisted chat-button store and can be rebound from its settings.
+  // We ignore presses while typing in inputs/textareas/contenteditable so the
+  // shortcut never hijacks normal text entry (e.g. the chat composer itself).
+  const chatHotkey = useChatButtonStore((s) => s.hotkey)
+  useEffect(() => {
+    if (!chatHotkey) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.code !== chatHotkey) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (
+        t &&
+        (t.isContentEditable ||
+          t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT")
+      ) {
+        return
+      }
+      e.preventDefault()
+      toggleChat()
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [chatHotkey, toggleChat])
 
   // Presentation
   const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -313,11 +342,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         micDevices={micDevices}
         selectedMicLabel={selectedMicLabel}
         collapsed={controlsCollapsed}
-        chatOpen={chatOpen}
-        unreadCount={unreadCount}
         whiteboardOpen={whiteboardOpen}
         onToggleWhiteboard={toggleWhiteboard}
-        onToggleChat={toggleChat}
         onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
@@ -339,6 +365,12 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         unreadFromIndex={unreadFromIndex}
         readMarkers={readMarkers}
         peerIds={Array.from(peers.keys())}
+      />
+
+      <FloatingChatButton
+        chatOpen={chatOpen}
+        unreadCount={unreadCount}
+        onToggleChat={toggleChat}
       />
     </div>
   )
