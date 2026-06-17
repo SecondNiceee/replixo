@@ -150,15 +150,23 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     const handler = (e: KeyboardEvent) => {
       if (e.code !== chatHotkey) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const t = e.target as HTMLElement | null
-      if (
-        t &&
-        (t.isContentEditable ||
-          t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.tagName === "SELECT")
-      ) {
-        return
+      // Only skip the hotkey for keys that actually type a character (e.key
+      // of length 1, e.g. letters/digits) while focused in a text field, so
+      // we never hijack normal text entry in the chat composer. Non-text keys
+      // like Tab/Escape/F-keys (e.key.length > 1) must still toggle the chat
+      // even when the composer is focused — otherwise it could never be closed.
+      const isTypingKey = e.key.length === 1
+      if (isTypingKey) {
+        const t = e.target as HTMLElement | null
+        if (
+          t &&
+          (t.isContentEditable ||
+            t.tagName === "INPUT" ||
+            t.tagName === "TEXTAREA" ||
+            t.tagName === "SELECT")
+        ) {
+          return
+        }
       }
       e.preventDefault()
       toggleChat()
