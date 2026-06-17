@@ -16,6 +16,7 @@ interface Peer {
   screenStream?: MediaStream
   screenAudioStream?: MediaStream
   presentationStream?: MediaStream
+  audioMuted?: boolean
 }
 
 interface RoomVideoGridProps {
@@ -89,6 +90,7 @@ export function RoomVideoGrid({
           stream={peer.videoStream}
           audioStream={peer.audioStream}
           displayName={peer.displayName}
+          isMuted={peer.audioMuted}
           className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
         />
       ))}
@@ -114,6 +116,7 @@ export function RoomVideoGrid({
           stream={peer.videoStream}
           audioStream={peer.audioStream}
           displayName={peer.displayName}
+          isMuted={peer.audioMuted}
           className="aspect-video w-full shrink-0 shadow-lg"
         />
       ))}
@@ -258,6 +261,7 @@ export function RoomVideoGrid({
           stream={peer.videoStream}
           audioStream={peer.audioStream}
           displayName={peer.displayName}
+          isMuted={peer.audioMuted}
           className="h-full w-full"
         />
       ))}

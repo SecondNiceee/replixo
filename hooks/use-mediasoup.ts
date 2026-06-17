@@ -33,6 +33,10 @@ export interface RemotePeer {
   screenStream?: MediaStream
   screenAudioStream?: MediaStream
   presentationStream?: MediaStream
+  // Whether this peer's microphone producer is currently paused (muted).
+  // Driven by the server's `producerPaused` broadcast and the initial
+  // `producerPaused` flag returned when we first consume their audio.
+  audioMuted?: boolean
 }
 
 export type MediaSource = "media" | "screen" | "presentation"
@@ -172,6 +176,7 @@ type Action =
   | { type: "PEER_JOINED"; peerId: string; displayName: string }
   | { type: "PEER_STREAM"; peerId: string; displayName: string; kind: "video" | "audio"; source: MediaSource; stream: MediaStream }
   | { type: "PEER_PRODUCER_CLOSED"; peerId: string; source: MediaSource; kind: "video" | "audio" }
+  | { type: "PEER_AUDIO_MUTED"; peerId: string; muted: boolean }
   | { type: "PEER_LEFT"; peerId: string }
   | { type: "TOGGLE_MIC"; isMuted: boolean; hasMic?: boolean }
   | { type: "TOGGLE_CAM"; isOff: boolean; hasCam?: boolean }
@@ -217,7 +222,20 @@ function reducer(state: State, action: Action): State {
       const key = streamKeyFor(action.source, action.kind)
       const updated = { ...existing }
       delete updated[key]
+      // If their mic producer went away entirely, clear the muted flag so a
+      // stale indicator doesn't linger.
+      if (action.source === "media" && action.kind === "audio") {
+        updated.audioMuted = false
+      }
       peers.set(action.peerId, updated)
+      return { ...state, peers }
+    }
+    case "PEER_AUDIO_MUTED": {
+      const peers = new Map(state.peers)
+      const existing = peers.get(action.peerId)
+      if (!existing) return state
+      if (existing.audioMuted === action.muted) return state
+      peers.set(action.peerId, { ...existing, audioMuted: action.muted })
       return { ...state, peers }
     }
     case "PEER_LEFT": {
@@ -574,6 +592,17 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             source,
             stream,
           })
+
+          // Seed the mic-muted indicator from the producer's initial paused
+          // state, so a peer who muted before we joined shows as muted right
+          // away (not just after a later pause/resume toggle).
+          if (kind === "audio" && source === "media") {
+            dispatch({
+              type: "PEER_AUDIO_MUTED",
+              peerId: remotePeerId,
+              muted: !!data.producerPaused,
+            })
+          }
 
           // A remote peer started a demonstration (screen share or slides).
           // Gate on the video track so we play exactly one sound (screen share
@@ -1057,6 +1086,31 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         playScreenShareStopSound()
       }
     })
+
+    // -----------------------------------------------------------------------
+    // Producer pause/resume — a remote peer muted/unmuted (or paused a track).
+    // We only surface this for their microphone (media audio) so other peers
+    // can show a "muted" indicator. Screen-share audio is ignored.
+    // -----------------------------------------------------------------------
+    socket.on(
+      "producerPaused",
+      ({ peerId: remotePeerId, producerId, paused }: { peerId: string; producerId: string; paused: boolean }) => {
+        if (typeof remotePeerId !== "string" || typeof producerId !== "string") return
+        // Resolve the consumer for this producer to confirm it's the peer's
+        // microphone (media audio) and not screen-share audio.
+        let target: Consumer | undefined
+        for (const c of consumersRef.current.values()) {
+          if (c.producerId === producerId) {
+            target = c
+            break
+          }
+        }
+        if (!target || target.kind !== "audio") return
+        const rawSource = (target.appData as Record<string, unknown>)?.source
+        if (rawSource === "screen" || rawSource === "presentation") return
+        dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: !!paused })
+      },
+    )
 
     // -----------------------------------------------------------------------
     // Slide sync — server broadcasts these when the presenter changes slide
