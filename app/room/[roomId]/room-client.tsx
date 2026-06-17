@@ -12,6 +12,9 @@ import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
+import { ChatFab } from "@/components/chat-fab"
+import { useSettingsStore } from "@/lib/stores/chat-settings-store"
+import { useSession } from "@/lib/auth-client"
 import { PresenterCanvas } from "@/components/presentation-viewer"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
@@ -77,6 +80,17 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
 
+  // Persisted chat-button settings (localStorage for guests, DB for accounts).
+  // Hydrate once we know auth state; this also merges a guest's local draft into
+  // the account on first authenticated load.
+  const { data: authSession, isPending: authPending } = useSession()
+  const hydrateSettings = useSettingsStore((s) => s.hydrate)
+  const openChatKey = useSettingsStore((s) => s.settings.openChatKey)
+  useEffect(() => {
+    if (authPending) return
+    hydrateSettings(!!authSession?.user)
+  }, [authPending, authSession?.user, hydrateSettings])
+
   // Chat panel open state + unread counter. We track how many messages had been
   // seen the last time the panel was open; anything beyond that is "unread".
   const [chatOpen, setChatOpen] = useState(false)
@@ -137,6 +151,30 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   }, [messages.length, seenCount])
 
   const closeChat = useCallback(() => setChatOpen(false), [])
+
+  // Configurable hotkey to toggle the chat panel (default: Tab). Ignored while
+  // the user is typing in an input/textarea/contenteditable so it doesn't hijack
+  // normal text entry (e.g. Tab navigation inside the chat composer).
+  useEffect(() => {
+    if (!openChatKey) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== openChatKey) return
+      const t = e.target as HTMLElement | null
+      const tag = t?.tagName
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        t?.isContentEditable
+      ) {
+        return
+      }
+      e.preventDefault()
+      toggleChat()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [openChatKey, toggleChat])
 
   // Presentation
   const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -313,11 +351,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         micDevices={micDevices}
         selectedMicLabel={selectedMicLabel}
         collapsed={controlsCollapsed}
-        chatOpen={chatOpen}
-        unreadCount={unreadCount}
         whiteboardOpen={whiteboardOpen}
         onToggleWhiteboard={toggleWhiteboard}
-        onToggleChat={toggleChat}
         onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
@@ -340,6 +375,9 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         readMarkers={readMarkers}
         peerIds={Array.from(peers.keys())}
       />
+
+      {/* Floating, draggable chat button with a hover gear for settings. */}
+      <ChatFab open={chatOpen} unreadCount={unreadCount} onToggleChat={toggleChat} />
     </div>
   )
 }

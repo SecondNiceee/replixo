@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS "verification" (
   "createdAt"   TIMESTAMP DEFAULT NOW(),
   "updatedAt"   TIMESTAMP DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS "chat_settings" (
+  "userId"          TEXT PRIMARY KEY REFERENCES "user"("id") ON DELETE CASCADE,
+  "showChatButton"  BOOLEAN NOT NULL DEFAULT TRUE,
+  "openChatKey"     TEXT NOT NULL DEFAULT 'Tab',
+  "buttonX"         REAL,
+  "buttonY"         REAL,
+  "updatedAt"       TIMESTAMP NOT NULL DEFAULT NOW()
+);
 `
 
 try {

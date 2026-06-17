@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, primaryKey, real } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -112,6 +112,25 @@ export const messageRead = pgTable(
   },
   (t) => [primaryKey({ columns: [t.roomId, t.peerId] })],
 )
+
+// --- Chat button / room UI settings ----------------------------------------
+// Персональные настройки плавающей кнопки чата в комнате. Хранятся по одной
+// строке на зарегистрированного пользователя. Для гостей те же значения живут
+// только в localStorage; при регистрации они сливаются сюда (см. /api/settings).
+
+export const chatSettings = pgTable('chat_settings', {
+  userId: text('userId')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  // Показывать ли плавающую кнопку чата.
+  showChatButton: boolean('showChatButton').notNull().default(true),
+  // Горячая клавиша открытия чата (значение KeyboardEvent.key, напр. "Tab").
+  openChatKey: text('openChatKey').notNull().default('Tab'),
+  // Положение кнопки в долях от размеров окна (0..1) от правого-нижнего угла.
+  buttonX: real('buttonX'),
+  buttonY: real('buttonY'),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})
 
 // --- Shared whiteboard -----------------------------------------------------
 // Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
