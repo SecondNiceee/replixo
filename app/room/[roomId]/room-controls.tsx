@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff, FileText,
-  ChevronUp, MessageSquare, Pencil,
+  ChevronUp, Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,11 +32,8 @@ interface RoomControlsProps {
   micDevices: MediaDeviceInfo[]
   selectedMicLabel: string | null
   collapsed: boolean
-  chatOpen: boolean
-  unreadCount: number
   whiteboardOpen: boolean
   onToggleWhiteboard: () => void
-  onToggleChat: () => void
   onToggleCollapsed: () => void
   onToggleMic: () => void
   onToggleCam: () => void
@@ -57,11 +54,8 @@ export function RoomControls({
   micDevices,
   selectedMicLabel,
   collapsed,
-  chatOpen,
-  unreadCount,
   whiteboardOpen,
   onToggleWhiteboard,
-  onToggleChat,
   onToggleCollapsed,
   onToggleMic,
   onToggleCam,
@@ -231,27 +225,8 @@ export function RoomControls({
         <Pencil className="size-5" />
       </Button>
 
-      {/* Chat */}
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={onToggleChat}
-        className={cn(
-          "relative size-12 rounded-full",
-          chatOpen && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
-        )}
-        aria-label={chatOpen ? "Закрыть чат" : "Открыть чат"}
-      >
-        <MessageSquare className="size-5" />
-        {!chatOpen && unreadCount > 0 && (
-          <span
-            className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground"
-            aria-label={`${unreadCount} непрочитанных сообщений`}
-          >
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-      </Button>
+      {/* Chat now lives in a draggable floating button (FloatingChatButton),
+          so it's no longer part of the footer cluster. */}
 
       {/* Leave */}
       <Button
