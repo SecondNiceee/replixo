@@ -36,7 +36,7 @@ const DEFAULTS = {
   xRatio: 0.92,
   yRatio: 0.78,
   visible: true,
-  hotkey: "KeyC",
+  hotkey: "Tab",
 } as const
 
 export const useChatButtonStore = create<ChatButtonState>()(
