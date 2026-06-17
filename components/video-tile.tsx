@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { MicOff, VideoOff, User, Volume2, VolumeX } from "lucide-react"
+import { MicOff, User, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
 import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
@@ -175,13 +175,8 @@ export function VideoTile({
         </span>
         <div className="flex items-center gap-1">
           {isMuted && (
-            <span className="flex size-5 items-center justify-center rounded-full bg-destructive/90">
-              <MicOff className="size-2.5 text-white" />
-            </span>
-          )}
-          {isCamOff && (
-            <span className="flex size-5 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-              <VideoOff className="size-2.5 text-white" />
+            <span className="flex size-8 items-center justify-center rounded-full bg-destructive/90">
+              <MicOff className="size-4 text-white" />
             </span>
           )}
           {!isLocal && localMuted && (
