@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { MessageSquare, Settings, Hand } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
+import { useChatButtonSync } from "@/hooks/use-chat-button-sync"
 import { ChatButtonSettingsDialog } from "./chat-button-settings"
 
 interface FloatingChatButtonProps {
@@ -22,6 +23,10 @@ export function FloatingChatButton({
   onToggleChat,
 }: FloatingChatButtonProps) {
   const { xRatio, yRatio, visible, setPosition } = useChatButtonStore()
+
+  // Keep settings in sync with the DB for signed-in users (merge on login,
+  // debounced autosave afterwards). No-op for anonymous users.
+  useChatButtonSync()
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
