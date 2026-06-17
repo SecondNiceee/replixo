@@ -165,7 +165,7 @@ export function VideoTile({
       )}
 
       {/* Bottom bar */}
-      <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 px-2 py-1.5">
+      <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 px-4 py-4">
         <span className="max-w-[70%] truncate rounded-md bg-black/45 px-1.5 py-0.5 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
           {isScreen
             ? `${displayName}${isLocal ? " (вы)" : ""} — экран`
@@ -175,8 +175,8 @@ export function VideoTile({
         </span>
         <div className="flex items-center gap-1">
           {isMuted && (
-            <span className="flex size-8 items-center justify-center rounded-full bg-destructive/90">
-              <MicOff className="size-4 text-white" />
+            <span className="flex size-10 items-center justify-center rounded-full bg-destructive/90">
+              <MicOff className="size-5 text-white" />
             </span>
           )}
           {!isLocal && localMuted && (
