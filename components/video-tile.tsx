@@ -38,6 +38,7 @@ export function VideoTile({
   // Per-user local audio controls (remote tiles only).
   const [localMuted, setLocalMuted] = useState(false)
   const [volume, setVolume] = useState(1)
+  const [isDragging, setIsDragging] = useState(false)
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
   const analysedStream = isLocal ? speakingStream : audioStream
@@ -120,7 +121,12 @@ export function VideoTile({
 
       {/* Per-user volume control (remote tiles only) */}
       {!isLocal && (
-        <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 opacity-0 backdrop-blur-sm transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+        <div
+          className={cn(
+            "absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
+            isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
+          )}
+        >
           <button
             onClick={() => setLocalMuted((m) => !m)}
             className="flex size-6 items-center justify-center rounded-full text-white transition-colors hover:bg-white/15"
@@ -139,8 +145,12 @@ export function VideoTile({
               setVolume(v)
               setLocalMuted(v === 0)
             }}
+            onMouseDown={() => setIsDragging(true)}
+            onMouseUp={() => setIsDragging(false)}
+            onTouchStart={() => setIsDragging(true)}
+            onTouchEnd={() => setIsDragging(false)}
             aria-label="Громкость участника"
-            className="h-1 w-16 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
+            className="h-1.5 w-24 cursor-pointer appearance-none rounded-full bg-white/30 accent-white"
           />
         </div>
       )}
