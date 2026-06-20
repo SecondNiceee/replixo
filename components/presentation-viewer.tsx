@@ -1,10 +1,123 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { ChevronLeft, ChevronRight, X, FileText } from "lucide-react"
+import { ChevronLeft, ChevronRight, X, FileText, Pencil, Eraser, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SlideState } from "@/hooks/use-mediasoup"
+
+// ---------------------------------------------------------------------------
+// DrawingOverlay
+//
+// A transparent canvas that sits over the presentation content. The presenter
+// can draw freehand strokes and erase them. The overlay does NOT block mouse
+// events when the drawing tool is inactive, so slide navigation still works.
+// ---------------------------------------------------------------------------
+
+const DRAW_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#a855f7", "#ffffff"]
+
+interface DrawingOverlayProps {
+  /** Whether the overlay is in drawing mode (captures pointer events). */
+  active: boolean
+  tool: "pen" | "eraser"
+  color: string
+  lineWidth: number
+  eraserSize: number
+}
+
+function DrawingOverlay({ active, tool, color, lineWidth, eraserSize }: DrawingOverlayProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drawing = useRef(false)
+  const lastPoint = useRef<{ x: number; y: number } | null>(null)
+
+  // Resize canvas to match its CSS size whenever the container resizes.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ro = new ResizeObserver(() => {
+      // Preserve existing drawing by copying to a tmp image before resize.
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      canvas.width = canvas.offsetWidth
+      canvas.height = canvas.offsetHeight
+      ctx.putImageData(imgData, 0, 0)
+    })
+    ro.observe(canvas)
+    // Initial size.
+    canvas.width = canvas.offsetWidth
+    canvas.height = canvas.offsetHeight
+    return () => ro.disconnect()
+  }, [])
+
+  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!active) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drawing.current = true
+    lastPoint.current = getPos(e)
+  }, [active])
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current || !active) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")!
+    const pos = getPos(e)
+    const prev = lastPoint.current ?? pos
+
+    ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over"
+    ctx.strokeStyle = color
+    ctx.lineWidth = tool === "eraser" ? eraserSize : lineWidth
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    ctx.beginPath()
+    ctx.moveTo(prev.x, prev.y)
+    ctx.lineTo(pos.x, pos.y)
+    ctx.stroke()
+
+    lastPoint.current = pos
+  }, [active, tool, color, lineWidth, eraserSize])
+
+  const onPointerUp = useCallback(() => {
+    drawing.current = false
+    lastPoint.current = null
+  }, [])
+
+  // Expose a clear method via a data attribute hack — parent calls it via ref.
+  const clear = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height)
+  }, [])
+
+  // Attach clear to canvas element so parent can call it.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(canvas as any).__clearDrawing = clear
+  }, [clear])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className={cn(
+        "absolute inset-0 h-full w-full",
+        active ? (tool === "eraser" ? "cursor-cell" : "cursor-crosshair") : "pointer-events-none",
+      )}
+      style={{ zIndex: 10 }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerUp}
+    />
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,6 +165,19 @@ export function PresentationViewer({
   file,
 }: PresentationViewerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const drawingOverlayRef = useRef<HTMLDivElement>(null)
+
+  // Drawing tool state
+  const [drawActive, setDrawActive] = useState(false)
+  const [drawTool, setDrawTool] = useState<"pen" | "eraser">("pen")
+  const [drawColor, setDrawColor] = useState(DRAW_COLORS[0])
+  const [lineWidth] = useState(3)
+  const [eraserSize] = useState(24)
+
+  const handleClearDrawing = useCallback(() => {
+    const overlay = drawingOverlayRef.current?.querySelector("canvas") as HTMLCanvasElement & { __clearDrawing?: () => void } | null
+    overlay?.__clearDrawing?.()
+  }, [])
 
   // Wire viewer stream into <video> and autoplay only when there are tracks.
   useEffect(() => {
@@ -129,7 +255,7 @@ export function PresentationViewer({
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl bg-black">
       {/* Main content */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+      <div ref={drawingOverlayRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         {isPresenter ? (
           canvasRef ? (
             <PresenterCanvas
@@ -151,9 +277,17 @@ export function PresentationViewer({
           <EmptySlate label="Ожидание презентации…" />
         )}
 
-        {/* Large side navigation arrows — presenter only. Overlaid on the slide
-            so it is obvious the deck can be paged forward/back. */}
-        {isPresenter && total > 0 && (
+        {/* Drawing overlay — sits above content, pointer-events disabled when not drawing */}
+        <DrawingOverlay
+          active={drawActive}
+          tool={drawTool}
+          color={drawColor}
+          lineWidth={lineWidth}
+          eraserSize={eraserSize}
+        />
+
+        {/* Large side navigation arrows — presenter only. Hidden while drawing. */}
+        {isPresenter && total > 0 && !drawActive && (
           <>
             <button
               onClick={goPrev}
@@ -186,9 +320,9 @@ export function PresentationViewer({
       </div>
 
       {/* Controls bar */}
-      <div className="flex shrink-0 items-center justify-between gap-3 bg-black/80 px-4 py-2 backdrop-blur-sm">
-        {/* Stop button — only for presenter */}
-        <div className="flex w-28 items-center">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-black/80 px-4 py-2 backdrop-blur-sm">
+        {/* Left: Stop + Draw toggle */}
+        <div className="flex items-center gap-1.5">
           {isPresenter && (
             <Button
               variant="ghost"
@@ -200,17 +334,89 @@ export function PresentationViewer({
               Завершить
             </Button>
           )}
+
+          {/* Drawing tool toggle — available for both presenter and viewer */}
+          <button
+            onClick={() => setDrawActive((v) => !v)}
+            title={drawActive ? "Отключить рисование" : "Рисовать на слайде"}
+            className={cn(
+              "flex size-8 items-center justify-center rounded-lg transition-colors",
+              drawActive
+                ? "bg-white/20 text-white"
+                : "text-white/50 hover:bg-white/10 hover:text-white",
+            )}
+          >
+            <Pencil className="size-4" />
+          </button>
         </div>
+
+        {/* Drawing sub-toolbar — shown only when drawing is active */}
+        {drawActive && (
+          <div className="flex items-center gap-1.5">
+            {/* Pen tool */}
+            <button
+              onClick={() => setDrawTool("pen")}
+              title="Карандаш"
+              className={cn(
+                "flex size-7 items-center justify-center rounded transition-colors",
+                drawTool === "pen" ? "bg-white/25 text-white" : "text-white/50 hover:text-white",
+              )}
+            >
+              <Pencil className="size-3.5" />
+            </button>
+
+            {/* Eraser tool */}
+            <button
+              onClick={() => setDrawTool("eraser")}
+              title="Ластик"
+              className={cn(
+                "flex size-7 items-center justify-center rounded transition-colors",
+                drawTool === "eraser" ? "bg-white/25 text-white" : "text-white/50 hover:text-white",
+              )}
+            >
+              <Eraser className="size-3.5" />
+            </button>
+
+            {/* Divider */}
+            <div className="mx-0.5 h-4 w-px bg-white/20" />
+
+            {/* Color swatches — hidden while eraser is active */}
+            {drawTool === "pen" && DRAW_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setDrawColor(c)}
+                title={c}
+                className={cn(
+                  "size-5 rounded-full border-2 transition-transform hover:scale-110",
+                  drawColor === c ? "border-white scale-110" : "border-transparent",
+                )}
+                style={{ background: c }}
+              />
+            ))}
+
+            {/* Divider */}
+            <div className="mx-0.5 h-4 w-px bg-white/20" />
+
+            {/* Clear all */}
+            <button
+              onClick={handleClearDrawing}
+              title="Очистить всё"
+              className="flex size-7 items-center justify-center rounded text-white/50 transition-colors hover:bg-red-500/20 hover:text-red-400"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Slide counter — always shown. Arrows — presenter only. */}
         <div className="flex items-center gap-3">
           {isPresenter && (
             <button
               onClick={goPrev}
-              disabled={!canGoBack}
+              disabled={!canGoBack || drawActive}
               className={cn(
                 "flex size-9 items-center justify-center rounded-full transition-colors",
-                canGoBack ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
+                canGoBack && !drawActive ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
               )}
               aria-label="Предыдущий слайд"
             >
@@ -225,10 +431,10 @@ export function PresentationViewer({
           {isPresenter && (
             <button
               onClick={goNext}
-              disabled={!canGoForward}
+              disabled={!canGoForward || drawActive}
               className={cn(
                 "flex size-9 items-center justify-center rounded-full transition-colors",
-                canGoForward ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
+                canGoForward && !drawActive ? "bg-white/10 text-white hover:bg-white/20" : "cursor-default text-white/20",
               )}
               aria-label="Следующий слайд"
             >
@@ -236,9 +442,6 @@ export function PresentationViewer({
             </button>
           )}
         </div>
-
-        {/* Spacer to keep arrows centred */}
-        <div className="w-28" />
       </div>
     </div>
   )
