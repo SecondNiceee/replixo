@@ -96,7 +96,7 @@ export function VideoTile({
   return (
     <div
       className={cn(
-        "group relative flex items-center justify-center overflow-hidden rounded-2xl bg-secondary transition-all",
+        "group relative flex items-center justify-center overflow-hidden rounded-2xl bg-black transition-all",
         speaking && "ring-2 ring-green-500 ring-offset-2 ring-offset-background",
         className,
       )}
