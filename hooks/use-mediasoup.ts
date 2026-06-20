@@ -166,6 +166,9 @@ interface State {
   // as incremental diffs through a ref-based subscription, not through state.
   whiteboardOpen: boolean
   whiteboardSnapshot: string | null
+  // Presentation drawing annotations: Map<slideIndex, snapshotDataURL>.
+  // Loaded from DB on join; updated live as participants draw.
+  presentationDrawings: Map<number, string>
 }
 
 type Action =
@@ -187,6 +190,8 @@ type Action =
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "SET_READ_MARKER"; peerId: string; ts: number }
   | { type: "SET_WHITEBOARD"; open: boolean; snapshot?: string | null }
+  | { type: "SET_PRESENTATION_DRAWINGS"; drawings: Map<number, string> }
+  | { type: "SET_PRESENTATION_DRAWING_SNAPSHOT"; slideIndex: number; snapshot: string | null }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -274,6 +279,17 @@ function reducer(state: State, action: Action): State {
       if (action.ts <= prev) return state
       return { ...state, readMarkers: { ...state.readMarkers, [action.peerId]: action.ts } }
     }
+    case "SET_PRESENTATION_DRAWINGS":
+      return { ...state, presentationDrawings: action.drawings }
+    case "SET_PRESENTATION_DRAWING_SNAPSHOT": {
+      const drawings = new Map(state.presentationDrawings)
+      if (action.snapshot === null) {
+        drawings.delete(action.slideIndex)
+      } else {
+        drawings.set(action.slideIndex, action.snapshot)
+      }
+      return { ...state, presentationDrawings: drawings }
+    }
     case "SET_WHITEBOARD": {
       // Only overwrite the snapshot when one is explicitly provided; toggling
       // the board closed/open without a payload preserves the last snapshot.
@@ -334,6 +350,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     readMarkers: {},
     whiteboardOpen: false,
     whiteboardSnapshot: null,
+    presentationDrawings: new Map(),
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -359,6 +376,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Whiteboard component). Kept in a ref so handlers stay stable and the join
   // effect never needs to re-run when the board mounts/unmounts.
   const whiteboardListenersRef = useRef<Set<(changes: unknown) => void>>(new Set())
+
+  // Presentation drawing stroke subscribers. Fans incoming remote strokes out
+  // to the DrawingOverlay so it can replay the segment locally.
+  type StrokeEvent = { slideIndex: number; stroke: unknown }
+  const presentationStrokeListenersRef = useRef<Set<(event: StrokeEvent) => void>>(new Set())
+  // Presentation draw-clear subscribers.
+  type DrawClearEvent = { slideIndex: number }
+  const presentationClearListenersRef = useRef<Set<(event: DrawClearEvent) => void>>(new Set())
 
   // consumerId -> Consumer
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
@@ -828,6 +853,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           readMarkers?: Array<{ peerId: string; ts: number }>
           whiteboardOpen?: boolean
           whiteboardSnapshot?: string | null
+          presentationDrawings?: Record<string, unknown>
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -850,6 +876,18 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             open: !!data.whiteboardOpen,
             snapshot: data.whiteboardSnapshot ?? null,
           })
+
+          // Restore persisted presentation drawing annotations (рисунки на слайдах).
+          if (data.presentationDrawings && typeof data.presentationDrawings === 'object') {
+            const drawMap = new Map<number, string>()
+            for (const [k, v] of Object.entries(data.presentationDrawings as Record<string, unknown>)) {
+              const idx = Number(k)
+              if (Number.isFinite(idx) && typeof v === 'string') {
+                drawMap.set(idx, v)
+              }
+            }
+            dispatch({ type: "SET_PRESENTATION_DRAWINGS", drawings: drawMap })
+          }
 
           // Load persisted chat history (oldest first). ADD_MESSAGE dedupes by
           // id, so re-running this on a full rejoin is harmless. "self" is
@@ -956,7 +994,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               if (hadMic) {
                 const audioTrack = localStreamRef.current?.getAudioTracks()[0]
                 if (audioTrack) {
-                  // Ensure track is enabled regardless of previous mute state —
+                  // Ensure track is enabled regardless of previous mute state ���
                   // we'll pause the producer below if the user was muted.
                   audioTrack.enabled = true
                   const newAudioProducer = await (newSendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({
@@ -1207,6 +1245,23 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     socket.on("whiteboardChange", (payload: { peerId: string; changes: unknown }) => {
       if (!payload || payload.changes == null) return
       whiteboardListenersRef.current.forEach((fn) => fn(payload.changes))
+    })
+
+    // Presentation drawing: incoming remote stroke — fan out to listeners.
+    socket.on("presentationStroke", (payload: { peerId: string; slideIndex: number; stroke: unknown }) => {
+      if (!payload || payload.stroke == null) return
+      presentationStrokeListenersRef.current.forEach((fn) =>
+        fn({ slideIndex: payload.slideIndex, stroke: payload.stroke })
+      )
+    })
+
+    // Presentation drawing: clear a slide's drawing for everyone.
+    socket.on("presentationDrawClear", (payload: { peerId: string; slideIndex: number }) => {
+      if (!payload || typeof payload.slideIndex !== 'number') return
+      dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex: payload.slideIndex, snapshot: null })
+      presentationClearListenersRef.current.forEach((fn) =>
+        fn({ slideIndex: payload.slideIndex })
+      )
     })
   }, [roomId, displayName, setupTransports, consumeProducer])
 
@@ -1787,6 +1842,52 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     }
   }, [])
 
+  // -------------------------------------------------------------------------
+  // Presentation drawing annotations
+  // -------------------------------------------------------------------------
+
+  // Send an incremental stroke to all peers (relayed by server, not stored).
+  const sendPresentationStroke = useCallback((slideIndex: number, stroke: unknown) => {
+    const socket = socketRef.current
+    if (!socket || stroke == null) return
+    socket.emit("presentationStroke", { roomId, peerId: peerId.current, slideIndex, stroke })
+  }, [roomId])
+
+  // Clear drawing on a slide for everyone + persist null to DB.
+  const clearPresentationDrawing = useCallback((slideIndex: number) => {
+    const socket = socketRef.current
+    if (!socket) return
+    dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex, snapshot: null })
+    socket.emit("presentationDrawClear", { roomId, peerId: peerId.current, slideIndex })
+  }, [roomId])
+
+  // Save the full canvas snapshot for a slide (debounced by caller). Persisted
+  // to DB; also kept in state for local restoration on slide navigation.
+  const savePresentationDrawingSnapshot = useCallback((slideIndex: number, snapshot: string) => {
+    const socket = socketRef.current
+    if (!socket || typeof snapshot !== 'string') return
+    dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex, snapshot })
+    socket.emit("presentationDrawSnapshot", { roomId, peerId: peerId.current, slideIndex, snapshot })
+  }, [roomId])
+
+  // Subscribe to incoming remote strokes. Returns unsubscribe fn.
+  const subscribePresentationStroke = useCallback(
+    (fn: (event: { slideIndex: number; stroke: unknown }) => void) => {
+      presentationStrokeListenersRef.current.add(fn)
+      return () => { presentationStrokeListenersRef.current.delete(fn) }
+    },
+    [],
+  )
+
+  // Subscribe to remote clear events. Returns unsubscribe fn.
+  const subscribePresentationClear = useCallback(
+    (fn: (event: { slideIndex: number }) => void) => {
+      presentationClearListenersRef.current.add(fn)
+      return () => { presentationClearListenersRef.current.delete(fn) }
+    },
+    [],
+  )
+
   // Publish a canvas-captured stream as the presentation video track.
   const startPresentation = useCallback(async (stream: MediaStream) => {
     const sendTransport = sendTransportRef.current
@@ -1869,6 +1970,13 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
+    // Presentation drawing annotations
+    presentationDrawings: state.presentationDrawings,
+    sendPresentationStroke,
+    clearPresentationDrawing,
+    savePresentationDrawingSnapshot,
+    subscribePresentationStroke,
+    subscribePresentationClear,
     localPeerId: peerId.current,
   }
 }

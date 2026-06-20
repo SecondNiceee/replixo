@@ -34,6 +34,13 @@ interface RoomVideoGridProps {
   onSlideChange: (slide: number, total: number) => void
   onPresentationLoaded: (total: number) => void
   onStopPresentation: () => void
+  // Drawing sync
+  presentationDrawings?: Map<number, string>
+  onSendStroke?: (slideIndex: number, stroke: unknown) => void
+  onClearDrawing?: (slideIndex: number) => void
+  onSaveDrawingSnapshot?: (slideIndex: number, dataURL: string) => void
+  subscribeRemoteStroke?: (fn: (event: { slideIndex: number; stroke: unknown }) => void) => () => void
+  subscribeRemoteClear?: (fn: (event: { slideIndex: number }) => void) => () => void
 }
 
 export function RoomVideoGrid({
@@ -51,6 +58,12 @@ export function RoomVideoGrid({
   onSlideChange,
   onPresentationLoaded,
   onStopPresentation,
+  presentationDrawings,
+  onSendStroke,
+  onClearDrawing,
+  onSaveDrawingSnapshot,
+  subscribeRemoteStroke,
+  subscribeRemoteClear,
 }: RoomVideoGridProps) {
   const [participantsHidden, setParticipantsHidden] = useState(false)
 
@@ -138,6 +151,12 @@ export function RoomVideoGrid({
             canvasRef={isPresenting ? presentationCanvasRef : undefined}
             remoteStream={presentingPeer?.presentationStream}
             file={presentationFile}
+            presentationDrawings={presentationDrawings}
+            onSendStroke={onSendStroke}
+            onClearDrawing={onClearDrawing}
+            onSaveDrawingSnapshot={onSaveDrawingSnapshot}
+            subscribeRemoteStroke={subscribeRemoteStroke}
+            subscribeRemoteClear={subscribeRemoteClear}
           />
         </div>
 

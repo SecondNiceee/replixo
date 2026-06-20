@@ -146,3 +146,20 @@ export const whiteboard = pgTable('whiteboard', {
   open: boolean('open').notNull().default(false),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 })
+
+// --- Presentation drawing annotations --------------------------------------
+// Рисунки поверх слайдов презентации. Для каждой пары (комната, слайд) храним
+// снапшот canvas в виде base64 PNG-строки (data URL). Стирается вместе с
+// комнатой. Одна строка на слайд — upsert при каждом сохранении.
+
+export const presentationDrawing = pgTable(
+  'presentation_drawing',
+  {
+    roomId: text('roomId').notNull(),
+    slideIndex: text('slideIndex').notNull(), // строка чтобы избежать integer PK
+    // Снапшот canvas как data URL ("data:image/png;base64,..."). null — пусто.
+    snapshot: text('snapshot'),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.roomId, t.slideIndex] })],
+)

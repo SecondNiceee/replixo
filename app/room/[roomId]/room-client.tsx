@@ -73,6 +73,13 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
+    // Presentation drawing annotations
+    presentationDrawings,
+    sendPresentationStroke,
+    clearPresentationDrawing,
+    savePresentationDrawingSnapshot,
+    subscribePresentationStroke,
+    subscribePresentationClear,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -336,6 +343,12 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           onSlideChange={notifySlideChange}
           onPresentationLoaded={handlePresentationLoaded}
           onStopPresentation={handleStopPresentation}
+          presentationDrawings={presentationDrawings}
+          onSendStroke={sendPresentationStroke}
+          onClearDrawing={clearPresentationDrawing}
+          onSaveDrawingSnapshot={savePresentationDrawingSnapshot}
+          subscribeRemoteStroke={subscribePresentationStroke}
+          subscribeRemoteClear={subscribePresentationClear}
         />
       )}
 

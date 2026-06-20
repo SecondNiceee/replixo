@@ -9,58 +9,167 @@ import type { SlideState } from "@/hooks/use-mediasoup"
 // ---------------------------------------------------------------------------
 // DrawingOverlay
 //
-// A transparent canvas that sits over the presentation content. The presenter
-// can draw freehand strokes and erase them. The overlay does NOT block mouse
-// events when the drawing tool is inactive, so slide navigation still works.
+// A transparent canvas that sits over the presentation content. Strokes are
+// synced to all peers in real-time via Socket.io and persisted to DB (one
+// canvas snapshot per slide index).
+//
+// Sync protocol:
+//   - onStroke(stroke) — called after each completed stroke; parent emits it
+//   - subscribeRemote — registers a listener that receives remote strokes and
+//     replays them onto the canvas
+//   - subscribeClear — registers a listener for remote clear events
+//   - onSaveSnapshot(dataURL) — called debounced after each stroke to persist
+//   - initialSnapshot — data URL to restore when the slide mounts
+//   - onClear() — called when the user clears locally; parent emits + persists
 // ---------------------------------------------------------------------------
 
 const DRAW_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#a855f7", "#ffffff"]
 
+// Serialised form of a single stroke — transmitted over the wire.
+interface StrokeData {
+  tool: "pen" | "eraser"
+  color: string
+  lineWidth: number
+  // Array of normalised [0,1] coordinates (relative to canvas dimensions).
+  // Normalised so the remote canvas can replay at any resolution.
+  points: Array<{ x: number; y: number }>
+}
+
 interface DrawingOverlayProps {
-  /** Whether the overlay is in drawing mode (captures pointer events). */
   active: boolean
   tool: "pen" | "eraser"
   color: string
   lineWidth: number
   eraserSize: number
+  // Sync callbacks — all optional so the component works standalone too.
+  onStroke?: (stroke: StrokeData) => void
+  onClear?: () => void
+  onSaveSnapshot?: (dataURL: string) => void
+  subscribeRemote?: (fn: (event: { slideIndex: number; stroke: unknown }) => void) => () => void
+  subscribeClear?: (fn: (event: { slideIndex: number }) => void) => () => void
+  slideIndex: number
+  initialSnapshot?: string | null
 }
 
-function DrawingOverlay({ active, tool, color, lineWidth, eraserSize }: DrawingOverlayProps) {
+function DrawingOverlay({
+  active,
+  tool,
+  color,
+  lineWidth,
+  eraserSize,
+  onStroke,
+  onClear,
+  onSaveSnapshot,
+  subscribeRemote,
+  subscribeClear,
+  slideIndex,
+  initialSnapshot,
+}: DrawingOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
-  const lastPoint = useRef<{ x: number; y: number } | null>(null)
+  // Points collected during the current stroke (in normalised 0-1 coords).
+  const currentStrokePoints = useRef<Array<{ x: number; y: number }>>([])
+  const snapshotDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Resize canvas to match its CSS size whenever the container resizes.
+  // ---------------------------------------------------------------------------
+  // Resize: preserve drawing content when the container resizes.
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ro = new ResizeObserver(() => {
-      // Preserve existing drawing by copying to a tmp image before resize.
       const ctx = canvas.getContext("2d")
       if (!ctx) return
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      // Save current bitmap.
+      const img = canvas.toDataURL()
       canvas.width = canvas.offsetWidth
       canvas.height = canvas.offsetHeight
-      ctx.putImageData(imgData, 0, 0)
+      const tmp = new Image()
+      tmp.onload = () => ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height)
+      tmp.src = img
     })
     ro.observe(canvas)
-    // Initial size.
-    canvas.width = canvas.offsetWidth
-    canvas.height = canvas.offsetHeight
+    canvas.width = canvas.offsetWidth || 1
+    canvas.height = canvas.offsetHeight || 1
     return () => ro.disconnect()
   }, [])
 
-  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
-  }
+  // ---------------------------------------------------------------------------
+  // Restore snapshot when slide changes.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")!
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (initialSnapshot) {
+      const img = new Image()
+      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      img.src = initialSnapshot
+    }
+  }, [slideIndex, initialSnapshot])
 
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  const getPos = useCallback((e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } => {
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) / canvas.width,
+      y: (e.clientY - rect.top) / canvas.height,
+    }
+  }, [])
+
+  const replayStroke = useCallback((canvas: HTMLCanvasElement, stroke: StrokeData) => {
+    if (!stroke.points || stroke.points.length < 1) return
+    const ctx = canvas.getContext("2d")!
+    ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over"
+    ctx.strokeStyle = stroke.color
+    ctx.lineWidth = (stroke.tool === "eraser" ? stroke.lineWidth : stroke.lineWidth) * canvas.width / 1000
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    ctx.beginPath()
+    const first = stroke.points[0]
+    ctx.moveTo(first.x * canvas.width, first.y * canvas.height)
+    for (let i = 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i].x * canvas.width, stroke.points[i].y * canvas.height)
+    }
+    ctx.stroke()
+  }, [])
+
+  const triggerSnapshot = useCallback(() => {
+    if (!onSaveSnapshot) return
+    if (snapshotDebounceRef.current) clearTimeout(snapshotDebounceRef.current)
+    snapshotDebounceRef.current = setTimeout(() => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      onSaveSnapshot(canvas.toDataURL("image/png"))
+    }, 800)
+  }, [onSaveSnapshot])
+
+  // ---------------------------------------------------------------------------
+  // Pointer events — draw locally and collect points for sync.
+  // ---------------------------------------------------------------------------
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!active) return
     e.currentTarget.setPointerCapture(e.pointerId)
     drawing.current = true
-    lastPoint.current = getPos(e)
-  }, [active])
+    const pos = getPos(e)
+    currentStrokePoints.current = [pos]
+
+    // Start the path on local canvas immediately.
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")!
+    ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over"
+    ctx.strokeStyle = color
+    ctx.lineWidth = (tool === "eraser" ? eraserSize : lineWidth) * canvas.width / 1000
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    ctx.beginPath()
+    ctx.moveTo(pos.x * canvas.width, pos.y * canvas.height)
+  }, [active, tool, color, lineWidth, eraserSize, getPos])
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!drawing.current || !active) return
@@ -68,40 +177,74 @@ function DrawingOverlay({ active, tool, color, lineWidth, eraserSize }: DrawingO
     if (!canvas) return
     const ctx = canvas.getContext("2d")!
     const pos = getPos(e)
-    const prev = lastPoint.current ?? pos
-
-    ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over"
-    ctx.strokeStyle = color
-    ctx.lineWidth = tool === "eraser" ? eraserSize : lineWidth
-    ctx.lineCap = "round"
-    ctx.lineJoin = "round"
-    ctx.beginPath()
-    ctx.moveTo(prev.x, prev.y)
-    ctx.lineTo(pos.x, pos.y)
+    currentStrokePoints.current.push(pos)
+    ctx.lineTo(pos.x * canvas.width, pos.y * canvas.height)
     ctx.stroke()
-
-    lastPoint.current = pos
-  }, [active, tool, color, lineWidth, eraserSize])
+  }, [active, getPos])
 
   const onPointerUp = useCallback(() => {
+    if (!drawing.current) return
     drawing.current = false
-    lastPoint.current = null
-  }, [])
 
-  // Expose a clear method via a data attribute hack — parent calls it via ref.
+    const points = currentStrokePoints.current
+    currentStrokePoints.current = []
+    if (points.length === 0) return
+
+    const stroke: StrokeData = {
+      tool,
+      color,
+      lineWidth: tool === "eraser" ? eraserSize : lineWidth,
+      points,
+    }
+
+    onStroke?.(stroke)
+    triggerSnapshot()
+  }, [tool, color, lineWidth, eraserSize, onStroke, triggerSnapshot])
+
+  // ---------------------------------------------------------------------------
+  // Expose clear method via DOM hack (parent calls it).
+  // ---------------------------------------------------------------------------
   const clear = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height)
-  }, [])
+    onClear?.()
+    if (snapshotDebounceRef.current) clearTimeout(snapshotDebounceRef.current)
+  }, [onClear])
 
-  // Attach clear to canvas element so parent can call it.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(canvas as any).__clearDrawing = clear
   }, [clear])
+
+  // ---------------------------------------------------------------------------
+  // Subscribe to remote strokes — replay on our canvas.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!subscribeRemote) return
+    const unsub = subscribeRemote((event) => {
+      const canvas = canvasRef.current
+      if (!canvas || event.slideIndex !== slideIndex) return
+      replayStroke(canvas, event.stroke as StrokeData)
+      triggerSnapshot()
+    })
+    return unsub
+  }, [subscribeRemote, slideIndex, replayStroke, triggerSnapshot])
+
+  // ---------------------------------------------------------------------------
+  // Subscribe to remote clear events.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!subscribeClear) return
+    const unsub = subscribeClear((event) => {
+      const canvas = canvasRef.current
+      if (!canvas || event.slideIndex !== slideIndex) return
+      canvas.getContext("2d")!.clearRect(0, 0, canvas.width, canvas.height)
+    })
+    return unsub
+  }, [subscribeClear, slideIndex])
 
   return (
     <canvas
@@ -148,6 +291,19 @@ export interface PresentationViewerProps {
   remoteStream?: MediaStream
   /** The file selected by the presenter. */
   file?: File | null
+  // Drawing sync — all optional; if absent the overlay works locally only.
+  /** All saved drawing snapshots by slide index (from DB / server). */
+  presentationDrawings?: Map<number, string>
+  /** Send a completed stroke to peers. */
+  onSendStroke?: (slideIndex: number, stroke: unknown) => void
+  /** Clear drawing on a slide for everyone (triggers server persist). */
+  onClearDrawing?: (slideIndex: number) => void
+  /** Save canvas snapshot to DB (debounced by DrawingOverlay). */
+  onSaveDrawingSnapshot?: (slideIndex: number, dataURL: string) => void
+  /** Subscribe to remote strokes from other peers. */
+  subscribeRemoteStroke?: (fn: (event: { slideIndex: number; stroke: unknown }) => void) => () => void
+  /** Subscribe to remote clear events. */
+  subscribeRemoteClear?: (fn: (event: { slideIndex: number }) => void) => () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +319,12 @@ export function PresentationViewer({
   canvasRef,
   remoteStream,
   file,
+  presentationDrawings,
+  onSendStroke,
+  onClearDrawing,
+  onSaveDrawingSnapshot,
+  subscribeRemoteStroke,
+  subscribeRemoteClear,
 }: PresentationViewerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const drawingOverlayRef = useRef<HTMLDivElement>(null)
@@ -176,6 +338,7 @@ export function PresentationViewer({
 
   const handleClearDrawing = useCallback(() => {
     const overlay = drawingOverlayRef.current?.querySelector("canvas") as HTMLCanvasElement & { __clearDrawing?: () => void } | null
+    // __clearDrawing calls onClear internally which calls onClearDrawing(slideIndex).
     overlay?.__clearDrawing?.()
   }, [])
 
@@ -284,6 +447,13 @@ export function PresentationViewer({
           color={drawColor}
           lineWidth={lineWidth}
           eraserSize={eraserSize}
+          slideIndex={slide}
+          initialSnapshot={presentationDrawings?.get(slide) ?? null}
+          onStroke={onSendStroke ? (stroke) => onSendStroke(slide, stroke) : undefined}
+          onClear={onClearDrawing ? () => onClearDrawing(slide) : undefined}
+          onSaveSnapshot={onSaveDrawingSnapshot ? (dataURL) => onSaveDrawingSnapshot(slide, dataURL) : undefined}
+          subscribeRemote={subscribeRemoteStroke}
+          subscribeClear={subscribeRemoteClear}
         />
 
         {/* Large side navigation arrows — presenter only. Hidden while drawing. */}
@@ -298,7 +468,7 @@ export function PresentationViewer({
                   ? "bg-black/50 text-white hover:scale-105 hover:bg-black/70"
                   : "cursor-default bg-black/20 text-white/30",
               )}
-              aria-label="Предыдущий слайд"
+              aria-label="Пре��ыдущий слайд"
             >
               <ChevronLeft className="size-6" />
             </button>
