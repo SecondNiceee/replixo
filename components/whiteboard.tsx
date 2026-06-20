@@ -50,6 +50,8 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
   const cleanupRef = useRef<(() => void) | null>(null)
 
   const handleMount = useCallback((editor: Editor) => {
+    console.log("[v0][whiteboard] handleMount — Whiteboard component mounted")
+
     // Flag to suppress the store listener while we're seeding the initial
     // snapshot. loadSnapshot triggers source:"user" events in tldraw, which
     // would otherwise be mistakenly broadcast to peers as local edits.
@@ -62,11 +64,16 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
     const unlisten = editor.store.listen(
       (entry) => {
         // Ignore synthetic changes produced by our own loadSnapshot call.
-        if (isLoadingSnapshot) return
+        if (isLoadingSnapshot) {
+          console.log("[v0][whiteboard] store.listen SUPPRESSED (isLoadingSnapshot)")
+          return
+        }
+        console.log("[v0][whiteboard] store.listen onChange — sending diff to peers")
         onChangeRef.current(entry.changes as StoreDiff)
         if (snapshotTimer) clearTimeout(snapshotTimer)
         snapshotTimer = setTimeout(() => {
           try {
+            console.log("[v0][whiteboard] snapshotTimer fired — sending snapshot")
             onSnapshotRef.current(JSON.stringify(getSnapshot(editor.store)))
           } catch (e) {
             console.error("[Replixo] whiteboard: failed to serialize snapshot", e)
@@ -79,20 +86,26 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
     // 1. Seed the board with the persisted drawing (document only — we don't
     //    load another user's session/camera state).
     if (initialSnapshotRef.current) {
+      console.log("[v0][whiteboard] loading initialSnapshot — suppressing store listener")
       try {
         isLoadingSnapshot = true
         const parsed = JSON.parse(initialSnapshotRef.current)
         loadSnapshot(editor.store, parsed.document ? { document: parsed.document } : parsed)
+        console.log("[v0][whiteboard] initialSnapshot loaded OK")
       } catch (e) {
         console.error("[Replixo] whiteboard: failed to load snapshot", e)
       } finally {
         isLoadingSnapshot = false
+        console.log("[v0][whiteboard] isLoadingSnapshot = false — store listener active")
       }
+    } else {
+      console.log("[v0][whiteboard] no initialSnapshot — blank board")
     }
 
     // 3. Apply remote peers' diffs. mergeRemoteChanges tags them "remote" so the
     //    user-scoped listener above does not echo them back into the network.
     const unsubscribe = subscribeRef.current((changes) => {
+      console.log("[v0][whiteboard] subscribeRemote — applying remote diff")
       try {
         editor.store.mergeRemoteChanges(() => {
           editor.store.applyDiff(changes as StoreDiff)
@@ -111,6 +124,7 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
 
   useEffect(() => {
     return () => {
+      console.log("[v0][whiteboard] Whiteboard UNMOUNTING — running cleanup")
       cleanupRef.current?.()
       cleanupRef.current = null
     }

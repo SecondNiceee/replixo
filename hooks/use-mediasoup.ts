@@ -277,6 +277,11 @@ function reducer(state: State, action: Action): State {
     case "SET_WHITEBOARD": {
       // Only overwrite the snapshot when one is explicitly provided; toggling
       // the board closed/open without a payload preserves the last snapshot.
+      console.log(
+        "[v0][whiteboard] SET_WHITEBOARD dispatch — open:", action.open,
+        "| was:", state.whiteboardOpen,
+        "| snapshot provided:", action.snapshot !== undefined,
+      )
       return {
         ...state,
         whiteboardOpen: action.open,
@@ -1189,13 +1194,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // whiteboardChange relays a remote peer's incremental store diff, which we
     // fan out to the mounted Whiteboard component via the listener registry.
     // -----------------------------------------------------------------------
-    socket.on("whiteboardOpened", (payload: { peerId: string; snapshot: string | null }) => {
-      dispatch({ type: "SET_WHITEBOARD", open: true, snapshot: payload?.snapshot ?? null })
-    })
+  socket.on("whiteboardOpened", (payload: { peerId: string; snapshot: string | null }) => {
+    console.log("[v0][whiteboard] socket←whiteboardOpened from peer:", payload?.peerId, "snapshot?", !!payload?.snapshot)
+    dispatch({ type: "SET_WHITEBOARD", open: true, snapshot: payload?.snapshot ?? null })
+  })
 
-    socket.on("whiteboardClosed", () => {
-      dispatch({ type: "SET_WHITEBOARD", open: false })
-    })
+  socket.on("whiteboardClosed", () => {
+    console.log("[v0][whiteboard] socket←whiteboardClosed received")
+    dispatch({ type: "SET_WHITEBOARD", open: false })
+  })
 
     socket.on("whiteboardChange", (payload: { peerId: string; changes: unknown }) => {
       if (!payload || payload.changes == null) return
@@ -1746,6 +1753,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const openWhiteboard = useCallback(() => {
     const socket = socketRef.current
     if (!socket) return
+    console.log("[v0][whiteboard] openWhiteboard called — emitting whiteboardOpen")
     socket.emit("whiteboardOpen", { roomId, peerId: peerId.current })
     dispatch({ type: "SET_WHITEBOARD", open: true })
   }, [roomId])
@@ -1753,6 +1761,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const closeWhiteboard = useCallback(() => {
     const socket = socketRef.current
     if (!socket) return
+    console.log("[v0][whiteboard] closeWhiteboard called — emitting whiteboardClose")
     socket.emit("whiteboardClose", { roomId, peerId: peerId.current })
     dispatch({ type: "SET_WHITEBOARD", open: false })
   }, [roomId])
@@ -1760,12 +1769,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const sendWhiteboardChange = useCallback((changes: unknown) => {
     const socket = socketRef.current
     if (!socket || changes == null) return
+    console.log("[v0][whiteboard] sendWhiteboardChange — relaying diff to server")
     socket.emit("whiteboardChange", { roomId, peerId: peerId.current, changes })
   }, [roomId])
 
   const sendWhiteboardSnapshot = useCallback((snapshot: string) => {
     const socket = socketRef.current
     if (!socket || typeof snapshot !== "string") return
+    console.log("[v0][whiteboard] sendWhiteboardSnapshot — snapshot size:", snapshot.length)
     socket.emit("whiteboardSnapshot", { roomId, peerId: peerId.current, snapshot })
   }, [roomId])
 
