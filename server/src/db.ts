@@ -160,6 +160,7 @@ export async function deleteRoomMessages(roomId: string): Promise<void> {
     await pool.query(`DELETE FROM "message" WHERE "roomId" = $1`, [roomId])
     await pool.query(`DELETE FROM "message_read" WHERE "roomId" = $1`, [roomId])
     await pool.query(`DELETE FROM "whiteboard" WHERE "roomId" = $1`, [roomId])
+    await pool.query(`DELETE FROM "presentation_drawing" WHERE "roomId" = $1`, [roomId])
     console.log(`[db] Удалена история чата комнаты ${roomId}`)
   } catch (e) {
     console.error('[db] deleteRoomMessages failed:', (e as Error).message)
@@ -177,7 +178,7 @@ export interface StoredWhiteboard {
 
 /**
  * Сохранить/обновить снапшот доски комнаты и/или флаг "открыта". Передавай
- * только те поля, которые меняются. Вызывается дебаунсенно во время рисования,
+ * только те поля, которые меняются. Вызывае��ся дебаунсенно во время рисования,
  * поэтому пишем upsert одной строкой на комнату.
  */
 export async function saveWhiteboard(
@@ -224,5 +225,78 @@ export async function getWhiteboard(roomId: string): Promise<StoredWhiteboard> {
   } catch (e) {
     console.error('[db] getWhiteboard failed:', (e as Error).message)
     return { snapshot: null, open: false }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Рисунки поверх слайдов презентации
+// ---------------------------------------------------------------------------
+
+/**
+ * Сохранить/обновить снапшот рисунка на слайде.
+ * snapshot — data URL (base64 PNG) или null (стереть).
+ * slideIndex — 0-based индекс слайда.
+ */
+export async function savePresentationDrawing(
+  roomId: string,
+  slideIndex: number,
+  snapshot: string | null,
+): Promise<void> {
+  if (!pool) return
+  // Ограничиваем размер во избежание переполнения БД (5 МБ на слайд).
+  if (snapshot !== null && snapshot.length > 5_000_000) return
+  try {
+    await pool.query(
+      `INSERT INTO "presentation_drawing" ("roomId", "slideIndex", "snapshot", "updatedAt")
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT ("roomId", "slideIndex") DO UPDATE SET
+         "snapshot" = EXCLUDED."snapshot",
+         "updatedAt" = now()`,
+      [roomId, String(slideIndex), snapshot],
+    )
+  } catch (e) {
+    console.error('[db] savePresentationDrawing failed:', (e as Error).message)
+  }
+}
+
+/**
+ * Получить все рисунки комнаты: Map<slideIndex, snapshotDataURL>.
+ * Вызывается при воссоздании комнаты (после рестарта сервера) и при входе
+ * нового участника, чтобы он сразу увидел уже нарисованное.
+ */
+export async function getPresentationDrawings(
+  roomId: string,
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>()
+  if (!pool) return result
+  try {
+    const { rows } = await pool.query(
+      `SELECT "slideIndex", "snapshot" FROM "presentation_drawing"
+       WHERE "roomId" = $1 AND "snapshot" IS NOT NULL`,
+      [roomId],
+    )
+    for (const r of rows) {
+      result.set(Number(r.slideIndex), r.snapshot as string)
+    }
+  } catch (e) {
+    console.error('[db] getPresentationDrawings failed:', (e as Error).message)
+  }
+  return result
+}
+
+/**
+ * Удалить все рисунки комнаты. Вызывается при уничтожении комнаты.
+ * (deleteRoomMessages уже вызывает это через отдельный запрос — дублируем
+ * здесь для явности и для случаев, когда нужно удалить только рисунки.)
+ */
+export async function deletePresentationDrawings(roomId: string): Promise<void> {
+  if (!pool) return
+  try {
+    await pool.query(
+      `DELETE FROM "presentation_drawing" WHERE "roomId" = $1`,
+      [roomId],
+    )
+  } catch (e) {
+    console.error('[db] deletePresentationDrawings failed:', (e as Error).message)
   }
 }

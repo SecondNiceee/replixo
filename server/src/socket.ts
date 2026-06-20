@@ -12,6 +12,8 @@ import {
   getRoomReadMarkers,
   getWhiteboard,
   saveWhiteboard,
+  savePresentationDrawing,
+  getPresentationDrawings,
 } from './db'
 import type {
   JoinRoomPayload,
@@ -28,6 +30,9 @@ import type {
   WhiteboardOpenPayload,
   WhiteboardChangePayload,
   WhiteboardSnapshotPayload,
+  PresentationStrokePayload,
+  PresentationDrawClearPayload,
+  PresentationDrawSnapshotPayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -74,6 +79,13 @@ function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
       room.whiteboardSnapshot = wb.snapshot
     } catch {
       // Ignore — board simply starts empty.
+    }
+    // Hydrate presentation drawing annotations (рисунки поверх слайдов).
+    try {
+      const drawings = await getPresentationDrawings(roomId)
+      room.presentationDrawings = drawings
+    } catch {
+      // Ignore — slides start empty.
     }
     return room
   })
@@ -198,6 +210,12 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
           // already-sent messages right after joining/reloading.
           const readMarkers = await getRoomReadMarkers(roomId)
 
+          // Serialize presentationDrawings Map → plain object for JSON transport.
+          const presentationDrawings: Record<string, string> = {}
+          for (const [idx, snap] of room.presentationDrawings.entries()) {
+            presentationDrawings[String(idx)] = snap
+          }
+
           ack(callback, {
             rtpCapabilities: room.getRtpCapabilities(),
             existingPeers,
@@ -208,6 +226,8 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
             // full snapshot so a mid-session joiner sees the current drawing.
             whiteboardOpen: room.whiteboardOpen,
             whiteboardSnapshot: room.whiteboardSnapshot,
+            // Presentation drawing annotations — one snapshot per slide index.
+            presentationDrawings,
           })
         } catch (e) {
           err(callback as Callback<never>, (e as Error).message)
@@ -670,6 +690,69 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       if (typeof snapshot !== 'string' || snapshot.length > 5_000_000) return
       room.whiteboardSnapshot = snapshot
       void saveWhiteboard(rid, { snapshot })
+    })
+
+    // -----------------------------------------------------------------------
+    // Presentation drawing annotations
+    //
+    // presentationStroke — relay an incremental stroke to all other peers.
+    // presentationDrawClear — clear drawing on a slide for everyone.
+    // presentationDrawSnapshot — persist the full canvas snapshot for a slide.
+    // -----------------------------------------------------------------------
+
+    socket.on(
+      'presentationStroke',
+      (() => {
+        // Rate-limit: up to 300 stroke events/sec (drawing fires many events).
+        const PD_RATE_LIMIT = 300
+        const PD_RATE_WINDOW_MS = 1000
+        let pdEventCount = 0
+        let pdWindowStart = Date.now()
+
+        return (payload: unknown) => {
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, slideIndex, stroke } = payload as PresentationStrokePayload
+          const room = authedRoom(rid, pid)
+          if (!room) return
+          if (typeof slideIndex !== 'number' || !Number.isFinite(slideIndex) || slideIndex < 0) return
+          if (stroke == null) return
+
+          const now = Date.now()
+          if (now - pdWindowStart > PD_RATE_WINDOW_MS) {
+            pdEventCount = 0
+            pdWindowStart = now
+          }
+          if (++pdEventCount > PD_RATE_LIMIT) return
+
+          socket.to(rid).emit('presentationStroke', { peerId: pid, slideIndex, stroke })
+        }
+      })(),
+    )
+
+    socket.on('presentationDrawClear', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid, slideIndex } = payload as PresentationDrawClearPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      if (typeof slideIndex !== 'number' || !Number.isFinite(slideIndex) || slideIndex < 0) return
+
+      room.presentationDrawings.delete(slideIndex)
+      // Persist: null means "cleared".
+      void savePresentationDrawing(rid, slideIndex, null)
+      socket.to(rid).emit('presentationDrawClear', { peerId: pid, slideIndex })
+    })
+
+    socket.on('presentationDrawSnapshot', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid, slideIndex, snapshot } = payload as PresentationDrawSnapshotPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      if (typeof slideIndex !== 'number' || !Number.isFinite(slideIndex) || slideIndex < 0) return
+      if (typeof snapshot !== 'string' || snapshot.length > 5_000_000) return
+
+      room.presentationDrawings.set(slideIndex, snapshot)
+      void savePresentationDrawing(rid, slideIndex, snapshot)
+      // No broadcast needed — snapshot is only for persistence + late joiners.
     })
 
     // -----------------------------------------------------------------------

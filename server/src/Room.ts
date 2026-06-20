@@ -25,6 +25,11 @@ export class Room {
   whiteboardOpen = false
   whiteboardSnapshot: string | null = null
 
+  // Presentation drawing annotations: рисунки поверх слайдов.
+  // Map<slideIndex, snapshotDataURL> — один снапшот canvas на слайд.
+  // Заполняется при создании комнаты из БД и обновляется по мере рисования.
+  presentationDrawings: Map<number, string> = new Map()
+
   private constructor(id: string) {
     this.id = id
   }

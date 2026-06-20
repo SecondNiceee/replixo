@@ -205,6 +205,35 @@ export interface WhiteboardSnapshotPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Presentation drawing annotations (canvas рисунки поверх слайдов)
+// ---------------------------------------------------------------------------
+
+// Client → server: diff одного мазка (сегмент линии или точка).
+// Данные непрозрачны для сервера — он просто транслирует их всем остальным.
+export interface PresentationStrokePayload {
+  roomId: string
+  peerId: string
+  slideIndex: number
+  // Сериализованный мазок: { tool, color, lineWidth, points: [{x,y},...] }
+  stroke: unknown
+}
+
+// Client → server: стереть рисунок на конкретном слайде.
+export interface PresentationDrawClearPayload {
+  roomId: string
+  peerId: string
+  slideIndex: number
+}
+
+// Client → server: полный снапшот canvas слайда (data URL, debounced).
+export interface PresentationDrawSnapshotPayload {
+  roomId: string
+  peerId: string
+  slideIndex: number
+  snapshot: string // data:image/png;base64,...
+}
+
+// ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
 
