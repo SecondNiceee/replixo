@@ -297,18 +297,19 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
       {/* Main column. When the chat opens on >=sm screens we add a right margin
           so the content visibly shrinks beside the panel instead of being
           covered by it. On mobile the chat overlays full-width as before. */}
-      <div
-        className={cn(
-          "flex h-full min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-300 ease-in-out",
-          chatOpen && "sm:mr-[360px]",
-        )}
-      >
       <RoomHeader
         roomId={roomId}
         displayName={displayName}
         status={status}
         participantCount={peers.size + 1}
       />
+
+      <div
+        className={cn(
+          "flex h-full min-w-0 flex-1 flex-col overflow-hidden transition-[margin] duration-300 ease-in-out",
+          chatOpen && "sm:mr-[360px]",
+        )}
+      >
 
       {whiteboardOpen ? (
         <div className="relative min-h-0 flex-1">
