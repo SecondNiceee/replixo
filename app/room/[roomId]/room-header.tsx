@@ -28,7 +28,7 @@ export function RoomHeader({ roomId, displayName, status, participantCount }: Ro
 
   return (
     <>
-      <header className="flex items-center justify-between border-b border-border px-5 py-3">
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-3 bg-background/40 backdrop-blur-md border-b border-border/30">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-foreground">Replixo</span>
           <span className="h-4 w-px bg-border" />
