@@ -140,7 +140,7 @@ export function RoomVideoGrid({
   // a collapsible vertical column on the right.
   if (hasPresentation) {
     return (
-      <main className="relative flex flex-1 gap-1 overflow-hidden p-1 sm:gap-2 sm:p-2">
+      <main className="relative flex flex-1 gap-1 overflow-hidden bg-black sm:gap-2">
         <div className="min-h-0 flex-1">
           <PresentationViewer
             isPresenter={isPresenting}
@@ -193,7 +193,7 @@ export function RoomVideoGrid({
   // Screen share layout
   if (hasScreenShare) {
     return (
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden p-3 lg:flex-row">
+      <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black lg:flex-row">
         <div
           className={cn(
             "grid min-h-0 flex-1 gap-2",
@@ -264,7 +264,7 @@ export function RoomVideoGrid({
 
   // Default camera grid
   return (
-    <main className={cn("grid min-h-0 flex-1 auto-rows-fr gap-2 p-3", gridClass)}>
+    <main className={cn("grid min-h-0 flex-1 auto-rows-fr gap-2 bg-black", gridClass)}>
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
