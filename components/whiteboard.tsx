@@ -50,21 +50,19 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
   const cleanupRef = useRef<(() => void) | null>(null)
 
   const handleMount = useCallback((editor: Editor) => {
-    // 1. Seed the board with the persisted drawing (document only — we don't
-    //    load another user's session/camera state).
-    if (initialSnapshotRef.current) {
-      try {
-        const parsed = JSON.parse(initialSnapshotRef.current)
-        loadSnapshot(editor.store, parsed.document ? { document: parsed.document } : parsed)
-      } catch (e) {
-        console.error("[Replixo] whiteboard: failed to load snapshot", e)
-      }
-    }
+    // Flag to suppress the store listener while we're seeding the initial
+    // snapshot. loadSnapshot triggers source:"user" events in tldraw, which
+    // would otherwise be mistakenly broadcast to peers as local edits.
+    let isLoadingSnapshot = false
 
     // 2. Relay local edits as incremental diffs + debounced full snapshots.
+    //    Registered BEFORE loadSnapshot so the listener is active when remote
+    //    diffs arrive later, but gated by isLoadingSnapshot during seeding.
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     const unlisten = editor.store.listen(
       (entry) => {
+        // Ignore synthetic changes produced by our own loadSnapshot call.
+        if (isLoadingSnapshot) return
         onChangeRef.current(entry.changes as StoreDiff)
         if (snapshotTimer) clearTimeout(snapshotTimer)
         snapshotTimer = setTimeout(() => {
@@ -77,6 +75,20 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
       },
       { source: "user", scope: "document" },
     )
+
+    // 1. Seed the board with the persisted drawing (document only — we don't
+    //    load another user's session/camera state).
+    if (initialSnapshotRef.current) {
+      try {
+        isLoadingSnapshot = true
+        const parsed = JSON.parse(initialSnapshotRef.current)
+        loadSnapshot(editor.store, parsed.document ? { document: parsed.document } : parsed)
+      } catch (e) {
+        console.error("[Replixo] whiteboard: failed to load snapshot", e)
+      } finally {
+        isLoadingSnapshot = false
+      }
+    }
 
     // 3. Apply remote peers' diffs. mergeRemoteChanges tags them "remote" so the
     //    user-scoped listener above does not echo them back into the network.

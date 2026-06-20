@@ -486,16 +486,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // WebRTC and socket.io and does NOT always auto-fire a reconnect. We kick the
   // socket back to life and renegotiate ICE on both transports.
   // -------------------------------------------------------------------------
+  // Timestamp of the last recoverConnection call — used to debounce spurious
+  // triggers (e.g. window.focus fires on every tldraw canvas click, which would
+  // otherwise send a rejoinProbe on every brush stroke).
+  const lastRecoverAtRef = useRef(0)
+
   const recoverConnection = useCallback(() => {
     const socket = socketRef.current
     if (!socket || !hasJoinedRef.current) return
 
-    // If the signaling socket dropped, reconnect it — the "connect" handler
-    // then runs the rejoinProbe / ICE-restart path.
+    // If the socket is disconnected, reconnect immediately (no debounce needed —
+    // the "connect" event only fires once the socket is truly back).
     if (!socket.connected) {
       socket.connect()
       return
     }
+
+    // Debounce ICE-restart probes to at most once every 5 seconds so that
+    // high-frequency focus events (tldraw canvas, rapid tab switching) don't
+    // flood the server with rejoinProbe requests.
+    const now = Date.now()
+    if (now - lastRecoverAtRef.current < 5000) return
+    lastRecoverAtRef.current = now
 
     // Socket is alive but media may be frozen — probe + restart ICE.
     socket.emit(
