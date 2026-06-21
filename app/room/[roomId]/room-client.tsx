@@ -200,7 +200,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           <span>
             {permissionError === "mic"
               ? "Разрешите доступ к микрофону в настройках браузера"
-              : "Разрешите доступ к камере в настройках браузера"}
+              : "Разреши��е доступ к камере в настройках браузера"}
           </span>
           <button
             onClick={clearPermissionError}
@@ -220,6 +220,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         displayName={displayName}
         status={status}
         participantCount={peers.size + 1}
+        isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
       />
 
       <div

@@ -10,9 +10,10 @@ interface RoomHeaderProps {
   displayName: string
   status: string
   participantCount: number
+  isFixed?: boolean
 }
 
-export function RoomHeader({ roomId, displayName, status, participantCount }: RoomHeaderProps) {
+export function RoomHeader({ roomId, displayName, status, participantCount, isFixed = false }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false)
   const [editNameOpen, setEditNameOpen] = useState(false)
 
@@ -28,7 +29,10 @@ export function RoomHeader({ roomId, displayName, status, participantCount }: Ro
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-3 bg-transparent border-b border-transparent">
+      <header className={cn(
+        "left-0 right-0 z-50 flex items-center justify-between px-5 py-3 bg-transparent border-b border-transparent",
+        isFixed ? "fixed top-0" : "relative",
+      )}>
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-foreground">Replixo</span>
           <span className="h-4 w-px bg-border" />

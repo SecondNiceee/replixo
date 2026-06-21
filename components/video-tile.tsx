@@ -168,14 +168,14 @@ export function VideoTile({
           <div
             className={cn(
               "flex items-center justify-center rounded-full bg-muted ring-1 ring-border/60 transition-all",
-              "size-12 sm:size-14",
+              "size-16 sm:size-20",
               speaking && "ring-2 ring-green-500",
             )}
           >
             {initials ? (
-              <span className="text-sm font-semibold text-foreground sm:text-base">{initials}</span>
+              <span className="text-xl font-semibold text-foreground sm:text-2xl">{initials}</span>
             ) : (
-              <User className="size-6 text-muted-foreground" />
+              <User className="size-8 text-muted-foreground sm:size-9" />
             )}
           </div>
         </div>
@@ -183,7 +183,7 @@ export function VideoTile({
 
       {/* Bottom bar */}
       <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 px-4 py-4">
-        <span className="max-w-[70%] truncate rounded-md bg-black/45 px-1.5 py-0.5 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+        <span className="max-w-[70%] truncate rounded-md bg-black/50 px-2.5 py-1 text-sm font-semibold leading-tight text-white backdrop-blur-sm shadow-sm">
           {isScreen
             ? `${displayName}${isLocal ? " (вы)" : ""} — экран`
             : isLocal
@@ -192,8 +192,8 @@ export function VideoTile({
         </span>
         <div className="flex items-center gap-1">
           {isMuted && (
-            <span className="flex size-10 items-center justify-center rounded-full bg-destructive/90">
-              <MicOff className="size-5 text-white" />
+            <span className="flex size-8 items-center justify-center rounded-full bg-destructive/90">
+              <MicOff className="size-4 text-white" />
             </span>
           )}
           {!isLocal && localMuted && (
