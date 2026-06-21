@@ -318,6 +318,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // currently selected screen-share quality preset
   const screenQualityRef = useRef<ScreenQuality>("auto")
   const [screenQuality, setScreenQualityState] = useState<ScreenQuality>("auto")
+  // Non-fatal permission error shown as an inline banner (does NOT abort the call)
+  const [permissionError, setPermissionError] = useState<string | null>(null)
   // Live whiteboard diff subscribers. The socket "whiteboardChange" handler
   // fans incoming remote diffs out to every registered listener (the mounted
   // Whiteboard component). Kept in a ref so handlers stay stable and the join
@@ -1213,6 +1215,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             : true,
         }
         const micStream = await navigator.mediaDevices.getUserMedia(constraints)
+        setPermissionError(null)
         const track = micStream.getAudioTracks()[0]
         stream.addTrack(track)
         if (sendTransport) {
@@ -1227,8 +1230,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           audioProducerRef.current = producer
         }
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
-      } catch {
-        dispatch({ type: "ERROR", error: "Нет доступа к микрофону" })
+      } catch (err) {
+        const name = (err as { name?: string })?.name
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          setPermissionError("mic")
+          // Re-prompt the browser for microphone access
+          navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {/* user dismissed */})
+        } else {
+          dispatch({ type: "ERROR", error: "Нет доступа к микрофону" })
+        }
       }
       return
     }
@@ -1309,6 +1319,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       // First time — ask for permission
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
+        setPermissionError(null)
         const track = camStream.getVideoTracks()[0]
         stream.addTrack(track)
         // Publish the track if transport is ready.
@@ -1319,8 +1330,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           videoProducerRef.current = producer
         }
         dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })
-      } catch {
-        dispatch({ type: "ERROR", error: "Нет доступа к камере" })
+      } catch (err) {
+        const name = (err as { name?: string })?.name
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          setPermissionError("cam")
+          // Re-prompt the browser for camera access
+          navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {/* user dismissed */})
+        } else {
+          dispatch({ type: "ERROR", error: "Нет доступа к камере" })
+        }
       }
       return
     }
@@ -1643,6 +1661,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   return {
     status: state.status,
     error: state.error,
+    permissionError,
+    clearPermissionError: () => setPermissionError(null),
     peers: state.peers,
     localStream: state.localStream,
     isMicMuted: state.isMicMuted,

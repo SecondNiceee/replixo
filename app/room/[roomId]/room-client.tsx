@@ -44,6 +44,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const {
     status,
     error,
+    permissionError,
+    clearPermissionError,
     peers,
     localStream,
     isMicMuted,
@@ -192,6 +194,24 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     <div className="relative flex h-screen flex-col overflow-hidden bg-background">
       <EnableSoundBanner />
 
+      {/* Permission error banner — shown when the browser blocked mic or cam access */}
+      {permissionError && (
+        <div className="relative z-50 flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-sm text-destructive border-b border-destructive/20">
+          <span>
+            {permissionError === "mic"
+              ? "Разрешите доступ к микрофону в настройках браузера"
+              : "Разреши��е доступ к камере в настройках браузера"}
+          </span>
+          <button
+            onClick={clearPermissionError}
+            aria-label="Закрыть"
+            className="shrink-0 text-destructive/70 hover:text-destructive transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main column. When the chat opens on >=sm screens we add a right margin
           so the content visibly shrinks beside the panel instead of being
           covered by it. On mobile the chat overlays full-width as before. */}
@@ -200,6 +220,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         displayName={displayName}
         status={status}
         participantCount={peers.size + 1}
+        isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
       />
 
       <div
