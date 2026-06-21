@@ -53,7 +53,7 @@ export function RoomVideoGrid({
           : "grid-cols-3"
 
   const sidebarTiles = (
-    <div className="flex shrink-0 gap-2 overflow-x-auto lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
+    <div className="flex shrink-0 gap-2 overflow-x-auto p-1 lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:p-1">
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
@@ -79,7 +79,7 @@ export function RoomVideoGrid({
   // Screen share layout
   if (hasScreenShare) {
     return (
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black lg:flex-row">
+      <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row">
         <div
           className={cn(
             "grid min-h-0 flex-1 gap-2",
@@ -150,7 +150,7 @@ export function RoomVideoGrid({
 
   // Default camera grid
   return (
-    <main className={cn("grid min-h-0 flex-1 auto-rows-fr gap-2 bg-black", gridClass)}>
+    <main className={cn("grid min-h-0 flex-1 auto-rows-fr gap-2 bg-black p-2", gridClass)}>
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
