@@ -3,10 +3,7 @@
 import { useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { VideoTile } from "@/components/video-tile"
-import { PresentationViewer } from "@/components/presentation-viewer"
 import { cn } from "@/lib/utils"
-import type { RefObject } from "react"
-import type { SlideState } from "@/hooks/use-mediasoup"
 
 interface Peer {
   peerId: string
@@ -15,7 +12,6 @@ interface Peer {
   audioStream?: MediaStream
   screenStream?: MediaStream
   screenAudioStream?: MediaStream
-  presentationStream?: MediaStream
   audioMuted?: boolean
 }
 
@@ -26,21 +22,7 @@ interface RoomVideoGridProps {
   isMicMuted: boolean
   isCamOff: boolean
   isScreenSharing: boolean
-  isPresenting: boolean
   peers: Map<string, Peer>
-  currentSlide: SlideState | null
-  presentationFile: File | null
-  presentationCanvasRef: RefObject<HTMLCanvasElement | null>
-  onSlideChange: (slide: number, total: number) => void
-  onPresentationLoaded: (total: number) => void
-  onStopPresentation: () => void
-  // Drawing sync
-  presentationDrawings?: Map<number, string>
-  onSendStroke?: (slideIndex: number, stroke: unknown) => void
-  onClearDrawing?: (slideIndex: number) => void
-  onSaveDrawingSnapshot?: (slideIndex: number, dataURL: string) => void
-  subscribeRemoteStroke?: (fn: (event: { slideIndex: number; stroke: unknown }) => void) => () => void
-  subscribeRemoteClear?: (fn: (event: { slideIndex: number }) => void) => () => void
 }
 
 export function RoomVideoGrid({
@@ -50,32 +32,16 @@ export function RoomVideoGrid({
   isMicMuted,
   isCamOff,
   isScreenSharing,
-  isPresenting,
   peers,
-  currentSlide,
-  presentationFile,
-  presentationCanvasRef,
-  onSlideChange,
-  onPresentationLoaded,
-  onStopPresentation,
-  presentationDrawings,
-  onSendStroke,
-  onClearDrawing,
-  onSaveDrawingSnapshot,
-  subscribeRemoteStroke,
-  subscribeRemoteClear,
 }: RoomVideoGridProps) {
   const [participantsHidden, setParticipantsHidden] = useState(false)
 
   const allPeers = [...peers.values()]
-  const presentingPeer = allPeers.find((p) => p.presentationStream)
   const remoteScreens = allPeers.filter((p) => p.screenStream)
 
-  const hasPresentation = isPresenting || !!presentingPeer || (currentSlide !== null && currentSlide !== undefined)
   const hasScreenShare = (isScreenSharing && localScreenStream) || remoteScreens.length > 0
 
-  const totalTiles =
-    allPeers.length + 1 + (isScreenSharing && localScreenStream ? 1 : 0) + remoteScreens.length
+  const totalTiles = allPeers.length + 1 + (isScreenSharing && localScreenStream ? 1 : 0) + remoteScreens.length
 
   const gridClass =
     totalTiles === 1
@@ -109,86 +75,6 @@ export function RoomVideoGrid({
       ))}
     </div>
   )
-
-  // Participants shown as a vertical column on the right during a presentation.
-  // Collapsible via a chevron handle (same pattern as the bottom controls bar).
-  const participantsColumn = (
-    <div className="flex h-full w-36 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-l-2xl bg-zinc-900/95 p-2 sm:w-44 lg:w-52">
-      <VideoTile
-        stream={localStream ?? undefined}
-        speakingStream={localStream ?? undefined}
-        displayName={displayName}
-        isMuted={isMicMuted}
-        isCamOff={isCamOff}
-        isLocal
-        className="aspect-[4/3] w-full shrink-0 shadow-xl"
-      />
-      {allPeers.map((peer) => (
-        <VideoTile
-          key={peer.peerId}
-          stream={peer.videoStream}
-          audioStream={peer.audioStream}
-          displayName={peer.displayName}
-          isMuted={!peer.audioStream || !!peer.audioMuted}
-          className="aspect-[4/3] w-full shrink-0 shadow-xl"
-        />
-      ))}
-    </div>
-  )
-
-  // Presentation layout — document fills the screen, with participants shown as
-  // a collapsible vertical column on the right.
-  if (hasPresentation) {
-    return (
-      <main className="relative flex flex-1 gap-1 overflow-hidden bg-black sm:gap-2">
-        <div className="min-h-0 flex-1">
-          <PresentationViewer
-            isPresenter={isPresenting}
-            currentSlide={currentSlide}
-            onSlideChange={onSlideChange}
-            onPresentationLoaded={onPresentationLoaded}
-            onStop={onStopPresentation}
-            canvasRef={isPresenting ? presentationCanvasRef : undefined}
-            remoteStream={presentingPeer?.presentationStream}
-            file={presentationFile}
-            presentationDrawings={presentationDrawings}
-            onSendStroke={onSendStroke}
-            onClearDrawing={onClearDrawing}
-            onSaveDrawingSnapshot={onSaveDrawingSnapshot}
-            subscribeRemoteStroke={subscribeRemoteStroke}
-            subscribeRemoteClear={subscribeRemoteClear}
-          />
-        </div>
-
-        {/* Right participants panel + collapse handle */}
-        <div className="relative flex shrink-0">
-          {/* Toggle handle — always visible on the left edge of the panel */}
-          <button
-            onClick={() => setParticipantsHidden((v) => !v)}
-            aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
-            className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl bg-zinc-900/95 transition-colors hover:bg-zinc-800"
-          >
-            <ChevronRight
-              className={cn(
-                "size-4 text-muted-foreground transition-transform duration-300",
-                participantsHidden && "rotate-180",
-              )}
-            />
-          </button>
-
-          {/* Collapsing area: animates width to 0 via the grid-cols 1fr/0fr trick */}
-          <div
-            className={cn(
-              "grid h-full transition-[grid-template-columns] duration-300 ease-in-out",
-              participantsHidden ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
-            )}
-          >
-            <div className="h-full overflow-hidden">{participantsColumn}</div>
-          </div>
-        </div>
-      </main>
-    )
-  }
 
   // Screen share layout
   if (hasScreenShare) {
