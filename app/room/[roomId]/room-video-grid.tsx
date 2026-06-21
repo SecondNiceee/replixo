@@ -112,7 +112,7 @@ export function RoomVideoGrid({
 
         {/* Collapsible participants panel — bottom strip on mobile, right column
             on large screens. Toggle handle uses the same pattern as the
-            presentation layout and the bottom controls bar. */}
+            bottom controls bar. */}
         <div className="relative flex shrink-0">
           {/* Toggle handle: sits above the strip on mobile, on the left edge of
               the column on large screens */}

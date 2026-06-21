@@ -531,12 +531,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
           const rawSource =
             appData?.source ?? (data.appData as Record<string, unknown>)?.source
-          const source: MediaSource =
-            rawSource === "screen"
-              ? "screen"
-              : rawSource === "presentation"
-                ? "presentation"
-                : "media"
+          const source: MediaSource = rawSource === "screen" ? "screen" : "media"
 
           const consumer = await recvTransport.consume({
             id: data.consumerId,
@@ -893,10 +888,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               recvTransportRef.current = null
               consumersRef.current.clear()
 
-              // Clear stale slide state — the fresh joinRoom response will
-              // restore it if a presentation is still active.
-              dispatch({ type: "SET_SLIDE", slide: null })
-
               // Re-run the join sequence. After setupTransports resolves the
               // new send transport is ready and we can re-publish the tracks that
               // the user had active before the drop.
@@ -1041,10 +1032,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         return
       }
       const rawSource = (target.appData as Record<string, unknown>)?.source
-      const source: MediaSource =
-        rawSource === "screen" ? "screen"
-        : rawSource === "presentation" ? "presentation"
-        : "media"
+      const source: MediaSource = rawSource === "screen" ? "screen" : "media"
       const closedKind = target.kind as "audio" | "video"
       target.close()
       consumersRef.current.delete(target.id)
