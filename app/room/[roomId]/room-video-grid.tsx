@@ -113,7 +113,7 @@ export function RoomVideoGrid({
   // Participants shown as a vertical column on the right during a presentation.
   // Collapsible via a chevron handle (same pattern as the bottom controls bar).
   const participantsColumn = (
-    <div className="flex h-full w-32 flex-col gap-2 overflow-y-auto overflow-x-hidden pr-0.5 sm:w-40 lg:w-48">
+    <div className="flex h-full w-36 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-l-2xl bg-zinc-900/95 p-2 sm:w-44 lg:w-52">
       <VideoTile
         stream={localStream ?? undefined}
         speakingStream={localStream ?? undefined}
@@ -121,7 +121,7 @@ export function RoomVideoGrid({
         isMuted={isMicMuted}
         isCamOff={isCamOff}
         isLocal
-        className="aspect-video w-full shrink-0 shadow-lg"
+        className="aspect-[4/3] w-full shrink-0 shadow-xl"
       />
       {allPeers.map((peer) => (
         <VideoTile
@@ -130,7 +130,7 @@ export function RoomVideoGrid({
           audioStream={peer.audioStream}
           displayName={peer.displayName}
           isMuted={!peer.audioStream || !!peer.audioMuted}
-          className="aspect-video w-full shrink-0 shadow-lg"
+          className="aspect-[4/3] w-full shrink-0 shadow-xl"
         />
       ))}
     </div>
@@ -166,7 +166,7 @@ export function RoomVideoGrid({
           <button
             onClick={() => setParticipantsHidden((v) => !v)}
             aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
-            className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
+            className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl bg-zinc-900/95 transition-colors hover:bg-zinc-800"
           >
             <ChevronRight
               className={cn(
