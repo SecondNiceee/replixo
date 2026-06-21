@@ -1,19 +1,50 @@
 "use client"
 
 import { useCallback, useEffect, useRef } from "react"
-import { Tldraw, getSnapshot, loadSnapshot, setDefaultUiAssetUrls } from "tldraw"
-import type { Editor, RecordsDiff, TLRecord } from "tldraw"
+import { Tldraw, getSnapshot, loadSnapshot } from "tldraw"
+import type { Editor, RecordsDiff, TLRecord, TLUiAssetUrls } from "tldraw"
 import "tldraw/tldraw.css"
 
 // ---------------------------------------------------------------------------
-// Self-host all tldraw static assets so they are served from our own domain
-// instead of cdn.tldraw.com. This prevents "Could not load assets" errors for
-// users whose network blocks external CDNs (e.g. Russia).
-// Run `scripts/download-tldraw-assets.sh` to refresh these files.
+// Self-host ALL tldraw static assets from our own domain instead of
+// cdn.tldraw.com. This prevents "Could not load assets" errors for users
+// whose networks block external CDNs.
+//
+// We pass these as the `assetUrls` prop directly to <Tldraw> rather than
+// using the global setDefaultUiAssetUrls() setter so there is zero chance of
+// a race condition: the URLs are always available when the component renders.
+//
+// The complete icon list is derived from tldraw's own icon-types source so it
+// stays in sync with whichever version is installed.
 // ---------------------------------------------------------------------------
 const TLDRAW_BASE = "/tldraw-assets"
 
-setDefaultUiAssetUrls({
+// Complete list of icons shipped with tldraw 2.4.4 (matches icon-types.mjs).
+const ALL_ICON_NAMES = [
+  "align-bottom","align-center-horizontal","align-center-vertical","align-left","align-right","align-top",
+  "arrow-left","arrowhead-arrow","arrowhead-bar","arrowhead-diamond","arrowhead-dot","arrowhead-none",
+  "arrowhead-square","arrowhead-triangle-inverted","arrowhead-triangle","blob","bring-forward","bring-to-front",
+  "broken","check-circle","check","chevron-down","chevron-left","chevron-right","chevron-up",
+  "chevrons-ne","chevrons-sw","clipboard-copied","clipboard-copy","color","cross-2","cross-circle",
+  "dash-dashed","dash-dotted","dash-draw","dash-solid","disconnected","discord","distribute-horizontal",
+  "distribute-vertical","dot","dots-horizontal","dots-vertical","drag-handle-dots","duplicate","edit",
+  "external-link","fill-fill","fill-none","fill-pattern","fill-semi","fill-solid","follow","following",
+  "font-draw","font-mono","font-sans","font-serif","geo-arrow-down","geo-arrow-left","geo-arrow-right",
+  "geo-arrow-up","geo-check-box","geo-cloud","geo-diamond","geo-ellipse","geo-heart","geo-hexagon",
+  "geo-octagon","geo-oval","geo-pentagon","geo-rectangle","geo-rhombus-2","geo-rhombus","geo-star",
+  "geo-trapezoid","geo-triangle","geo-x-box","github","group","horizontal-align-end",
+  "horizontal-align-middle","horizontal-align-start","info-circle","leading","link","lock","menu",
+  "minus","mixed","pack","plus","question-mark-circle","question-mark","redo","reset-zoom",
+  "rotate-ccw","rotate-cw","send-backward","send-to-back","share-1","size-extra-large","size-large",
+  "size-medium","size-small","spline-cubic","spline-line","stack-horizontal","stack-vertical",
+  "status-offline","stretch-horizontal","stretch-vertical","text-align-center","text-align-left",
+  "text-align-right","toggle-off","toggle-on","tool-arrow","tool-eraser","tool-frame","tool-hand",
+  "tool-highlight","tool-laser","tool-line","tool-media","tool-note","tool-pencil","tool-pointer",
+  "tool-screenshot","tool-text","trash","twitter","undo","ungroup","unlock","vertical-align-end",
+  "vertical-align-middle","vertical-align-start","warning-triangle","zoom-in","zoom-out",
+] as const
+
+const TLDRAW_ASSET_URLS: TLUiAssetUrls = {
   fonts: {
     draw: `${TLDRAW_BASE}/fonts/Shantell_Sans-Tldrawish.woff2`,
     serif: `${TLDRAW_BASE}/fonts/IBMPlexSerif-Medium.woff2`,
@@ -21,29 +52,7 @@ setDefaultUiAssetUrls({
     monospace: `${TLDRAW_BASE}/fonts/IBMPlexMono-Medium.woff2`,
   },
   icons: Object.fromEntries(
-    [
-      "align-bottom","align-center-horizontal","align-center-vertical","align-left","align-right","align-top",
-      "arrow-left","arrowhead-arrow","arrowhead-bar","arrowhead-diamond","arrowhead-dot","arrowhead-none",
-      "arrowhead-square","arrowhead-triangle-inverted","arrowhead-triangle","blob","bring-forward","bring-to-front",
-      "broken","check-circle","check","chevron-down","chevron-right","clipboard-copied","clipboard-copy",
-      "color","comment","cross-2","dash-dashed","dash-dotted","dash-draw","dash-solid","dots-horizontal",
-      "dots-vertical","duplicate","edit","eraser","external-link","fill-none","fill-pattern","fill-semi",
-      "fill-solid","fit-to-content","flip-horizontal","flip-vertical","follow","following","font-draw",
-      "font-mono","font-sans","font-serif","frame","geo-arrow-down","geo-arrow-left","geo-arrow-right",
-      "geo-arrow-up","geo-check-box","geo-diamond","geo-ellipse","geo-heart","geo-hexagon","geo-octagon",
-      "geo-oval","geo-pentagon","geo-polygon","geo-rhombus-2","geo-rhombus","geo-star","geo-trapezoid",
-      "geo-triangle","geo-x-box","group","hand","heart","hide","image","info","iterator-intersect",
-      "iterator-subtract","iterator-union","keep-inside","keep-outside","label-align-center",
-      "label-align-end","label-align-start","link","lock-small","lock","menu","minus","mixed","move-to-page",
-      "new-frame","new-page","note","opacity","pack","page","pan","pencil-48","pencil","plus","pointer",
-      "question-mark","redo","remove-frame","reset-zoom","rotate-ccw","rotate-cw","select","send-backward",
-      "send-to-back","share-1","size-extra-large","size-large","size-medium","size-small","slack","stack-horizontal",
-      "stack-vertical","status-offline","status-online","stretch-horizontal","stretch-vertical","text-align-center",
-      "text-align-justify","text-align-left","text-align-right","thin-lock","tool-arrow","tool-embed",
-      "tool-eraser","tool-frame","tool-hand","tool-highlight","tool-laser","tool-line","tool-media",
-      "tool-note","tool-pencil","tool-pointer","tool-text","trash","undo","ungroup","unlock","update",
-      "zoom-in","zoom-out",
-    ].map((name) => [name, `${TLDRAW_BASE}/icons/icon/${name}.svg`])
+    ALL_ICON_NAMES.map((name) => [name, `${TLDRAW_BASE}/icons/icon/${name}.svg`])
   ),
   translations: Object.fromEntries(
     ["cs","da","de","en","es","fi","fr","hu","it","ja","pl","pt-br","ro","ru","sv","tr","uk","zh-cn","zh-tw"].map(
@@ -55,7 +64,7 @@ setDefaultUiAssetUrls({
       (type) => [type, `${TLDRAW_BASE}/embed-icons/${type}.png`]
     )
   ),
-})
+}
 
 // tldraw's incremental store diff. We only relay the opaque diff between peers
 // and hand it straight back to applyDiff/the store listener.
@@ -170,7 +179,7 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
 
   return (
     <div className="absolute inset-0">
-      <Tldraw onMount={handleMount} />
+      <Tldraw onMount={handleMount} assetUrls={TLDRAW_ASSET_URLS} />
     </div>
   )
 }
