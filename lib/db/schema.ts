@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index, real } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
