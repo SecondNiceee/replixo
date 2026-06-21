@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation"
 import { useState, useCallback, useRef, useEffect } from "react"
-import dynamic from "next/dynamic"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
@@ -13,10 +12,11 @@ import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
-import { PresenterCanvas } from "@/components/presentation-viewer"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
+
+import dynamic from "next/dynamic"
 
 // tldraw is a heavy, browser-only dependency — load it lazily and skip SSR so
 // it only ships/initialises when the board is actually opened.
@@ -57,11 +57,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     setScreenQuality,
     switchMic,
     leave,
-    isPresenting,
-    startPresentation,
-    stopPresentation,
-    notifySlideChange,
-    currentSlide,
     messages,
     sendChatMessage,
     readMarkers,
@@ -73,13 +68,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
-    // Presentation drawing annotations
-    presentationDrawings,
-    sendPresentationStroke,
-    clearPresentationDrawing,
-    savePresentationDrawingSnapshot,
-    subscribePresentationStroke,
-    subscribePresentationClear,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -182,72 +170,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     return () => window.removeEventListener("keydown", handler)
   }, [chatHotkey, toggleChat])
 
-  // Presentation
-  const presentationCanvasRef = useRef<HTMLCanvasElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [presentationFile, setPresentationFile] = useState<File | null>(null)
-
-  // Sync presentationFile with isPresenting — if remote stopped it, clear locally
-  const wasPresentingRef = useRef(false)
-  useEffect(() => {
-    if (wasPresentingRef.current && !isPresenting) {
-      setPresentationFile(null)
-    }
-    wasPresentingRef.current = isPresenting
-  }, [isPresenting])
-
-  // Whether we've already called startPresentation for the current file.
-  // Guards against onLoaded firing multiple times (e.g. from React Strict Mode).
-  const presentationStartedRef = useRef(false)
-
-  const handleFileSelected = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (!file) return
-      e.target.value = ""
-      presentationStartedRef.current = false
-      // Just set the file — PresenterCanvas will render the first slide into the
-      // offscreen canvas, then call onLoaded. We start the stream capture there
-      // so the first frame is already painted before viewers receive it.
-      setPresentationFile(file)
-    },
-    [],
-  )
-
-  // Called by PresenterCanvas once the first slide is painted into the canvas.
-  const handlePresentationLoaded = useCallback(
-    async (total: number) => {
-      if (presentationStartedRef.current) return
-      presentationStartedRef.current = true
-      const canvas = presentationCanvasRef.current
-      if (!canvas) return
-      try {
-        const stream = canvas.captureStream(30)
-        await startPresentation(stream)
-        // notifySlideChange so all peers get slide 0 / total immediately.
-        notifySlideChange(0, total)
-      } catch (err) {
-        console.error("[Replixo] startPresentation failed:", err)
-        setPresentationFile(null)
-        presentationStartedRef.current = false
-      }
-    },
-    [startPresentation, notifySlideChange],
-  )
-
-  const handleStopPresentation = useCallback(() => {
-    stopPresentation()
-    setPresentationFile(null)
-  }, [stopPresentation])
-
-  const handlePresentationAction = useCallback(() => {
-    if (isPresenting) {
-      handleStopPresentation()
-    } else {
-      fileInputRef.current?.click()
-    }
-  }, [isPresenting, handleStopPresentation])
-
   const toggleWhiteboard = useCallback(() => {
     if (whiteboardOpen) {
       closeWhiteboard()
@@ -268,37 +190,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-background">
-      {/* Offscreen canvas for presentation capture */}
-      <canvas
-        ref={presentationCanvasRef}
-        className="pointer-events-none fixed left-[-9999px] top-0"
-        width={1280}
-        height={720}
-        aria-hidden
-      />
-      {/* PresenterCanvas is mounted as soon as a file is selected so it can
-          render slide 0 into the offscreen canvas and call onLoaded — which
-          triggers startPresentation(). Without this, isPresenting stays false
-          and PresentationViewer never mounts, so onLoaded never fires. */}
-      {presentationFile && !isPresenting && (
-        <div className="pointer-events-none fixed left-[-9999px] top-0" aria-hidden>
-          <PresenterCanvas
-            canvasRef={presentationCanvasRef}
-            file={presentationFile}
-            slideIndex={0}
-            onLoaded={handlePresentationLoaded}
-          />
-        </div>
-      )}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,.pptx"
-        className="hidden"
-        onChange={handleFileSelected}
-        aria-label="Выбрать файл презентации"
-      />
-
       <EnableSoundBanner />
 
       {/* Main column. When the chat opens on >=sm screens we add a right margin
@@ -335,20 +226,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           isMicMuted={isMicMuted}
           isCamOff={isCamOff}
           isScreenSharing={isScreenSharing}
-          isPresenting={isPresenting}
           peers={peers}
-          currentSlide={currentSlide}
-          presentationFile={presentationFile}
-          presentationCanvasRef={presentationCanvasRef}
-          onSlideChange={notifySlideChange}
-          onPresentationLoaded={handlePresentationLoaded}
-          onStopPresentation={handleStopPresentation}
-          presentationDrawings={presentationDrawings}
-          onSendStroke={sendPresentationStroke}
-          onClearDrawing={clearPresentationDrawing}
-          onSaveDrawingSnapshot={savePresentationDrawingSnapshot}
-          subscribeRemoteStroke={subscribePresentationStroke}
-          subscribeRemoteClear={subscribePresentationClear}
         />
       )}
 
@@ -359,7 +237,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         isMicMuted={isMicMuted}
         isCamOff={isCamOff}
         isScreenSharing={isScreenSharing}
-        isPresenting={isPresenting}
         screenQuality={screenQuality}
         micDevices={micDevices}
         selectedMicLabel={selectedMicLabel}
@@ -373,7 +250,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         onSetScreenQuality={setScreenQuality}
         onSwitchMic={switchMic}
         onSelectMicLabel={setSelectedMicLabel}
-        onPresentationAction={handlePresentationAction}
         onLeave={handleLeave}
       />
       </div>

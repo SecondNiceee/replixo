@@ -32,31 +32,28 @@ export interface RemotePeer {
   audioStream?: MediaStream
   screenStream?: MediaStream
   screenAudioStream?: MediaStream
-  presentationStream?: MediaStream
   // Whether this peer's microphone producer is currently paused (muted).
   // Driven by the server's `producerPaused` broadcast and the initial
   // `producerPaused` flag returned when we first consume their audio.
   audioMuted?: boolean
 }
 
-export type MediaSource = "media" | "screen" | "presentation"
+export type MediaSource = "media" | "screen"
 
 // Normalise an untrusted `appData.source` value (string | unknown) into one of
 // our known MediaSource variants, defaulting to "media".
 function normalizeSource(raw: unknown): MediaSource {
-  return raw === "screen" ? "screen" : raw === "presentation" ? "presentation" : "media"
+  return raw === "screen" ? "screen" : "media"
 }
 
 // The RemotePeer field that a given (source, kind) pair maps to.
 type StreamKey =
-  | "presentationStream"
   | "screenStream"
   | "screenAudioStream"
   | "videoStream"
   | "audioStream"
 
 function streamKeyFor(source: MediaSource, kind: "video" | "audio"): StreamKey {
-  if (source === "presentation") return "presentationStream"
   if (source === "screen") return kind === "video" ? "screenStream" : "screenAudioStream"
   return kind === "video" ? "videoStream" : "audioStream"
 }
@@ -105,12 +102,6 @@ export const SCREEN_QUALITY_PRESETS: Record<ScreenQuality, ScreenQualityPreset> 
   },
 }
 
-export interface SlideState {
-  peerId: string
-  slide: number
-  total: number
-}
-
 export interface ChatMessage {
   id: string
   peerId: string
@@ -148,12 +139,9 @@ interface State {
   isMicMuted: boolean
   isCamOff: boolean
   isScreenSharing: boolean
-  isPresenting: boolean
   // whether the user has ever enabled mic/cam (i.e. track exists)
   hasMic: boolean
   hasCam: boolean
-  // active slide state from any presenter (null = no presentation)
-  currentSlide: SlideState | null
   // chat messages, oldest first
   messages: ChatMessage[]
   // peerId -> timestamp (ms) of the latest message that peer has read.
@@ -166,9 +154,6 @@ interface State {
   // as incremental diffs through a ref-based subscription, not through state.
   whiteboardOpen: boolean
   whiteboardSnapshot: string | null
-  // Presentation drawing annotations: Map<slideIndex, snapshotDataURL>.
-  // Loaded from DB on join; updated live as participants draw.
-  presentationDrawings: Map<number, string>
 }
 
 type Action =
@@ -184,14 +169,9 @@ type Action =
   | { type: "TOGGLE_MIC"; isMuted: boolean; hasMic?: boolean }
   | { type: "TOGGLE_CAM"; isOff: boolean; hasCam?: boolean }
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
-  | { type: "SET_PRESENTING"; isPresenting: boolean }
-  | { type: "SET_SLIDE"; slide: SlideState | null }
-  | { type: "STOP_PRESENTING" }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "SET_READ_MARKER"; peerId: string; ts: number }
   | { type: "SET_WHITEBOARD"; open: boolean; snapshot?: string | null }
-  | { type: "SET_PRESENTATION_DRAWINGS"; drawings: Map<number, string> }
-  | { type: "SET_PRESENTATION_DRAWING_SNAPSHOT"; slideIndex: number; snapshot: string | null }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -246,12 +226,7 @@ function reducer(state: State, action: Action): State {
     case "PEER_LEFT": {
       const peers = new Map(state.peers)
       peers.delete(action.peerId)
-      // If the leaving peer was the presenter, clear slide state immediately.
-      // The server also emits presentationEnded, but handling it here makes the
-      // reducer the single source of truth and avoids a two-event race.
-      const currentSlide =
-        state.currentSlide?.peerId === action.peerId ? null : state.currentSlide
-      return { ...state, peers, currentSlide }
+      return { ...state, peers }
     }
     case "TOGGLE_MIC":
       return { ...state, isMicMuted: action.isMuted, hasMic: action.hasMic ?? state.hasMic }
@@ -259,12 +234,6 @@ function reducer(state: State, action: Action): State {
       return { ...state, isCamOff: action.isOff, hasCam: action.hasCam ?? state.hasCam }
     case "SET_SCREEN_SHARING":
       return { ...state, isScreenSharing: action.isSharing }
-    case "SET_PRESENTING":
-      return { ...state, isPresenting: action.isPresenting }
-    case "STOP_PRESENTING":
-      return { ...state, isPresenting: false, currentSlide: null }
-    case "SET_SLIDE":
-      return { ...state, currentSlide: action.slide }
     case "ADD_MESSAGE": {
       // Guard against duplicate ids (e.g. a re-emitted broadcast).
       if (state.messages.some((m) => m.id === action.message.id)) return state
@@ -278,17 +247,6 @@ function reducer(state: State, action: Action): State {
       const prev = state.readMarkers[action.peerId] ?? 0
       if (action.ts <= prev) return state
       return { ...state, readMarkers: { ...state.readMarkers, [action.peerId]: action.ts } }
-    }
-    case "SET_PRESENTATION_DRAWINGS":
-      return { ...state, presentationDrawings: action.drawings }
-    case "SET_PRESENTATION_DRAWING_SNAPSHOT": {
-      const drawings = new Map(state.presentationDrawings)
-      if (action.snapshot === null) {
-        drawings.delete(action.slideIndex)
-      } else {
-        drawings.set(action.slideIndex, action.snapshot)
-      }
-      return { ...state, presentationDrawings: drawings }
     }
     case "SET_WHITEBOARD": {
       // Only overwrite the snapshot when one is explicitly provided; toggling
@@ -337,15 +295,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     isMicMuted: true,
     isCamOff: true,
     isScreenSharing: false,
-    isPresenting: false,
     hasMic: false,
     hasCam: false,
-    currentSlide: null,
     messages: [],
     readMarkers: {},
     whiteboardOpen: false,
     whiteboardSnapshot: null,
-    presentationDrawings: new Map(),
   })
 
   const socketRef = useRef<Socket | null>(null)
@@ -359,9 +314,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const screenVideoProducerRef = useRef<Producer | null>(null)
   const screenAudioProducerRef = useRef<Producer | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
-  const presentationVideoProducerRef = useRef<Producer | null>(null)
-  const presentationStreamRef = useRef<MediaStream | null>(null)
-  const isPresentingRef = useRef(false)
   const selectedMicIdRef = useRef<string | undefined>(undefined)
   // currently selected screen-share quality preset
   const screenQualityRef = useRef<ScreenQuality>("auto")
@@ -371,14 +323,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Whiteboard component). Kept in a ref so handlers stay stable and the join
   // effect never needs to re-run when the board mounts/unmounts.
   const whiteboardListenersRef = useRef<Set<(changes: unknown) => void>>(new Set())
-
-  // Presentation drawing stroke subscribers. Fans incoming remote strokes out
-  // to the DrawingOverlay so it can replay the segment locally.
-  type StrokeEvent = { slideIndex: number; stroke: unknown }
-  const presentationStrokeListenersRef = useRef<Set<(event: StrokeEvent) => void>>(new Set())
-  // Presentation draw-clear subscribers.
-  type DrawClearEvent = { slideIndex: number }
-  const presentationClearListenersRef = useRef<Set<(event: DrawClearEvent) => void>>(new Set())
 
   // consumerId -> Consumer
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
@@ -587,12 +531,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
           const rawSource =
             appData?.source ?? (data.appData as Record<string, unknown>)?.source
-          const source: MediaSource =
-            rawSource === "screen"
-              ? "screen"
-              : rawSource === "presentation"
-                ? "presentation"
-                : "media"
+          const source: MediaSource = rawSource === "screen" ? "screen" : "media"
 
           const consumer = await recvTransport.consume({
             id: data.consumerId,
@@ -644,7 +583,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           // A remote peer started a demonstration (screen share or slides).
           // Gate on the video track so we play exactly one sound (screen share
           // can also carry an audio track, which we ignore here).
-          if (kind === "video" && (source === "screen" || source === "presentation")) {
+          if (kind === "video" && source === "screen") {
             playScreenShareSound()
           }
 
@@ -843,12 +782,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             displayName: string
             producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
           }>
-          currentSlide?: SlideState | null
           messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number }>
           readMarkers?: Array<{ peerId: string; ts: number }>
           whiteboardOpen?: boolean
           whiteboardSnapshot?: string | null
-          presentationDrawings?: Record<string, unknown>
         } | undefined) => {
           if (error || !data) {
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
@@ -859,11 +796,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           dispatch({ type: "CONNECTED", localStream })
           hasJoinedRef.current = true
 
-          // If a presentation is already in progress, sync the slide state.
-          if (data.currentSlide) {
-            dispatch({ type: "SET_SLIDE", slide: data.currentSlide })
-          }
-
           // Restore the shared whiteboard: if it's open for the room, mount it
           // with the latest persisted snapshot so we see the current drawing.
           dispatch({
@@ -871,18 +803,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             open: !!data.whiteboardOpen,
             snapshot: data.whiteboardSnapshot ?? null,
           })
-
-          // Restore persisted presentation drawing annotations (рисунки на слайдах).
-          if (data.presentationDrawings && typeof data.presentationDrawings === 'object') {
-            const drawMap = new Map<number, string>()
-            for (const [k, v] of Object.entries(data.presentationDrawings as Record<string, unknown>)) {
-              const idx = Number(k)
-              if (Number.isFinite(idx) && typeof v === 'string') {
-                drawMap.set(idx, v)
-              }
-            }
-            dispatch({ type: "SET_PRESENTATION_DRAWINGS", drawings: drawMap })
-          }
 
           // Load persisted chat history (oldest first). ADD_MESSAGE dedupes by
           // id, so re-running this on a full rejoin is harmless. "self" is
@@ -967,10 +887,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               sendTransportRef.current = null
               recvTransportRef.current = null
               consumersRef.current.clear()
-
-              // Clear stale slide state — the fresh joinRoom response will
-              // restore it if a presentation is still active.
-              dispatch({ type: "SET_SLIDE", slide: null })
 
               // Re-run the join sequence. After setupTransports resolves the
               // new send transport is ready and we can re-publish the tracks that
@@ -1116,10 +1032,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         return
       }
       const rawSource = (target.appData as Record<string, unknown>)?.source
-      const source: MediaSource =
-        rawSource === "screen" ? "screen"
-        : rawSource === "presentation" ? "presentation"
-        : "media"
+      const source: MediaSource = rawSource === "screen" ? "screen" : "media"
       const closedKind = target.kind as "audio" | "video"
       target.close()
       consumersRef.current.delete(target.id)
@@ -1132,7 +1045,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
       // A remote peer stopped a demonstration. Gate on the video track so we
       // play exactly one sound (a screen share's audio track also closes).
-      if (closedKind === "video" && (source === "screen" || source === "presentation")) {
+      if (closedKind === "video" && source === "screen") {
         playScreenShareStopSound()
       }
     })
@@ -1157,33 +1070,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         }
         if (!target || target.kind !== "audio") return
         const rawSource = (target.appData as Record<string, unknown>)?.source
-        if (rawSource === "screen" || rawSource === "presentation") return
+        if (rawSource === "screen") return
         dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: !!paused })
-      },
-    )
-
-    // -----------------------------------------------------------------------
-    // Slide sync — server broadcasts these when the presenter changes slide
-    // or stops presenting.
-    // -----------------------------------------------------------------------
-    socket.on(
-      "presentationSlideChanged",
-      ({ peerId: presenterPeerId, slide, total }: { peerId: string; slide: number; total: number }) => {
-        // Basic sanity check — server already validates, but guard the reducer too.
-        if (
-          typeof presenterPeerId !== "string" || !presenterPeerId ||
-          typeof slide !== "number" || !Number.isFinite(slide) || slide < 0 ||
-          typeof total !== "number" || !Number.isFinite(total) || total < 1 ||
-          slide >= total
-        ) return
-        dispatch({ type: "SET_SLIDE", slide: { peerId: presenterPeerId, slide: Math.floor(slide), total: Math.floor(total) } })
-      },
-    )
-
-    socket.on(
-      "presentationEnded",
-      (_payload: { peerId: string }) => {
-        dispatch({ type: "SET_SLIDE", slide: null })
       },
     )
 
@@ -1240,22 +1128,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       whiteboardListenersRef.current.forEach((fn) => fn(payload.changes))
     })
 
-    // Presentation drawing: incoming remote stroke — fan out to listeners.
-    socket.on("presentationStroke", (payload: { peerId: string; slideIndex: number; stroke: unknown }) => {
-      if (!payload || payload.stroke == null) return
-      presentationStrokeListenersRef.current.forEach((fn) =>
-        fn({ slideIndex: payload.slideIndex, stroke: payload.stroke })
-      )
-    })
-
-    // Presentation drawing: clear a slide's drawing for everyone.
-    socket.on("presentationDrawClear", (payload: { peerId: string; slideIndex: number }) => {
-      if (!payload || typeof payload.slideIndex !== 'number') return
-      dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex: payload.slideIndex, snapshot: null })
-      presentationClearListenersRef.current.forEach((fn) =>
-        fn({ slideIndex: payload.slideIndex })
-      )
-    })
   }, [roomId, displayName, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
@@ -1294,16 +1166,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // -------------------------------------------------------------------------
   // Leave
   // -------------------------------------------------------------------------
-  // Stable ref so leave() can call stopPresentation() without a dep-cycle
-  // (leave is declared before stopPresentation in the file).
-  const stopPresentationRef = useRef<((options?: { silent?: boolean }) => void) | null>(null)
-
   const leave = useCallback(() => {
-    // Stop any active presentation before leaving so canvas capture is released
-    // and presentationEnded is sent to the server before the socket closes.
-    // Silent: we're leaving the room, not ending a demonstration mid-call.
-    stopPresentationRef.current?.({ silent: true })
-
     const socket = socketRef.current
     if (socket) {
       socket.emit("leaveRoom", { roomId, peerId: peerId.current })
@@ -1688,71 +1551,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     [startScreenShare, stopScreenShare],
   )
 
-  // -------------------------------------------------------------------------
-  // Presentation sharing
-  //
-  // A presentation (PPTX / PDF / image) is rendered to a <canvas> by the
-  // owner. We capture that canvas as a video track and publish it through the
-  // normal send transport, tagged with appData.source === "presentation".
-  // Every other peer receives it as a regular video stream and shows it in a
-  // fullscreen overlay. Because only the owner controls the canvas (which
-  // slide/scroll position), navigation is implicitly owner-only.
-  // -------------------------------------------------------------------------
-  const stopPresentation = useCallback((options?: { silent?: boolean }) => {
-    const socket = socketRef.current
-    const producer = presentationVideoProducerRef.current
-
-    // Guard: nothing to tear down if no presentation is active.
-    // Use isPresentingRef (not state) to avoid stale-closure issues in leave().
-    if (!isPresentingRef.current && !producer && !presentationStreamRef.current) return
-    const wasPresenting = isPresentingRef.current || !!producer
-    isPresentingRef.current = false
-
-    if (producer) {
-      // Clear onended BEFORE stopping tracks so we don't trigger a recursive call.
-      const track = presentationStreamRef.current?.getVideoTracks()[0]
-      if (track) track.onended = null
-
-      socket?.emit("closeProducer", {
-        roomId,
-        peerId: peerId.current,
-        producerId: producer.id,
-      })
-      producer.close()
-      presentationVideoProducerRef.current = null
-
-      // Notify the server so it clears currentSlide and broadcasts to other peers.
-      socket?.emit("presentationEnded", { roomId, peerId: peerId.current })
-    }
-
-    presentationStreamRef.current?.getTracks().forEach((t) => t.stop())
-    presentationStreamRef.current = null
-    dispatch({ type: "STOP_PRESENTING" })
-    // Snappy descending arpeggio confirming the demonstration has stopped.
-    if (wasPresenting && !options?.silent) playScreenShareStopSound()
-  }, [roomId])
-
-  // Wire the ref so leave() can call stopPresentation() without a dep-cycle.
-  stopPresentationRef.current = stopPresentation
-
-  // Notify the server (and all other peers) that the current slide changed.
-  // Call this whenever the presenter navigates to a different slide/page.
-  const notifySlideChange = useCallback((slide: number, total: number) => {
-    const socket = socketRef.current
-    if (!socket) return
-    // Validate before emitting — mirrors server-side validation.
-    if (
-      !Number.isFinite(slide) || slide < 0 ||
-      !Number.isFinite(total) || total < 1 ||
-      Math.floor(slide) >= Math.floor(total)
-    ) return
-    const s = Math.floor(slide)
-    const t = Math.floor(total)
-    socket.emit("presentationSlide", { roomId, peerId: peerId.current, slide: s, total: t })
-    // Update local state immediately so the presenter sees their own progress.
-    dispatch({ type: "SET_SLIDE", slide: { peerId: peerId.current, slide: s, total: t } })
-  }, [roomId])
-
   // Send a chat message: emit to the server (which broadcasts to other peers)
   // and add it locally right away so the sender sees it immediately.
   const sendChatMessage = useCallback((text: string) => {
@@ -1832,85 +1630,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   }, [])
 
   // -------------------------------------------------------------------------
-  // Presentation drawing annotations
-  // -------------------------------------------------------------------------
-
-  // Send an incremental stroke to all peers (relayed by server, not stored).
-  const sendPresentationStroke = useCallback((slideIndex: number, stroke: unknown) => {
-    const socket = socketRef.current
-    if (!socket || stroke == null) return
-    socket.emit("presentationStroke", { roomId, peerId: peerId.current, slideIndex, stroke })
-  }, [roomId])
-
-  // Clear drawing on a slide for everyone + persist null to DB.
-  const clearPresentationDrawing = useCallback((slideIndex: number) => {
-    const socket = socketRef.current
-    if (!socket) return
-    dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex, snapshot: null })
-    socket.emit("presentationDrawClear", { roomId, peerId: peerId.current, slideIndex })
-  }, [roomId])
-
-  // Save the full canvas snapshot for a slide (debounced by caller). Persisted
-  // to DB; also kept in state for local restoration on slide navigation.
-  const savePresentationDrawingSnapshot = useCallback((slideIndex: number, snapshot: string) => {
-    const socket = socketRef.current
-    if (!socket || typeof snapshot !== 'string') return
-    dispatch({ type: "SET_PRESENTATION_DRAWING_SNAPSHOT", slideIndex, snapshot })
-    socket.emit("presentationDrawSnapshot", { roomId, peerId: peerId.current, slideIndex, snapshot })
-  }, [roomId])
-
-  // Subscribe to incoming remote strokes. Returns unsubscribe fn.
-  const subscribePresentationStroke = useCallback(
-    (fn: (event: { slideIndex: number; stroke: unknown }) => void) => {
-      presentationStrokeListenersRef.current.add(fn)
-      return () => { presentationStrokeListenersRef.current.delete(fn) }
-    },
-    [],
-  )
-
-  // Subscribe to remote clear events. Returns unsubscribe fn.
-  const subscribePresentationClear = useCallback(
-    (fn: (event: { slideIndex: number }) => void) => {
-      presentationClearListenersRef.current.add(fn)
-      return () => { presentationClearListenersRef.current.delete(fn) }
-    },
-    [],
-  )
-
-  // Publish a canvas-captured stream as the presentation video track.
-  const startPresentation = useCallback(async (stream: MediaStream) => {
-    const sendTransport = sendTransportRef.current
-    if (!sendTransport) return
-
-    // Tear down any existing presentation synchronously before producing a new
-    // one. stopPresentation is synchronous (no awaits), so there is no race.
-    stopPresentation()
-
-    presentationStreamRef.current = stream
-    const videoTrack = stream.getVideoTracks()[0]
-    if (!videoTrack) return
-
-    // Optimise the encoder for sharp text/detail (slides, documents).
-    if ("contentHint" in videoTrack) {
-      videoTrack.contentHint = "detail"
-    }
-
-    const producer = await sendTransport.produce({
-      track: videoTrack,
-      encodings: [{ maxBitrate: 4_000_000, scaleResolutionDownBy: 1 }],
-      codecOptions: { videoGoogleStartBitrate: 2000 },
-      appData: { source: "presentation" },
-    })
-    presentationVideoProducerRef.current = producer
-    isPresentingRef.current = true
-    videoTrack.onended = () => stopPresentation()
-
-    dispatch({ type: "SET_PRESENTING", isPresenting: true })
-    // Snappy ascending arpeggio confirming the demonstration has started.
-    playScreenShareSound()
-  }, [stopPresentation])
-
-  // -------------------------------------------------------------------------
   // Auto-join on mount, leave on unmount
   // -------------------------------------------------------------------------
   useEffect(() => {
@@ -1939,12 +1658,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     setScreenQuality,
     switchMic,
     leave,
-    // Presentation slide sync
-    currentSlide: state.currentSlide,
-    notifySlideChange,
-    startPresentation,
-    stopPresentation,
-    isPresenting: state.isPresenting,
     // Chat
     messages: state.messages,
     sendChatMessage,
@@ -1959,13 +1672,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
-    // Presentation drawing annotations
-    presentationDrawings: state.presentationDrawings,
-    sendPresentationStroke,
-    clearPresentationDrawing,
-    savePresentationDrawingSnapshot,
-    subscribePresentationStroke,
-    subscribePresentationClear,
     localPeerId: peerId.current,
   }
 }

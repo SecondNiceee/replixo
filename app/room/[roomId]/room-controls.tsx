@@ -2,7 +2,7 @@
 
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
-  Check, ChevronDown, MonitorUp, MonitorOff, FileText,
+  Check, ChevronDown, MonitorUp, MonitorOff,
   ChevronUp, Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -27,7 +27,6 @@ interface RoomControlsProps {
   isMicMuted: boolean
   isCamOff: boolean
   isScreenSharing: boolean
-  isPresenting: boolean
   screenQuality: ScreenQuality
   micDevices: MediaDeviceInfo[]
   selectedMicLabel: string | null
@@ -41,7 +40,6 @@ interface RoomControlsProps {
   onSetScreenQuality: (q: ScreenQuality) => void
   onSwitchMic: (deviceId: string) => void
   onSelectMicLabel: (label: string) => void
-  onPresentationAction: () => void
   onLeave: () => void
 }
 
@@ -49,7 +47,6 @@ export function RoomControls({
   isMicMuted,
   isCamOff,
   isScreenSharing,
-  isPresenting,
   screenQuality,
   micDevices,
   selectedMicLabel,
@@ -63,7 +60,6 @@ export function RoomControls({
   onSetScreenQuality,
   onSwitchMic,
   onSelectMicLabel,
-  onPresentationAction,
   onLeave,
 }: RoomControlsProps) {
   return (
@@ -157,13 +153,11 @@ export function RoomControls({
         <Button
           variant="outline"
           onClick={onToggleScreenShare}
-          disabled={isPresenting && !isScreenSharing}
           className={cn(
             "size-12 rounded-full rounded-r-none border-r-0",
             isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
           )}
           aria-label={isScreenSharing ? "Остановить демонстрацию экрана" : "Демонстрация экрана"}
-          title={isPresenting && !isScreenSharing ? "Завершите презентацию перед демонстрацией экрана" : undefined}
         >
           {isScreenSharing ? <MonitorOff className="size-5" /> : <MonitorUp className="size-5" />}
         </Button>
@@ -194,22 +188,6 @@ export function RoomControls({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {/* Presentation */}
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={onPresentationAction}
-        disabled={isScreenSharing && !isPresenting}
-        className={cn(
-          "size-12 rounded-full",
-          isPresenting && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
-        )}
-        aria-label={isPresenting ? "Завершить презентацию" : "Открыть презентацию (PDF / PPTX)"}
-        title={isScreenSharing && !isPresenting ? "Остановите демонстрацию экрана перед запуском презентации" : undefined}
-      >
-        <FileText className="size-5" />
-      </Button>
 
       {/* Whiteboard */}
       <Button
