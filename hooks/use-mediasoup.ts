@@ -1234,8 +1234,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         const name = (err as { name?: string })?.name
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
           setPermissionError("mic")
-          // Re-prompt the browser for microphone access
-          navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {/* user dismissed */})
         } else {
           dispatch({ type: "ERROR", error: "Нет доступа к микрофону" })
         }
@@ -1334,8 +1332,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         const name = (err as { name?: string })?.name
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
           setPermissionError("cam")
-          // Re-prompt the browser for camera access
-          navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {/* user dismissed */})
         } else {
           dispatch({ type: "ERROR", error: "Нет доступа к камере" })
         }
