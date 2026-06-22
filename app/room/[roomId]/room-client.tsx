@@ -199,8 +199,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         <div className="relative z-50 flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-sm text-destructive border-b border-destructive/20">
           <span>
             {permissionError === "mic"
-              ? "Разрешите доступ к микрофону в настройках браузера"
-              : "Разреши��е доступ к камере в настройках браузера"}
+              ? "Нет доступа к микрофону. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"
+              : "Нет доступа к камере. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"}
           </span>
           <button
             onClick={clearPermissionError}
