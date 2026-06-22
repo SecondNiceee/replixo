@@ -1339,9 +1339,25 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       return
     }
 
-    // Already have track — just show/hide
-    existing.enabled = !existing.enabled
-    dispatch({ type: "TOGGLE_CAM", isOff: !existing.enabled })
+    // Track exists — turning off: stop the track and close the producer so the
+    // camera LED goes off. Turning on: treated as "first use" on the next call
+    // (the track will be gone from the stream so the block above handles it).
+    existing.stop()
+    stream.removeTrack(existing)
+
+    const producer = videoProducerRef.current
+    if (producer) {
+      const socket = socketRef.current
+      socket?.emit("closeProducer", {
+        roomId,
+        peerId: peerId.current,
+        producerId: producer.id,
+      })
+      producer.close()
+      videoProducerRef.current = null
+    }
+
+    dispatch({ type: "TOGGLE_CAM", isOff: true })
   }, [])
 
   // -------------------------------------------------------------------------
@@ -1574,7 +1590,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     if (!socket) return
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     // Send our generated id so the server persists + rebroadcasts with the same
-    // id — that keeps our optimistic copy and the stored record in sync and
+    // id ��� that keeps our optimistic copy and the stored record in sync and
     // prevents duplicates when chat history is reloaded later.
     socket.emit("chatMessage", { roomId, peerId: peerId.current, text: trimmed, id })
     dispatch({
