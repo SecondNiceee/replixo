@@ -221,6 +221,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         status={status}
         participantCount={peers.size + 1}
         isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
+        chatOpen={chatOpen}
       />
 
       <div
