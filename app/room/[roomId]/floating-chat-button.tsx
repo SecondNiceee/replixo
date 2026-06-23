@@ -1,11 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { MessageSquare, Settings, Hand } from "lucide-react"
+import { MessageSquare, Hand } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
 import { useChatButtonSync } from "@/hooks/use-chat-button-sync"
-import { ChatButtonSettingsDialog } from "./chat-button-settings"
 
 interface FloatingChatButtonProps {
   chatOpen: boolean
@@ -28,7 +27,6 @@ export function FloatingChatButton({
   // debounced autosave afterwards). No-op for anonymous users.
   useChatButtonSync()
 
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
   // Mounted guard: the store rehydrates from localStorage on the client, so we
   // avoid rendering until after mount to keep SSR and first paint consistent.
@@ -117,15 +115,6 @@ export function FloatingChatButton({
           >
             <Hand className="size-4" />
           </button>
-          {/* Settings gear */}
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Настройки кнопки чата"
-            className="pointer-events-auto flex size-8 items-center justify-center rounded-full border border-border bg-background/95 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Settings className="size-4" />
-          </button>
         </div>
 
         {/* The chat button itself */}
@@ -154,7 +143,6 @@ export function FloatingChatButton({
         </button>
       </div>
 
-      <ChatButtonSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   )
 }
