@@ -204,8 +204,8 @@ export function RoomSettingsDialog({ open, onOpenChange }: RoomSettingsDialogPro
                 min={0}
                 max={100}
                 step={1}
-                value={[soundVolume]}
-                onValueChange={([v]) => setSoundVolume(v)}
+                value={soundVolume}
+                onValueChange={({ value }) => setSoundVolume(value as number)}
                 aria-label="Громкость звуков приложения"
               />
             </div>
