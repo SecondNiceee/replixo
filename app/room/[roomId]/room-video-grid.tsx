@@ -23,6 +23,7 @@ interface RoomVideoGridProps {
   isCamOff: boolean
   isScreenSharing: boolean
   peers: Map<string, Peer>
+  chatOpen?: boolean
 }
 
 export function RoomVideoGrid({
@@ -33,6 +34,7 @@ export function RoomVideoGrid({
   isCamOff,
   isScreenSharing,
   peers,
+  chatOpen = false,
 }: RoomVideoGridProps) {
   const [participantsHidden, setParticipantsHidden] = useState(false)
 
@@ -79,7 +81,46 @@ export function RoomVideoGrid({
   // Screen share layout
   if (hasScreenShare) {
     return (
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row">
+      <main
+        className={cn(
+          "flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row transition-[margin] duration-300 ease-in-out",
+          chatOpen && "sm:mr-[360px]",
+        )}
+      >
+        {/* Collapsible participants panel — bottom strip on mobile, LEFT column
+            on large screens. Выезжает слева. */}
+        <div className="relative flex shrink-0">
+          {/* Toggle handle: sits below the strip on mobile, on the right edge of
+              the column on large screens */}
+          <button
+            onClick={() => setParticipantsHidden((v) => !v)}
+            aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
+            className={cn(
+              "absolute left-1/2 -bottom-7 z-10 flex h-7 w-14 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
+              "lg:left-auto lg:-right-7 lg:top-1/2 lg:h-14 lg:w-7 lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-b-none lg:rounded-r-xl lg:border-t lg:border-l-0",
+            )}
+          >
+            <ChevronRight
+              className={cn(
+                "size-4 -rotate-90 text-muted-foreground transition-transform duration-300 lg:rotate-180",
+                participantsHidden && "rotate-90 lg:rotate-0",
+              )}
+            />
+          </button>
+
+          {/* Collapsing area: height collapses on mobile, width on large screens */}
+          <div
+            className={cn(
+              "grid overflow-hidden transition-all duration-300 ease-in-out",
+              participantsHidden
+                ? "grid-rows-[0fr] lg:grid-rows-[1fr] lg:grid-cols-[0fr]"
+                : "grid-rows-[1fr] lg:grid-cols-[1fr]",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">{sidebarTiles}</div>
+          </div>
+        </div>
+
         <div
           className={cn(
             "grid min-h-0 flex-1 gap-2",
@@ -108,41 +149,6 @@ export function RoomVideoGrid({
               className="h-full w-full"
             />
           ))}
-        </div>
-
-        {/* Collapsible participants panel — bottom strip on mobile, right column
-            on large screens. Toggle handle uses the same pattern as the
-            bottom controls bar. */}
-        <div className="relative flex shrink-0">
-          {/* Toggle handle: sits above the strip on mobile, on the left edge of
-              the column on large screens */}
-          <button
-            onClick={() => setParticipantsHidden((v) => !v)}
-            aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
-            className={cn(
-              "absolute left-1/2 -top-7 z-10 flex h-7 w-14 -translate-x-1/2 items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
-              "lg:left-auto lg:-left-7 lg:top-1/2 lg:h-14 lg:w-7 lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-t-none lg:rounded-l-xl lg:border-b lg:border-r-0",
-            )}
-          >
-            <ChevronRight
-              className={cn(
-                "size-4 rotate-90 text-muted-foreground transition-transform duration-300 lg:rotate-0",
-                participantsHidden && "rotate-[270deg] lg:rotate-180",
-              )}
-            />
-          </button>
-
-          {/* Collapsing area: height collapses on mobile, width on large screens */}
-          <div
-            className={cn(
-              "grid overflow-hidden transition-all duration-300 ease-in-out",
-              participantsHidden
-                ? "grid-rows-[0fr] lg:grid-rows-[1fr] lg:grid-cols-[0fr]"
-                : "grid-rows-[1fr] lg:grid-cols-[1fr]",
-            )}
-          >
-            <div className="min-h-0 overflow-hidden">{sidebarTiles}</div>
-          </div>
         </div>
       </main>
     )
