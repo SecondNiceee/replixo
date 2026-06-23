@@ -13,9 +13,10 @@ interface RoomHeaderProps {
   participantCount: number
   isFixed?: boolean
   chatOpen?: boolean
+  participantsOpen?: boolean
 }
 
-export function RoomHeader({ roomId, displayName, status, participantCount, isFixed = false, chatOpen = false }: RoomHeaderProps) {
+export function RoomHeader({ roomId, displayName, status, participantCount, isFixed = false, chatOpen = false, participantsOpen = false }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false)
   const [editNameOpen, setEditNameOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -36,6 +37,7 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
         "left-0 right-0 z-50 flex items-center justify-between px-5 py-3 bg-transparent border-b border-transparent transition-[right,margin] duration-300 ease-in-out",
         isFixed ? "fixed top-0" : "relative",
         chatOpen && "sm:mr-[360px]",
+        participantsOpen && "lg:ml-[208px]",
       )}>
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-foreground">Replixo</span>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+
 import { ChevronRight } from "lucide-react"
 import { VideoTile } from "@/components/video-tile"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,8 @@ interface RoomVideoGridProps {
   isCamOff: boolean
   isScreenSharing: boolean
   peers: Map<string, Peer>
+  participantsHidden?: boolean
+  onParticipantsHiddenChange?: (hidden: boolean) => void
 }
 
 export function RoomVideoGrid({
@@ -33,8 +35,13 @@ export function RoomVideoGrid({
   isCamOff,
   isScreenSharing,
   peers,
+  participantsHidden = false,
+  onParticipantsHiddenChange,
 }: RoomVideoGridProps) {
-  const [participantsHidden, setParticipantsHidden] = useState(false)
+  const setParticipantsHidden = (v: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof v === "function" ? v(participantsHidden) : v
+    onParticipantsHiddenChange?.(next)
+  }
 
   const allPeers = [...peers.values()]
   const remoteScreens = allPeers.filter((p) => p.screenStream)
