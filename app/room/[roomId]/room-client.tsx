@@ -12,6 +12,7 @@ import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
+import { ChevronRight } from "lucide-react"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
@@ -278,15 +279,39 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
       </div>
       </div>
 
-      <RoomChat
-        open={chatOpen}
-        onClose={closeChat}
-        messages={messages}
-        onSend={sendChatMessage}
-        unreadFromIndex={unreadFromIndex}
-        readMarkers={readMarkers}
-        peerIds={Array.from(peers.keys())}
-      />
+      {/* Chat panel — slides in from the right. A sticky arrow tab peeks out
+          from the left edge of the panel, matching the participants panel handle
+          pattern used in the screen-share layout. */}
+      <div
+        className={cn(
+          "fixed inset-y-0 right-0 z-30 flex transition-transform duration-300 ease-in-out",
+          chatOpen ? "translate-x-0" : "translate-x-full",
+        )}
+      >
+        {/* Arrow handle — sits on the left edge, always visible */}
+        <button
+          onClick={toggleChat}
+          aria-label={chatOpen ? "Скрыть чат" : "Открыть чат"}
+          className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
+        >
+          <ChevronRight
+            className={cn(
+              "size-4 text-muted-foreground transition-transform duration-300",
+              chatOpen ? "rotate-0" : "rotate-180",
+            )}
+          />
+        </button>
+
+        <RoomChat
+          open={chatOpen}
+          onClose={closeChat}
+          messages={messages}
+          onSend={sendChatMessage}
+          unreadFromIndex={unreadFromIndex}
+          readMarkers={readMarkers}
+          peerIds={Array.from(peers.keys())}
+        />
+      </div>
 
       <FloatingChatButton
         chatOpen={chatOpen}

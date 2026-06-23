@@ -98,24 +98,10 @@ export function RoomChat({
 
   return (
     <>
-      {/* Mobile backdrop — tap to dismiss */}
-      <button
-        aria-hidden={!open}
-        tabIndex={-1}
-        onClick={onClose}
-        className={cn(
-          "absolute inset-0 z-20 bg-background/60 backdrop-blur-sm transition-opacity sm:hidden",
-          open ? "opacity-100" : "pointer-events-none opacity-0",
-        )}
-      />
-
       <aside
         aria-label="Чат комнаты"
         aria-hidden={!open}
-        className={cn(
-          "absolute inset-y-0 right-0 z-30 flex w-full flex-col border-l border-border bg-card transition-transform duration-300 ease-in-out sm:w-[360px]",
-          open ? "translate-x-0" : "translate-x-full",
-        )}
+        className="flex h-full w-[360px] flex-col border-l border-border bg-card"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
@@ -218,6 +204,5 @@ export function RoomChat({
           </Button>
         </form>
       </aside>
-    </>
   )
 }
