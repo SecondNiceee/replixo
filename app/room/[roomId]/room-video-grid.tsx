@@ -59,27 +59,58 @@ export function RoomVideoGrid({
           ? "grid-cols-2"
           : "grid-cols-3"
 
+  const allParticipants: Array<
+    | { key: string; isLocal: true }
+    | { key: string; isLocal: false; peer: Peer }
+  > = [
+    { key: "local", isLocal: true },
+    ...allPeers.map((peer) => ({ key: peer.peerId, isLocal: false as const, peer })),
+  ]
+
   const sidebarTiles = (
-    <div className="flex shrink-0 gap-2 overflow-x-auto p-1 lg:w-52 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:p-1">
-      <VideoTile
-        stream={localStream ?? undefined}
-        speakingStream={localStream ?? undefined}
-        displayName={displayName}
-        isMuted={isMicMuted}
-        isCamOff={isCamOff}
-        isLocal
-        className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
-      />
-      {allPeers.map((peer) => (
-        <VideoTile
-          key={peer.peerId}
-          stream={peer.videoStream}
-          audioStream={peer.audioStream}
-          displayName={peer.displayName}
-          isMuted={!peer.audioStream || !!peer.audioMuted}
-          className="aspect-video h-28 w-auto shrink-0 lg:h-auto lg:w-full"
-        />
-      ))}
+    <div className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-zinc-900/95 shadow-2xl ring-1 ring-white/5 backdrop-blur-md lg:w-52">
+      {/* Header */}
+      <div className="flex items-center gap-2 border-b border-white/10 bg-white/5 px-3 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+          Участники
+        </span>
+        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-white/10 px-1.5 text-[10px] font-bold tabular-nums text-white/50">
+          {allParticipants.length}
+        </span>
+      </div>
+
+      {/* Tiles — horizontal scroll on mobile, vertical on lg */}
+      <div className="flex overflow-x-auto lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
+        {allParticipants.map((item, idx) => (
+          <div
+            key={item.key}
+            className={cn(
+              "shrink-0",
+              idx !== 0 && "border-l border-white/10 lg:border-l-0 lg:border-t lg:border-white/10",
+            )}
+          >
+            {item.isLocal ? (
+              <VideoTile
+                stream={localStream ?? undefined}
+                speakingStream={localStream ?? undefined}
+                displayName={displayName}
+                isMuted={isMicMuted}
+                isCamOff={isCamOff}
+                isLocal
+                className="aspect-video h-28 w-auto rounded-none lg:h-auto lg:w-full"
+              />
+            ) : (
+              <VideoTile
+                stream={item.peer.videoStream}
+                audioStream={item.peer.audioStream}
+                displayName={item.peer.displayName}
+                isMuted={!item.peer.audioStream || !!item.peer.audioMuted}
+                className="aspect-video h-28 w-auto rounded-none lg:h-auto lg:w-full"
+              />
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 

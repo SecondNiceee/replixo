@@ -168,14 +168,14 @@ export function VideoTile({
           <div
             className={cn(
               "flex items-center justify-center rounded-full bg-muted ring-1 ring-border/60 transition-all",
-              "size-16 sm:size-20",
+              "size-10 sm:size-14",
               speaking && "ring-2 ring-green-500",
             )}
           >
             {initials ? (
-              <span className="text-xl font-semibold text-foreground sm:text-2xl">{initials}</span>
+              <span className="text-sm font-semibold text-foreground sm:text-lg">{initials}</span>
             ) : (
-              <User className="size-8 text-muted-foreground sm:size-9" />
+              <User className="size-5 text-muted-foreground sm:size-6" />
             )}
           </div>
         </div>
