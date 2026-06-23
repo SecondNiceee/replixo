@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from "react"
-import { X, SendHorizonal, Check, CheckCheck } from "lucide-react"
+import { SendHorizonal, Check, CheckCheck, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
@@ -127,7 +127,7 @@ export function RoomChat({
             className="size-8"
             aria-label="Закрыть чат"
           >
-            <X className="size-4" />
+            <ChevronRight className="size-4" />
           </Button>
         </div>
 
