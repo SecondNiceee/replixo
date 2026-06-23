@@ -97,8 +97,7 @@ export function RoomChat({
   )
 
   return (
-    <>
-      <aside
+    <aside
         aria-label="Чат комнаты"
         aria-hidden={!open}
         className="flex h-full w-[360px] flex-col border-l border-border bg-card"
