@@ -250,7 +250,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           isCamOff={isCamOff}
           isScreenSharing={isScreenSharing}
           peers={peers}
-          chatOpen={chatOpen}
         />
       )}
 
