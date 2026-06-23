@@ -76,6 +76,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const { devices: micDevices } = useAudioDevices()
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
+  const [participantsHidden, setParticipantsHidden] = useState(false)
 
   // Chat panel open state + unread counter. We track how many messages had been
   // seen the last time the panel was open; anything beyond that is "unread".
@@ -223,6 +224,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         participantCount={peers.size + 1}
         isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
         chatOpen={chatOpen}
+        participantsOpen={!participantsHidden && (isScreenSharing || [...peers.values()].some((p) => p.screenStream != null))}
       />
 
       <div
@@ -250,6 +252,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           isCamOff={isCamOff}
           isScreenSharing={isScreenSharing}
           peers={peers}
+          participantsHidden={participantsHidden}
+          onParticipantsHiddenChange={setParticipantsHidden}
         />
       )}
 
