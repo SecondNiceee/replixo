@@ -23,7 +23,6 @@ interface RoomVideoGridProps {
   isCamOff: boolean
   isScreenSharing: boolean
   peers: Map<string, Peer>
-  chatOpen?: boolean
 }
 
 export function RoomVideoGrid({
@@ -34,7 +33,6 @@ export function RoomVideoGrid({
   isCamOff,
   isScreenSharing,
   peers,
-  chatOpen = false,
 }: RoomVideoGridProps) {
   const [participantsHidden, setParticipantsHidden] = useState(false)
 
@@ -81,12 +79,7 @@ export function RoomVideoGrid({
   // Screen share layout
   if (hasScreenShare) {
     return (
-      <main
-        className={cn(
-          "flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row transition-[margin] duration-300 ease-in-out",
-          chatOpen && "sm:mr-[360px]",
-        )}
-      >
+      <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row">
         {/* Collapsible participants panel — bottom strip on mobile, LEFT column
             on large screens. Выезжает слева. */}
         <div className="relative flex shrink-0">
