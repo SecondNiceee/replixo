@@ -13,6 +13,14 @@
 // ---------------------------------------------------------------------------
 
 import { getSharedAudioContext } from "./audio-unlock"
+import { useRoomSettingsStore } from "@/stores/room-settings-store"
+
+/** Returns the current sound volume as a 0..1 multiplier. */
+function getSoundGainMultiplier(): number {
+  // Read directly from the store state (no hook needed — pure function call).
+  const { soundVolume } = useRoomSettingsStore.getState()
+  return soundVolume / 100
+}
 
 type Wave = "sine" | "triangle"
 
@@ -29,8 +37,10 @@ interface Note {
 }
 
 // Play a single enveloped note on the shared context.
-function playNote(ctx: AudioContext, note: Note, startTime: number) {
+function playNote(ctx: AudioContext, note: Note, startTime: number, volumeMultiplier: number) {
   const { freq, at, duration, gain = 0.18, wave = "sine" } = note
+  const effectiveGain = gain * volumeMultiplier
+  if (effectiveGain <= 0) return
 
   const osc = ctx.createOscillator()
   const env = ctx.createGain()
@@ -41,7 +51,7 @@ function playNote(ctx: AudioContext, note: Note, startTime: number) {
   // Quick attack, smooth exponential decay — bell-like and soft.
   const t0 = startTime + at
   env.gain.setValueAtTime(0.0001, t0)
-  env.gain.exponentialRampToValueAtTime(gain, t0 + 0.015)
+  env.gain.exponentialRampToValueAtTime(effectiveGain, t0 + 0.015)
   env.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
 
   osc.connect(env)
@@ -55,10 +65,12 @@ function playNote(ctx: AudioContext, note: Note, startTime: number) {
 function playSequence(notes: Note[]) {
   const ctx = getSharedAudioContext()
   if (!ctx) return
+  const volumeMultiplier = getSoundGainMultiplier()
+  if (volumeMultiplier <= 0) return
   // Resume in case the context is suspended (no-op if already running).
   if (ctx.state === "suspended") ctx.resume().catch(() => {})
   const start = ctx.currentTime
-  for (const note of notes) playNote(ctx, note, start)
+  for (const note of notes) playNote(ctx, note, start, volumeMultiplier)
 }
 
 // Bouncy three-note "pop" — playful and welcoming. (~0.3s)

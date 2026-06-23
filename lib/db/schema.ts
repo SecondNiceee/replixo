@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey, integer } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -129,6 +129,19 @@ export const chatButtonSettings = pgTable('chat_button_settings', {
   visible: boolean('visible').notNull().default(true),
   // KeyboardEvent.code для открытия чата; null — клавиша не назначена.
   hotkey: text('hotkey'),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})
+
+// --- Room / app settings ---------------------------------------------------
+// Общие настройки приложения для зарегистрированного пользователя.
+// Анонимные хранят то же самое в localStorage; при входе мёрджатся сюда.
+// soundVolume — громкость звуков приложения, 0..100 (целое число).
+
+export const roomSettings = pgTable('room_settings', {
+  userId: text('userId')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  soundVolume: integer('soundVolume').notNull().default(80),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 })
 
