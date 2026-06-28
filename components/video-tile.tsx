@@ -145,9 +145,10 @@ export function VideoTile({
       {!isLocal && audioStream && (
         <div
           className={cn(
-            // Pinned to the bottom-right corner so it never collides with the
-            // tile header (the top-right placement got hidden underneath it).
-            "absolute bottom-2 right-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
+            // Bottom-right corner, lifted above the bottom name bar (which is
+            // full-width with py-4 and sits later in the DOM, so a bottom-2
+            // placement was getting covered by it). z-30 keeps it on top.
+            "absolute bottom-14 right-2 z-30 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
             // Appears only on hover/focus (or while actively dragging the slider).
             isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
           )}
