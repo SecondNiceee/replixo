@@ -146,13 +146,30 @@ export function VideoTile({
         <div
           className={cn(
             "absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
-            isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
+            // Screen-share tiles carry the demonstration's system/tab audio.
+            // Its volume control must be obvious, so keep it always visible
+            // instead of hiding it behind hover (which made it impossible to
+            // find on the large screen tile). Camera tiles keep the subtle
+            // hover behaviour.
+            isScreen
+              ? "opacity-100"
+              : isDragging
+                ? "opacity-100"
+                : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
           )}
         >
           <button
             onClick={() => setLocalMuted((m) => !m)}
             className="flex size-6 items-center justify-center rounded-full text-white transition-colors hover:bg-white/15"
-            aria-label={localMuted ? "Включить звук участника" : "Выключить звук участника"}
+            aria-label={
+              localMuted
+                ? isScreen
+                  ? "Включить звук демонстрации"
+                  : "Включить звук участника"
+                : isScreen
+                  ? "Выключить звук демонстрации"
+                  : "Выключить звук участника"
+            }
           >
             {localMuted || volume === 0 ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
           </button>
@@ -170,7 +187,7 @@ export function VideoTile({
             onPointerDown={() => setIsDragging(true)}
             onPointerUp={() => setIsDragging(false)}
             onPointerCancel={() => setIsDragging(false)}
-            aria-label="Громкость участника"
+            aria-label={isScreen ? "Громкость демонстрации" : "Громкость участника"}
             className={cn(
               // The INPUT itself is tall (h-6 = 24px) so there's a comfortable
               // grab area for the mouse — a 6px track alone is nearly impossible
