@@ -137,8 +137,12 @@ export function VideoTile({
       {/* Remote audio — local audio is muted to prevent echo */}
       {!isLocal && <audio ref={audioRef} autoPlay playsInline className="hidden" />}
 
-      {/* Per-user volume control (remote tiles only) */}
-      {!isLocal && (
+      {/* Per-user volume control. Shown on any remote tile that actually
+          carries audio — this covers both microphone tiles and screen-share
+          tiles (their system audio arrives as `audioStream` here and is routed
+          through the same per-stream gain node). Hidden when there's no audio
+          to control so we never show a dead slider. */}
+      {!isLocal && audioStream && (
         <div
           className={cn(
             "absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
