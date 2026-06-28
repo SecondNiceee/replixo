@@ -97,6 +97,10 @@ export function VideoTile({
     <div
       className={cn(
         "group relative flex items-center justify-center overflow-hidden rounded-2xl bg-black transition-all",
+        // Subtle frame so participants are clearly separated on the dark
+        // background. Slightly brighter on hover; the speaking outline (below)
+        // sits on top via `outline` and is unaffected.
+        "ring-1 ring-white/10 shadow-lg shadow-black/40 hover:ring-white/20",
         speaking && "outline outline-[3px] outline-offset-[2px] outline-green-500",
         className,
       )}
@@ -185,7 +189,7 @@ export function VideoTile({
       <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 px-4 py-4">
         <span className="max-w-[70%] truncate rounded-md bg-black/50 px-2.5 py-1 text-sm font-semibold leading-tight text-white backdrop-blur-sm shadow-sm">
           {isScreen
-            ? `${displayName}${isLocal ? " (вы)" : ""} — экран`
+            ? `${displayName}${isLocal ? " (вы)" : ""} — эк��ан`
             : isLocal
               ? `${displayName} (вы)`
               : displayName}
