@@ -36,8 +36,10 @@ export function VideoTile({
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // Per-user local audio controls (remote tiles only).
+  // Volume is a gain multiplier: 1 == 100% (the original/raw stream loudness),
+  // values above 1 boost the participant louder than default. Default 0.6 (60%).
   const [localMuted, setLocalMuted] = useState(false)
-  const [volume, setVolume] = useState(1)
+  const [volume, setVolume] = useState(0.6)
   const [isDragging, setIsDragging] = useState(false)
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
@@ -87,7 +89,9 @@ export function VideoTile({
       if (routed) {
         audio.muted = true
       } else {
-        audio.volume = volume
+        // HTMLMediaElement.volume only accepts 0..1, so boosting (>1) is only
+        // possible on the AudioContext gain path above. Clamp the fallback.
+        audio.volume = Math.max(0, Math.min(1, volume))
         audio.muted = localMuted
       }
     }
@@ -141,7 +145,7 @@ export function VideoTile({
           <input
             type="range"
             min={0}
-            max={1}
+            max={2}
             step={0.05}
             value={localMuted ? 0 : volume}
             onChange={(e) => {
@@ -149,13 +153,13 @@ export function VideoTile({
               setVolume(v)
               setLocalMuted(v === 0)
             }}
-            onMouseDown={() => setIsDragging(true)}
-            onMouseUp={() => setIsDragging(false)}
-            onTouchStart={() => setIsDragging(true)}
-            onTouchEnd={() => setIsDragging(false)}
+            onPointerDown={() => setIsDragging(true)}
+            onPointerUp={() => setIsDragging(false)}
+            onPointerCancel={() => setIsDragging(false)}
             aria-label="Громкость участника"
             className={cn(
-              "h-1.5 w-24 cursor-pointer appearance-none rounded-full bg-white/30",
+              // `touch-none` keeps a drag from being hijacked by scroll/pan on touch devices.
+              "h-1.5 w-24 cursor-pointer touch-none appearance-none rounded-full bg-white/30",
               // Webkit thumb — must be re-defined when using appearance-none,
               // otherwise the thumb has zero size and can't be grabbed/dragged.
               "[&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow",
@@ -163,6 +167,9 @@ export function VideoTile({
               "[&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white",
             )}
           />
+          <span className="w-9 shrink-0 text-right text-[10px] font-semibold tabular-nums text-white/80">
+            {localMuted ? "0%" : `${Math.round(volume * 100)}%`}
+          </span>
         </div>
       )}
 
