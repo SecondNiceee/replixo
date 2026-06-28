@@ -139,7 +139,9 @@ function disconnectStreamFromContext(stream: MediaStream) {
 // own .volume will be ignored and this is the only thing that changes volume).
 export function setStreamVolume(stream: MediaStream | undefined | null, volume: number): boolean {
   if (!stream) return false
-  const clamped = Math.max(0, Math.min(1, volume))
+  // Allow boosting above 1 (100%) via the gain node — up to 4x. The slider in
+  // the UI tops out at 2 (200%); the extra headroom is just a safety margin.
+  const clamped = Math.max(0, Math.min(4, volume))
   streamVolumes.set(stream, clamped)
   const nodes = streamNodes.get(stream)
   if (nodes) {
