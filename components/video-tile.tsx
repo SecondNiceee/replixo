@@ -168,12 +168,17 @@ export function VideoTile({
             onPointerCancel={() => setIsDragging(false)}
             aria-label="Громкость участника"
             className={cn(
-              // `touch-none` keeps a drag from being hijacked by scroll/pan on touch devices.
-              "h-1.5 w-24 cursor-pointer touch-none appearance-none rounded-full bg-white/30",
-              // Webkit thumb — must be re-defined when using appearance-none,
-              // otherwise the thumb has zero size and can't be grabbed/dragged.
-              "[&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow",
-              // Firefox thumb
+              // The INPUT itself is tall (h-6 = 24px) so there's a comfortable
+              // grab area for the mouse — a 6px track alone is nearly impossible
+              // to click/drag. The visible thin bar is drawn via the track
+              // pseudo-elements below; the input has a transparent background.
+              "h-6 w-24 cursor-pointer touch-none appearance-none bg-transparent",
+              // Webkit: thin visible track + grabbable thumb. The negative top
+              // margin re-centers the 12px thumb on the 6px track.
+              "[&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-white/30",
+              "[&::-webkit-slider-thumb]:-mt-[3px] [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow",
+              // Firefox: thin visible track + grabbable thumb.
+              "[&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-white/30",
               "[&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white",
             )}
           />
