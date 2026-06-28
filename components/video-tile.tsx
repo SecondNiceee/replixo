@@ -6,6 +6,11 @@ import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
 import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
 
+// Slider position that corresponds to the stream's natural loudness (gain 1.0).
+// The slider runs 0..1; this is the default so users have headroom both down
+// (quieter) and up (louder, up to 1/NORMAL_VOLUME ≈ 1.67x at 100%).
+const NORMAL_VOLUME = 0.6
+
 interface VideoTileProps {
   stream?: MediaStream
   audioStream?: MediaStream
@@ -36,11 +41,12 @@ export function VideoTile({
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // Per-user local audio controls (remote tiles only).
-  // Volume is a gain multiplier: 1 == 100% (the original/raw stream loudness).
-  // The slider only goes UP from 100% (boost) — it never makes a participant
-  // quieter than normal. Muting is handled separately by the mute button.
+  // `volume` is the slider position in 0..1 (shown as 0%..100%). The default
+  // sits at NORMAL_VOLUME (60%), which maps to the stream's natural loudness
+  // (gain 1.0). Dragging below 60% makes the participant quieter; dragging
+  // above 60% boosts them louder (up to ~1.67x at 100%).
   const [localMuted, setLocalMuted] = useState(false)
-  const [volume, setVolume] = useState(1)
+  const [volume, setVolume] = useState(NORMAL_VOLUME)
   const [isDragging, setIsDragging] = useState(false)
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
@@ -83,8 +89,11 @@ export function VideoTile({
   // element's own volume/muted directly.
   useEffect(() => {
     if (isLocal) return
-    const effective = localMuted ? 0 : volume
-    const routed = setStreamVolume(audioStream, effective)
+    // Map the 0..1 slider position to a gain multiplier where NORMAL_VOLUME
+    // (the default) == 1.0 (natural loudness). Below default → quieter,
+    // above default → boosted.
+    const gain = localMuted ? 0 : volume / NORMAL_VOLUME
+    const routed = setStreamVolume(audioStream, gain)
     const audio = audioRef.current
     if (audio) {
       if (routed) {
@@ -92,7 +101,7 @@ export function VideoTile({
       } else {
         // HTMLMediaElement.volume only accepts 0..1, so boosting (>1) is only
         // possible on the AudioContext gain path above. Clamp the fallback.
-        audio.volume = Math.max(0, Math.min(1, volume))
+        audio.volume = Math.max(0, Math.min(1, gain))
         audio.muted = localMuted
       }
     }
@@ -145,12 +154,14 @@ export function VideoTile({
           </button>
           <input
             type="range"
-            min={1}
-            max={2}
+            min={0}
+            max={1}
             step={0.05}
             value={volume}
             onChange={(e) => {
-              setVolume(Number(e.target.value))
+              const v = Number(e.target.value)
+              setVolume(v)
+              setLocalMuted(v === 0)
             }}
             onPointerDown={() => setIsDragging(true)}
             onPointerUp={() => setIsDragging(false)}
