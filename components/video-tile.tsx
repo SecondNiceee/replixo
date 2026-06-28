@@ -145,10 +145,10 @@ export function VideoTile({
       {!isLocal && audioStream && (
         <div
           className={cn(
-            // Bottom-right corner, lifted above the bottom name bar (which is
-            // full-width with py-4 and sits later in the DOM, so a bottom-2
-            // placement was getting covered by it). z-30 keeps it on top.
-            "absolute bottom-14 right-2 z-30 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
+            // Bottom-right corner, vertically aligned with the name label in
+            // the bottom bar (bottom-0 + py-4 → bottom-4). z-30 keeps it above
+            // the bar.
+            "absolute bottom-4 right-2 z-30 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
             // Appears only on hover/focus (or while actively dragging the slider).
             isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
           )}
