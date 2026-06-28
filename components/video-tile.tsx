@@ -145,17 +145,11 @@ export function VideoTile({
       {!isLocal && audioStream && (
         <div
           className={cn(
-            "absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
-            // Screen-share tiles carry the demonstration's system/tab audio.
-            // Its volume control must be obvious, so keep it always visible
-            // instead of hiding it behind hover (which made it impossible to
-            // find on the large screen tile). Camera tiles keep the subtle
-            // hover behaviour.
-            isScreen
-              ? "opacity-100"
-              : isDragging
-                ? "opacity-100"
-                : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
+            // Pinned to the bottom-right corner so it never collides with the
+            // tile header (the top-right placement got hidden underneath it).
+            "absolute bottom-2 right-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
+            // Appears only on hover/focus (or while actively dragging the slider).
+            isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
           )}
         >
           <button
