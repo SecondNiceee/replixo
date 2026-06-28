@@ -141,7 +141,7 @@ export function VideoTile({
       {!isLocal && (
         <div
           className={cn(
-            "absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
+            "absolute right-2 top-2 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-1.5 py-1 backdrop-blur-sm transition-opacity duration-200",
             isDragging ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100",
           )}
         >
@@ -188,9 +188,11 @@ export function VideoTile({
         </div>
       )}
 
-      {/* Cam off placeholder */}
+      {/* Cam off placeholder — purely decorative, must NOT capture pointer
+          events or it would cover the volume control (top-right) and block the
+          slider, since it spans the whole tile and sits later in the DOM. */}
       {!isScreen && (isCamOff || !stream) && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div
             className={cn(
               "flex items-center justify-center rounded-full bg-muted ring-1 ring-border/60 transition-all",
