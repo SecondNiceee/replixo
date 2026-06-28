@@ -234,28 +234,36 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         )}
       >
 
-      {whiteboardOpen ? (
-        <div className="relative min-h-0 flex-1">
-          <Whiteboard
-            initialSnapshot={whiteboardSnapshot}
-            onChange={sendWhiteboardChange}
-            onSnapshot={sendWhiteboardSnapshot}
-            subscribeRemote={subscribeWhiteboardChange}
+      {/* The video grid stays MOUNTED even while the whiteboard is open — it
+          hosts the participants' <audio> elements, so unmounting it (a ternary
+          swap) would cut everyone's audio. Instead we hide it behind the board
+          with `hidden` (display:none keeps media playing) and overlay the
+          whiteboard on top. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className={cn("flex min-h-0 flex-1 flex-col", whiteboardOpen && "hidden")}>
+          <RoomVideoGrid
+            localStream={localStream}
+            localScreenStream={localScreenStream}
+            displayName={displayName}
+            isMicMuted={isMicMuted}
+            isCamOff={isCamOff}
+            isScreenSharing={isScreenSharing}
+            peers={peers}
+            participantsHidden={participantsHidden}
+            onParticipantsHiddenChange={setParticipantsHidden}
           />
         </div>
-      ) : (
-        <RoomVideoGrid
-          localStream={localStream}
-          localScreenStream={localScreenStream}
-          displayName={displayName}
-          isMicMuted={isMicMuted}
-          isCamOff={isCamOff}
-          isScreenSharing={isScreenSharing}
-          peers={peers}
-          participantsHidden={participantsHidden}
-          onParticipantsHiddenChange={setParticipantsHidden}
-        />
-      )}
+        {whiteboardOpen && (
+          <div className="absolute inset-0">
+            <Whiteboard
+              initialSnapshot={whiteboardSnapshot}
+              onChange={sendWhiteboardChange}
+              onSnapshot={sendWhiteboardSnapshot}
+              subscribeRemote={subscribeWhiteboardChange}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Overflow wrapper: clips the footer when it slides down, and provides
           the anchor point for the toggle handle that peeks above it */}
