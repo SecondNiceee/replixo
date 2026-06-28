@@ -36,10 +36,11 @@ export function VideoTile({
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // Per-user local audio controls (remote tiles only).
-  // Volume is a gain multiplier: 1 == 100% (the original/raw stream loudness),
-  // values above 1 boost the participant louder than default. Default 0.6 (60%).
+  // Volume is a gain multiplier: 1 == 100% (the original/raw stream loudness).
+  // The slider only goes UP from 100% (boost) — it never makes a participant
+  // quieter than normal. Muting is handled separately by the mute button.
   const [localMuted, setLocalMuted] = useState(false)
-  const [volume, setVolume] = useState(0.6)
+  const [volume, setVolume] = useState(1)
   const [isDragging, setIsDragging] = useState(false)
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
@@ -144,14 +145,12 @@ export function VideoTile({
           </button>
           <input
             type="range"
-            min={0}
+            min={1}
             max={2}
             step={0.05}
-            value={localMuted ? 0 : volume}
+            value={volume}
             onChange={(e) => {
-              const v = Number(e.target.value)
-              setVolume(v)
-              setLocalMuted(v === 0)
+              setVolume(Number(e.target.value))
             }}
             onPointerDown={() => setIsDragging(true)}
             onPointerUp={() => setIsDragging(false)}
@@ -168,7 +167,7 @@ export function VideoTile({
             )}
           />
           <span className="w-9 shrink-0 text-right text-[10px] font-semibold tabular-nums text-white/80">
-            {localMuted ? "0%" : `${Math.round(volume * 100)}%`}
+            {`${Math.round(volume * 100)}%`}
           </span>
         </div>
       )}
