@@ -97,7 +97,7 @@ export function RoomVideoGrid({
                 isMuted={isMicMuted}
                 isCamOff={isCamOff}
                 isLocal
-                className="aspect-video h-28 w-auto rounded-none lg:h-auto lg:w-full"
+                className="aspect-video h-28 w-auto rounded-none shadow-none ring-0 lg:h-auto lg:w-full"
               />
             ) : (
               <VideoTile
@@ -105,7 +105,7 @@ export function RoomVideoGrid({
                 audioStream={item.peer.audioStream}
                 displayName={item.peer.displayName}
                 isMuted={!item.peer.audioStream || !!item.peer.audioMuted}
-                className="aspect-video h-28 w-auto rounded-none lg:h-auto lg:w-full"
+                className="aspect-video h-28 w-auto rounded-none shadow-none ring-0 lg:h-auto lg:w-full"
               />
             )}
           </div>
