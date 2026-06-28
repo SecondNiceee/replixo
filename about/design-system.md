@@ -38,10 +38,10 @@
 
 Подключены два шрифта Google через `next/font` в `app/layout.tsx`:
 
-- **Geist Sans** — основной шрифт (переменная `--font-geist-sans`,
+- **Inter** — основной шрифт (переменная `--font-inter`, токен `--font-sans`,
   класс `font-sans`); также используется как заголовочный (`--font-heading`).
-- **Geist Mono** — моноширинный (`--font-geist-mono`, класс `font-mono`),
-  применяется для кода комнаты.
+- **JetBrains Mono** — моноширинный (`--font-jetbrains-mono`, токен `--font-mono`,
+  класс `font-mono`), применяется для кода комнаты.
 
 Связка задаётся в `@theme inline` в `globals.css`. Класс `font-sans`
 применяется к `html` по умолчанию.
