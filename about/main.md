@@ -28,6 +28,7 @@ Replixo — это веб-приложение для видеосвязи. Он
 | [`video-tile.md`](./video-tile.md) | Тайл участника: видео, аватар-заглушка, индикатор говорящего, регулятор громкости, подписи и иконки состояния. |
 | [`client-logic.md`](./client-logic.md) | Клиентская логика: хук `use-mediasoup` (WebRTC/mediasoup), `use-audio-devices`, `use-speaking`, утилиты `audio-unlock` и `display-name`. |
 | [`server.md`](./server.md) | Бэкенд на Node.js: mediasoup-сервер, Socket.io события, модели `Room` и `Peer`, конфигурация. |
+| [`desktop.md`](./desktop.md) | Десктопная версия на Electron (Windows): тонкая оболочка над сайтом, системный выбор источника экрана, overlay-режим, кастомный титлбар, рисование поверх экрана, сборка `.exe`. |
 | [`design-system.md`](./design-system.md) | Дизайн-система: цвета (тёмная тема), шрифты, токены, радиусы, общие визуальные приёмы. |
 | [`users/authorization.md`](./users/authorization.md) | Авторизация: Better Auth, схема БД, сессии, страницы входа/регистрации. |
 | [`users/friends.md`](./users/friends.md) | Система друзей: модель данных, API, UI на /profile, безопасность. |
