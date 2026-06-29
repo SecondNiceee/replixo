@@ -5,6 +5,25 @@ import { MicOff, User, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
 import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
+import {
+  StreamAnnotationCanvas,
+  type AnnotationTool,
+  type AnnotationStroke,
+} from "@/components/stream-annotation-canvas"
+
+// Annotation overlay config passed to a screen-share tile. When present (and the
+// tile is a screen), a transparent drawing canvas is laid over the actual video
+// content area so strokes (in normalized coords) line up for every participant.
+export interface VideoTileAnnotation {
+  active: boolean
+  tool: AnnotationTool
+  color: string
+  onStroke: (stroke: AnnotationStroke) => void
+  onClear: () => void
+  subscribeRemoteStroke: (fn: (stroke: unknown) => void) => () => void
+  subscribeRemoteClear: (fn: () => void) => () => void
+  clearSignal: number
+}
 
 // Slider position that corresponds to the stream's natural loudness (gain 1.0).
 // The slider runs 0..1; this is the default so users have headroom both down
@@ -23,6 +42,8 @@ interface VideoTileProps {
   isLocal?: boolean
   // Screen share tiles render the video "contained" and never mirrored.
   isScreen?: boolean
+  // Drawing overlay — only meaningful on screen-share tiles.
+  annotation?: VideoTileAnnotation
   className?: string
 }
 
@@ -35,10 +56,16 @@ export function VideoTile({
   isCamOff = false,
   isLocal = false,
   isScreen = false,
+  annotation,
   className,
 }: VideoTileProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  // Pixel rect of the actually-displayed video content (object-contain leaves
+  // letterbox bars). The annotation canvas is sized to this so normalized
+  // coordinates map to the same screen pixels across every participant.
+  const [videoBox, setVideoBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
 
   // Per-user local audio controls (remote tiles only).
   // `volume` is the slider position in 0..1 (shown as 0%..100%). The default
@@ -107,8 +134,47 @@ export function VideoTile({
     }
   }, [volume, localMuted, isLocal, audioStream])
 
+  // Track the displayed video rectangle (accounting for object-contain
+  // letterboxing) so the drawing canvas can overlay exactly the screen content.
+  const annotationEnabled = isScreen && !!annotation
+  useEffect(() => {
+    if (!annotationEnabled) return
+    const container = containerRef.current
+    const video = videoRef.current
+    if (!container || !video) return
+    const compute = () => {
+      const rect = container.getBoundingClientRect()
+      const vw = video.videoWidth
+      const vh = video.videoHeight
+      if (!vw || !vh) {
+        setVideoBox({ left: 0, top: 0, width: rect.width, height: rect.height })
+        return
+      }
+      const scale = Math.min(rect.width / vw, rect.height / vh)
+      const dw = vw * scale
+      const dh = vh * scale
+      setVideoBox({
+        left: (rect.width - dw) / 2,
+        top: (rect.height - dh) / 2,
+        width: dw,
+        height: dh,
+      })
+    }
+    compute()
+    const ro = new ResizeObserver(compute)
+    ro.observe(container)
+    video.addEventListener("loadedmetadata", compute)
+    video.addEventListener("resize", compute)
+    return () => {
+      ro.disconnect()
+      video.removeEventListener("loadedmetadata", compute)
+      video.removeEventListener("resize", compute)
+    }
+  }, [annotationEnabled])
+
   return (
     <div
+      ref={containerRef}
       className={cn(
         "group relative flex items-center justify-center overflow-hidden rounded-2xl bg-black transition-all",
         // Subtle frame so participants are clearly separated on the dark
@@ -133,6 +199,32 @@ export function VideoTile({
           isLocal && !isScreen && "scale-x-[-1]",
         )}
       />
+
+      {/* Annotation canvas — overlays exactly the displayed screen content so
+          strokes line up for everyone. z-20 keeps it above the video but below
+          the volume control (z-30) and bottom bar. */}
+      {annotationEnabled && annotation && videoBox && (
+        <div
+          className="absolute z-20"
+          style={{
+            left: videoBox.left,
+            top: videoBox.top,
+            width: videoBox.width,
+            height: videoBox.height,
+          }}
+        >
+          <StreamAnnotationCanvas
+            active={annotation.active}
+            tool={annotation.tool}
+            color={annotation.color}
+            onStroke={annotation.onStroke}
+            onClear={annotation.onClear}
+            subscribeRemoteStroke={annotation.subscribeRemoteStroke}
+            subscribeRemoteClear={annotation.subscribeRemoteClear}
+            clearSignal={annotation.clearSignal}
+          />
+        </div>
+      )}
 
       {/* Remote audio — local audio is muted to prevent echo */}
       {!isLocal && <audio ref={audioRef} autoPlay playsInline className="hidden" />}
