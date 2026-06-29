@@ -67,10 +67,18 @@ export async function saveMessage(msg: StoredMessage): Promise<void> {
   if (!pool) return
   try {
     await pool.query(
-      `INSERT INTO "message" ("id", "roomId", "peerId", "displayName", "text", "createdAt")
-       VALUES ($1, $2, $3, $4, $5, to_timestamp($6 / 1000.0))
+      `INSERT INTO "message" ("id", "roomId", "peerId", "displayName", "text", "attachment", "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0))
        ON CONFLICT ("id") DO NOTHING`,
-      [msg.id, msg.roomId, msg.peerId, msg.displayName, msg.text, msg.timestamp],
+      [
+        msg.id,
+        msg.roomId,
+        msg.peerId,
+        msg.displayName,
+        msg.text,
+        msg.attachment ? JSON.stringify(msg.attachment) : null,
+        msg.timestamp,
+      ],
     )
   } catch (e) {
     console.error('[db] saveMessage failed:', (e as Error).message)
@@ -90,7 +98,7 @@ export async function getRoomMessages(
     // Берём последние `limit` сообщений, затем разворачиваем в хронологический
     // порядок (старые сверху) для отображения в чате.
     const { rows } = await pool.query(
-      `SELECT "id", "roomId", "peerId", "displayName", "text",
+      `SELECT "id", "roomId", "peerId", "displayName", "text", "attachment",
               (EXTRACT(EPOCH FROM "createdAt") * 1000)::bigint AS "timestamp"
        FROM "message"
        WHERE "roomId" = $1
@@ -105,6 +113,8 @@ export async function getRoomMessages(
         peerId: r.peerId as string,
         displayName: r.displayName as string,
         text: r.text as string,
+        // pg возвращает jsonb уже распарсенным объектом (или null).
+        attachment: (r.attachment as MessageAttachment | null) ?? null,
         timestamp: Number(r.timestamp),
       }))
       .reverse()

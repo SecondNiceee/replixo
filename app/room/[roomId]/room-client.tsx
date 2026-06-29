@@ -66,6 +66,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     leave,
     messages,
     sendChatMessage,
+    uploadChatFile,
+    mediaBaseUrl,
     readMarkers,
     markChatRead,
     whiteboardOpen,
@@ -374,7 +376,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
           OVERLAY_INTERACTIVE_ATTR: в overlay-режиме (Electron) панель и её
           стрелка-хэндл должны «ловить» клики, иначе hit-test через
-          elementFromPoint не найдёт интерактивный маркер и клик уйдёт сквозь
+          elementFromPoint не найдёт инте��активный маркер и клик уйдёт сквозь
           окно на рабочий стол. */}
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
@@ -402,6 +404,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           onClose={closeChat}
           messages={messages}
           onSend={sendChatMessage}
+          onUploadFile={uploadChatFile}
+          mediaBaseUrl={mediaBaseUrl}
           unreadFromIndex={unreadFromIndex}
           readMarkers={readMarkers}
           peerIds={Array.from(peers.keys())}

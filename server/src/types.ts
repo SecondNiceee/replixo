@@ -150,11 +150,20 @@ export interface ProducerClosedPayload {
 // Client → server: a peer sends a chat message.
 // `id` is an optional client-generated id reused for persistence + broadcast so
 // the sender's optimistic copy matches the stored record (prevents duplicates).
+export interface ChatMessageAttachment {
+  url: string // относительный путь: /uploads/<roomId>/<file>
+  name: string // оригинальное имя файла
+  size: number // размер в байтах
+  mime: string // content-type
+}
+
 export interface ChatMessagePayload {
   roomId: string
   peerId: string
   text: string
   id?: string
+  // Необязательное вложение. Сообщение валидно, если есть text ИЛИ attachment.
+  attachment?: ChatMessageAttachment
 }
 
 // Server → client (broadcast): a chat message with server-assigned id/timestamp.
@@ -164,6 +173,7 @@ export interface ChatMessageBroadcastPayload {
   displayName: string
   text: string
   timestamp: number
+  attachment?: ChatMessageAttachment | null
 }
 
 // Client → server: a peer reports it has read the chat up to `ts` (ms).

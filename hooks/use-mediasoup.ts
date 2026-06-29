@@ -102,6 +102,15 @@ export const SCREEN_QUALITY_PRESETS: Record<ScreenQuality, ScreenQualityPreset> 
   },
 }
 
+// Файловое вложение сообщения. `url` — относительный путь на сервере
+// (/uploads/<roomId>/<file>); абсолютный адрес строится через MEDIA_BASE_URL.
+export interface ChatAttachment {
+  url: string
+  name: string
+  size: number
+  mime: string
+}
+
 export interface ChatMessage {
   id: string
   peerId: string
@@ -110,6 +119,8 @@ export interface ChatMessage {
   timestamp: number
   // true when this message was sent by the local user
   self: boolean
+  // Необязательное файловое вложение (картинка/документ/любой файл).
+  attachment?: ChatAttachment | null
 }
 
 // Camera simulcast layers. Publishing three spatial layers lets the SFU drop
@@ -788,7 +799,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             displayName: string
             producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
           }>
-          messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number }>
+          messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }>
           readMarkers?: Array<{ peerId: string; ts: number }>
           whiteboardOpen?: boolean
           whiteboardSnapshot?: string | null
@@ -825,6 +836,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   text: m.text,
                   timestamp: m.timestamp,
                   self: m.peerId === peerId.current,
+                  attachment: m.attachment ?? null,
                 },
               })
             }
@@ -1087,7 +1099,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // -----------------------------------------------------------------------
     socket.on(
       "chatMessage",
-      (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number }) => {
+      (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }) => {
         if (!msg || typeof msg.id !== "string" || typeof msg.text !== "string") return
         dispatch({
           type: "ADD_MESSAGE",
@@ -1098,6 +1110,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             text: msg.text,
             timestamp: msg.timestamp,
             self: false,
+            attachment: msg.attachment ?? null,
           },
         })
       },
@@ -1599,17 +1612,24 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   )
 
   // Send a chat message: emit to the server (which broadcasts to other peers)
-  // and add it locally right away so the sender sees it immediately.
-  const sendChatMessage = useCallback((text: string) => {
+  // and add it locally right away so the sender sees it immediately. A message
+  // may carry text, an attachment, or both.
+  const sendChatMessage = useCallback((text: string, attachment?: ChatAttachment | null) => {
     const trimmed = text.trim().slice(0, 2000)
-    if (!trimmed) return
+    if (!trimmed && !attachment) return
     const socket = socketRef.current
     if (!socket) return
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     // Send our generated id so the server persists + rebroadcasts with the same
-    // id ��� that keeps our optimistic copy and the stored record in sync and
+    // id — that keeps our optimistic copy and the stored record in sync and
     // prevents duplicates when chat history is reloaded later.
-    socket.emit("chatMessage", { roomId, peerId: peerId.current, text: trimmed, id })
+    socket.emit("chatMessage", {
+      roomId,
+      peerId: peerId.current,
+      text: trimmed,
+      id,
+      ...(attachment ? { attachment } : {}),
+    })
     dispatch({
       type: "ADD_MESSAGE",
       message: {
@@ -1619,9 +1639,35 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         text: trimmed,
         timestamp: Date.now(),
         self: true,
+        attachment: attachment ?? null,
       },
     })
   }, [roomId, displayName])
+
+  // Upload a file to this room's storage on the media server and return the
+  // resulting attachment metadata. Throws on failure so the UI can surface it.
+  const uploadChatFile = useCallback(
+    async (file: File): Promise<ChatAttachment> => {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/upload`, {
+        method: "POST",
+        body: form,
+      })
+      if (!res.ok) {
+        let message = "Не удалось загрузить файл"
+        try {
+          const data = await res.json()
+          if (data?.error) message = data.error
+        } catch {
+          // ignore — используем дефолтное сообщение
+        }
+        throw new Error(message)
+      }
+      return (await res.json()) as ChatAttachment
+    },
+    [roomId],
+  )
 
   // Report that the local user has read the chat up to `ts` (ms). Tells the
   // server (which broadcasts to others so their messages flip to "read") and
@@ -1744,6 +1790,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Chat
     messages: state.messages,
     sendChatMessage,
+    uploadChatFile,
+    // Базовый адрес медиа-сервера для построения абсолютных ссылок на вложения.
+    mediaBaseUrl: SERVER_URL,
     // Read receipts
     readMarkers: state.readMarkers,
     markChatRead,

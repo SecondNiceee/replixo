@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey, integer, jsonb } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -88,7 +88,11 @@ export const message = pgTable(
     roomId: text('roomId').notNull(),
     peerId: text('peerId').notNull(),
     displayName: text('displayName').notNull(),
-    text: text('text').notNull(),
+    // Текст сообщения. Для сообщений только с вложением хранится пустая строка.
+    text: text('text').notNull().default(''),
+    // Вложение (файл на диске сервера) в виде JSON: { url, name, size, mime }.
+    // null — обычное текстовое сообщение.
+    attachment: jsonb('attachment'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
   },
   (t) => [index('message_roomId_createdAt_idx').on(t.roomId, t.createdAt)],
