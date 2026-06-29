@@ -370,8 +370,14 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
       {/* Chat panel — slides in from the right. A sticky arrow tab peeks out
           from the left edge of the panel, matching the participants panel handle
-          pattern used in the screen-share layout. */}
+          pattern used in the screen-share layout.
+
+          OVERLAY_INTERACTIVE_ATTR: в overlay-режиме (Electron) панель и её
+          стрелка-хэндл должны «ловить» клики, иначе hit-test через
+          elementFromPoint не найдёт интерактивный маркер и клик уйдёт сквозь
+          окно на рабочий стол. */}
       <div
+        {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
         className={cn(
           "fixed inset-y-0 right-0 z-30 flex transition-transform duration-300 ease-in-out",
           chatOpen ? "translate-x-0" : "translate-x-full",
