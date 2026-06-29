@@ -5,6 +5,7 @@ import { SendHorizonal, Check, CheckCheck, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
+import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
 interface RoomChatProps {
   open: boolean
@@ -67,6 +68,9 @@ export function RoomChat({
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Помечаем панель как интерактивную для overlay-режима (Electron).
+  const overlayClickThrough = useOverlayClickThrough()
+
   // Auto-scroll to the newest message whenever messages change or the panel opens.
   useEffect(() => {
     if (!open) return
@@ -98,6 +102,7 @@ export function RoomChat({
 
   return (
     <aside
+        {...overlayClickThrough}
         aria-label="Чат комнаты"
         aria-hidden={!open}
         className="flex h-full w-[360px] flex-col border-l border-border bg-card"
