@@ -20,54 +20,58 @@ export function useOverlayClickThrough() {
 /**
  * Глобальный менеджер click-through для overlay-режима в Electron.
  *
- * Когда окно прозрачное и стоит setIgnoreMouseEvents(true, { forward: true }),
- * ховерные события (onMouseEnter/onMouseLeave) на конкретных элементах НЕ
- * срабатывают надёжно, потому что окно игнорирует мышь. Зато события mousemove
- * пробрасываются в renderer (forward: true). Поэтому мы слушаем mousemove
- * глобально и на каждом движении проверяем, находится ли курсор над
- * интерактивным элементом (по атрибуту OVERLAY_INTERACTIVE_ATTR). Если да —
- * включаем перехват мыши (клики работают), если нет — снова пропускаем клики
- * на рабочий стол.
+ * ПРОБЛЕМА: когда окно прозрачное и стоит setIgnoreMouseEvents(true), на Windows
+ * forwarded-события mousemove ({ forward: true }) доходят до renderer НЕнадёжно —
+ * особенно над полностью прозрачными пикселями (где виден рабочий стол). Из-за
+ * этого hit-test не срабатывает, перехват мыши никогда не включается, и все клики
+ * (по нижним контролам и по сайдбару участников) уходят сквозь окно на рабочий стол.
+ *
+ * РЕШЕНИЕ: не полагаемся на DOM-события мыши вообще. Вместо этого на каждом кадре
+ * опрашиваем РЕАЛЬНУЮ позицию курсора из ОС через main-процесс
+ * (electronAPI.getCursorPoint → screen.getCursorScreenPoint) и сами делаем
+ * hit-test через document.elementFromPoint. Если курсор над элементом с атрибутом
+ * OVERLAY_INTERACTIVE_ATTR — включаем перехват мыши (клики работают), иначе —
+ * пропускаем клики на рабочий стол. Это детерминированно и не зависит от
+ * прозрачности окна.
  */
 export function useOverlayMouseManager(active: boolean) {
   useEffect(() => {
     const api = typeof window !== "undefined" ? window.electronAPI : undefined
-    if (!active || !api) return
+    if (!active || !api || typeof api.getCursorPoint !== "function") return
 
     let ignoring = true // стартуем в режиме "клики проходят сквозь"
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     api.setIgnoreMouseEvents(true, { forward: true })
 
-    // Координаты последнего движения и флаг запланированного кадра — чтобы
-    // выполнять не более одного хит-теста на кадр (rAF-троттлинг), даже если
-    // событий mousemove приходит десятки в секунду.
-    let lastX = 0
-    let lastY = 0
-    let frame = 0
-
-    const evaluate = () => {
-      frame = 0
-      const el = document.elementFromPoint(lastX, lastY)
-      const overInteractive = !!el?.closest(`[${OVERLAY_INTERACTIVE_ATTR}]`)
-      if (overInteractive && ignoring) {
-        ignoring = false
-        api.setIgnoreMouseEvents(false)
-      } else if (!overInteractive && !ignoring) {
-        ignoring = true
-        api.setIgnoreMouseEvents(true, { forward: true })
+    const tick = async () => {
+      if (stopped) return
+      try {
+        const pt = await api.getCursorPoint!()
+        if (pt && !stopped) {
+          const el = document.elementFromPoint(pt.x, pt.y)
+          const overInteractive = !!el?.closest(`[${OVERLAY_INTERACTIVE_ATTR}]`)
+          if (overInteractive && ignoring) {
+            ignoring = false
+            // forward:false здесь не нужен — окно полностью перехватывает мышь.
+            api.setIgnoreMouseEvents(false)
+          } else if (!overInteractive && !ignoring) {
+            ignoring = true
+            api.setIgnoreMouseEvents(true, { forward: true })
+          }
+        }
+      } catch {
+        // ignore — продолжаем опрос
       }
+      // ~30 опросов/сек: отзывчиво, но без лишней нагрузки на IPC.
+      if (!stopped) timer = setTimeout(tick, 32)
     }
 
-    const handleMove = (e: MouseEvent) => {
-      lastX = e.clientX
-      lastY = e.clientY
-      if (!frame) frame = requestAnimationFrame(evaluate)
-    }
-
-    window.addEventListener("mousemove", handleMove)
+    tick()
 
     return () => {
-      window.removeEventListener("mousemove", handleMove)
-      if (frame) cancelAnimationFrame(frame)
+      stopped = true
+      if (timer) clearTimeout(timer)
       // Возвращаем нормальный перехват при выходе из overlay
       api.setIgnoreMouseEvents(false)
     }

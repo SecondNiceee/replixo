@@ -33,4 +33,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Click-through в overlay-режиме: ignore=true — клики проходят сквозь окно.
   setIgnoreMouseEvents: (ignore, options) =>
     ipcRenderer.send("set-ignore-mouse-events", ignore, options),
+
+  // Позиция курсора относительно окна (для надёжного hit-test в overlay-режиме,
+  // не зависящего от ненадёжных forwarded mousemove на прозрачном окне).
+  getCursorPoint: () => ipcRenderer.invoke("get-cursor-point"),
 })
