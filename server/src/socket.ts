@@ -33,6 +33,8 @@ import type {
   PresentationStrokePayload,
   PresentationDrawClearPayload,
   PresentationDrawSnapshotPayload,
+  AnnotationStrokePayload,
+  AnnotationClearPayload,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -753,6 +755,47 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
       room.presentationDrawings.set(slideIndex, snapshot)
       void savePresentationDrawing(rid, slideIndex, snapshot)
       // No broadcast needed — snapshot is only for persistence + late joiners.
+    })
+
+    // -----------------------------------------------------------------------
+    // Screen-share annotations (рисование поверх демонстрации экрана)
+    //
+    // Эфемерные — НЕ персистятся: аннотации живут только пока идёт демонстрация.
+    // annotationStroke транслирует один vector-штрих остальным участникам;
+    // annotationClear стирает всё для всех. Координаты нормализованы клиентом.
+    // -----------------------------------------------------------------------
+    socket.on(
+      'annotationStroke',
+      (() => {
+        // Rate-limit: рисование генерирует много событий — до 300/сек.
+        const ANN_RATE_LIMIT = 300
+        let annWindowStart = Date.now()
+        let annEventCount = 0
+        return (payload: unknown) => {
+          if (!payload || typeof payload !== 'object') return
+          const { roomId: rid, peerId: pid, stroke } = payload as AnnotationStrokePayload
+          const room = authedRoom(rid, pid)
+          if (!room) return
+          if (stroke == null) return
+
+          const now = Date.now()
+          if (now - annWindowStart >= 1000) {
+            annWindowStart = now
+            annEventCount = 0
+          }
+          if (++annEventCount > ANN_RATE_LIMIT) return
+
+          socket.to(rid).emit('annotationStroke', { peerId: pid, stroke })
+        }
+      })(),
+    )
+
+    socket.on('annotationClear', (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return
+      const { roomId: rid, peerId: pid } = payload as AnnotationClearPayload
+      const room = authedRoom(rid, pid)
+      if (!room) return
+      socket.to(rid).emit('annotationClear', { peerId: pid })
     })
 
     // -----------------------------------------------------------------------

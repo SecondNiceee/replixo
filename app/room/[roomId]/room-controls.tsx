@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, Pencil,
+  ChevronUp, Pencil, Presentation,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,6 +33,11 @@ interface RoomControlsProps {
   collapsed: boolean
   whiteboardOpen: boolean
   onToggleWhiteboard: () => void
+  // Screen-share annotation (рисование поверх стрима). Доступно только когда
+  // идёт демонстрация экрана (свой или чужой).
+  annotationActive: boolean
+  canAnnotate: boolean
+  onToggleAnnotation: () => void
   onToggleCollapsed: () => void
   onToggleMic: () => void
   onToggleCam: () => void

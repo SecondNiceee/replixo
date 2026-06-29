@@ -325,6 +325,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Whiteboard component). Kept in a ref so handlers stay stable and the join
   // effect never needs to re-run when the board mounts/unmounts.
   const whiteboardListenersRef = useRef<Set<(changes: unknown) => void>>(new Set())
+  // Live screen-share annotation subscribers. Incoming remote strokes / clears
+  // are fanned out to the mounted annotation canvas via these registries.
+  const annotationStrokeListenersRef = useRef<Set<(stroke: unknown) => void>>(new Set())
+  const annotationClearListenersRef = useRef<Set<() => void>>(new Set())
 
   // consumerId -> Consumer
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
@@ -1130,6 +1134,19 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       whiteboardListenersRef.current.forEach((fn) => fn(payload.changes))
     })
 
+    // -----------------------------------------------------------------------
+    // Screen-share annotations (рисование поверх демонстрации экрана).
+    // Эфемерные: фан-аут входящих штрихов / очистки на холст аннотаций.
+    // -----------------------------------------------------------------------
+    socket.on("annotationStroke", (payload: { peerId: string; stroke: unknown }) => {
+      if (!payload || payload.stroke == null) return
+      annotationStrokeListenersRef.current.forEach((fn) => fn(payload.stroke))
+    })
+
+    socket.on("annotationClear", () => {
+      annotationClearListenersRef.current.forEach((fn) => fn())
+    })
+
   }, [roomId, displayName, setupTransports, consumeProducer])
 
   // -------------------------------------------------------------------------
@@ -1660,6 +1677,40 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   }, [])
 
   // -------------------------------------------------------------------------
+  // Screen-share annotation senders + subscriptions.
+  //
+  // sendAnnotationStroke relays one vector stroke (in normalized coords) while
+  // drawing over the shared screen; sendAnnotationClear wipes all annotations
+  // for everyone. The annotation canvas registers via the subscribe helpers to
+  // receive remote strokes/clears. All ephemeral — nothing is persisted.
+  // -------------------------------------------------------------------------
+  const sendAnnotationStroke = useCallback((stroke: unknown) => {
+    const socket = socketRef.current
+    if (!socket || stroke == null) return
+    socket.emit("annotationStroke", { roomId, peerId: peerId.current, stroke })
+  }, [roomId])
+
+  const sendAnnotationClear = useCallback(() => {
+    const socket = socketRef.current
+    if (!socket) return
+    socket.emit("annotationClear", { roomId, peerId: peerId.current })
+  }, [roomId])
+
+  const subscribeAnnotationStroke = useCallback((fn: (stroke: unknown) => void) => {
+    annotationStrokeListenersRef.current.add(fn)
+    return () => {
+      annotationStrokeListenersRef.current.delete(fn)
+    }
+  }, [])
+
+  const subscribeAnnotationClear = useCallback((fn: () => void) => {
+    annotationClearListenersRef.current.add(fn)
+    return () => {
+      annotationClearListenersRef.current.delete(fn)
+    }
+  }, [])
+
+  // -------------------------------------------------------------------------
   // Auto-join on mount, leave on unmount
   // -------------------------------------------------------------------------
   useEffect(() => {
@@ -1704,6 +1755,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
+    // Screen-share annotations
+    sendAnnotationStroke,
+    sendAnnotationClear,
+    subscribeAnnotationStroke,
+    subscribeAnnotationClear,
     localPeerId: peerId.current,
   }
 }
