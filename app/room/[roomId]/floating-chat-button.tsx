@@ -5,6 +5,7 @@ import { MessageSquare, Hand } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
 import { useChatButtonSync } from "@/hooks/use-chat-button-sync"
+import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
 interface FloatingChatButtonProps {
   chatOpen: boolean
@@ -26,6 +27,10 @@ export function FloatingChatButton({
   // Keep settings in sync with the DB for signed-in users (merge on login,
   // debounced autosave afterwards). No-op for anonymous users.
   useChatButtonSync()
+
+  // Помечаем кнопку как интерактивную для overlay-режима (Electron), чтобы клики
+  // по ней перехватывались окном, а не уходили сквозь на рабочий стол.
+  const overlayClickThrough = useOverlayClickThrough()
 
   const [dragging, setDragging] = useState(false)
   // Mounted guard: the store rehydrates from localStorage on the client, so we
@@ -92,6 +97,7 @@ export function FloatingChatButton({
     <>
       <div
         ref={containerRef}
+        {...overlayClickThrough}
         className="group/fab fixed z-40 touch-none"
         style={{ left, top, width: BTN_SIZE, height: BTN_SIZE }}
       >
