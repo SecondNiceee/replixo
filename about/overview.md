@@ -46,6 +46,13 @@
 - `mediasoup` (SFU-сервер, маршрутизация медиапотоков);
 - порт по умолчанию `3001`.
 
+**Десктоп (`electron/`):**
+- `electron` + `electron-builder` — тонкая оболочка под Windows, которая
+  загружает задеплоенный сайт по URL (`https://replixo.ru`);
+- добавляет системный выбор источника экрана, overlay-режим поверх рабочего
+  стола, кастомный титлбар и нативный буфер обмена.
+- Подробно — [`desktop.md`](./desktop.md).
+
 ## Карта файлов проекта
 
 ```
@@ -104,14 +111,25 @@
 │   ├── db/                          # Drizzle: подключение и схема
 │   └── utils.ts                     # Утилита cn() для классов
 │
-└── server/                          # Mediasoup-бэкенд (Node.js)
-    └── src/
-        ├── index.ts                 # Точка входа: Express + HTTP + worker
-        ├── config.ts                # Конфигурация из переменных окружения
-        ├── Room.ts                  # Комната: router, транспорты, produce/consume
-        ├── Peer.ts                  # Модель участника
-        ├── socket.ts                # Все Socket.io события
-        └── types.ts                 # TypeScript-типы payload'ов
+├── server/                          # Mediasoup-бэкенд (Node.js)
+│   └── src/
+│       ├── index.ts                 # Точка входа: Express + HTTP + worker
+│       ├── config.ts                # Конфигурация из переменных окружения
+│       ├── Room.ts                  # Комната: router, транспорты, produce/consume
+│       ├── Peer.ts                  # Модель участника
+│       ├── socket.ts                # Все Socket.io события
+│       └── types.ts                 # TypeScript-типы payload'ов
+│
+└── electron/                        # Десктоп-оболочка (Electron, Windows)
+    ├── main.js                      # Главный процесс: окно, IPC, overlay, разрешения
+    ├── preload.js                   # Мост contextBridge (window.electronAPI)
+    ├── electron.d.ts                # Типы проброшенного API
+    └── icons/icon.png               # Иконка приложения
+    # см. также: electron-builder.yml (сборка .exe),
+    # components/desktop-titlebar.tsx, components/overlay-controls.tsx,
+    # components/electron-patches.tsx, components/annotation-toolbar.tsx,
+    # components/stream-annotation-canvas.tsx, hooks/use-overlay-click-through.ts,
+    # lib/clipboard.ts
 ```
 
 ## Главные страницы
