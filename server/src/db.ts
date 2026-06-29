@@ -12,6 +12,15 @@
 
 import { Pool } from 'pg'
 
+// Вложение сообщения (файл, лежащий на диске сервера). null-поля означают, что
+// сообщение чисто текстовое.
+export interface MessageAttachment {
+  url: string // относительный путь: /uploads/<roomId>/<file>
+  name: string // оригинальное имя файла
+  size: number // размер в байтах
+  mime: string // content-type
+}
+
 export interface StoredMessage {
   id: string
   roomId: string
@@ -19,6 +28,7 @@ export interface StoredMessage {
   displayName: string
   text: string
   timestamp: number
+  attachment?: MessageAttachment | null
 }
 
 // Отметка "прочитано": до какого момента (timestamp, мс) участник прочитал чат.
