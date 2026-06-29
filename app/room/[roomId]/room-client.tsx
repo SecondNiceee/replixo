@@ -17,6 +17,7 @@ import { ChevronRight } from "lucide-react"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
+import { useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
 
 import dynamic from "next/dynamic"
 
@@ -102,6 +103,10 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
       delete document.documentElement.dataset.overlay
     }
   }, [isScreenSharing, isElectron])
+
+  // Глобальный менеджер click-through: пока активен overlay, клики проходят на
+  // рабочий стол, кроме интерактивных областей (контролы, сайдбар участников).
+  useOverlayMouseManager(overlayMode)
 
   // Chat panel open state + unread counter. We track how many messages had been
   // seen the last time the panel was open; anything beyond that is "unread".
