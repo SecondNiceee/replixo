@@ -14,12 +14,12 @@ import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
 import { OverlayControls } from "@/components/overlay-controls"
 import { AnnotationToolbar } from "@/components/annotation-toolbar"
-import type { AnnotationTool } from "@/components/stream-annotation-canvas"
+import { StreamAnnotationCanvas, type AnnotationTool } from "@/components/stream-annotation-canvas"
 import { ChevronRight } from "lucide-react"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
 import { useChatButtonStore } from "@/stores/chat-button-store"
-import { useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
+import { useOverlayMouseManager, OVERLAY_INTERACTIVE_ATTR } from "@/hooks/use-overlay-click-through"
 
 import dynamic from "next/dynamic"
 
@@ -424,15 +424,62 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         </div>
       )}
 
-      {/* Overlay controls: плавающая панель снизу в режиме демонстрации экрана */}
+      {/* Overlay-режим (Electron, мы демонстрируем экран): рисование поверх
+          рабочего стола. Полноэкранный прозрачный холст накладывается на весь
+          экран — в тех же нормализованных координатах, что и холст на тайле
+          экрана у остальных участников, поэтому штрихи совпадают у всех.
+
+          Click-through: обёртка помечена OVERLAY_INTERACTIVE_ATTR и pointer-
+          events:none, а сам <canvas> включает pointer-events только когда
+          рисование активно. Менеджер мыши (useOverlayMouseManager) делает
+          hit-test через elementFromPoint: пока рисование выключено — клики
+          проходят на рабочий стол; когда включено — окно перехватывает мышь и
+          можно рисовать. */}
       {overlayMode && (
-        <OverlayControls
-          isMicMuted={isMicMuted}
-          isCamOff={isCamOff}
-          onToggleMic={toggleMic}
-          onToggleCam={toggleCam}
-          onStopScreenShare={toggleScreenShare}
-        />
+        <>
+          <div
+            {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
+            className="pointer-events-none fixed inset-0 z-[9990]"
+          >
+            <StreamAnnotationCanvas
+              active={annotationActive}
+              tool={annotationTool}
+              color={annotationColor}
+              onStroke={sendAnnotationStroke}
+              onClear={sendAnnotationClear}
+              subscribeRemoteStroke={subscribeAnnotationStroke}
+              subscribeRemoteClear={subscribeAnnotationClear}
+              clearSignal={annotationClearSignal}
+            />
+          </div>
+
+          {/* Тулбар рисования — над панелью контролов */}
+          {annotationActive && (
+            <div
+              {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
+              className="pointer-events-none fixed bottom-24 left-1/2 z-[9999] -translate-x-1/2"
+            >
+              <AnnotationToolbar
+                tool={annotationTool}
+                color={annotationColor}
+                onToolChange={setAnnotationTool}
+                onColorChange={setAnnotationColor}
+                onClear={() => setAnnotationClearSignal((n) => n + 1)}
+                onClose={() => setAnnotationActive(false)}
+              />
+            </div>
+          )}
+
+          <OverlayControls
+            isMicMuted={isMicMuted}
+            isCamOff={isCamOff}
+            annotationActive={annotationActive}
+            onToggleAnnotation={toggleAnnotation}
+            onToggleMic={toggleMic}
+            onToggleCam={toggleCam}
+            onStopScreenShare={toggleScreenShare}
+          />
+        </>
       )}
     </div>
   )
