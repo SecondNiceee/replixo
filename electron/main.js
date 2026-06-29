@@ -2,7 +2,7 @@ const { app, BrowserWindow, shell, session } = require("electron")
 const path = require("path")
 
 // URL задеплоенного приложения. Можно переопределить переменной окружения APP_URL.
-const APP_URL = process.env.APP_URL || "https://riplexo.ru"
+const APP_URL = process.env.APP_URL || "https://replixo.ru"
 
 let mainWindow = null
 

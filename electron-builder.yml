@@ -1,4 +1,4 @@
-appId: ru.riplexo.desktop
+appId: ru.replixo.desktop
 productName: Replixo
 copyright: Copyright © 2026 Replixo
 
@@ -7,7 +7,7 @@ directories:
   buildResources: electron/icons
 
 # В .exe попадает только оболочка Electron — само приложение
-# загружается по URL (https://riplexo.ru), поэтому сборка лёгкая.
+# загружается по URL (https://replixo.ru), поэтому сборка лёгкая.
 files:
   - electron/**/*
   - package.json
