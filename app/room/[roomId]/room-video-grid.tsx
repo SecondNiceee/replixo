@@ -4,6 +4,7 @@
 import { ChevronRight } from "lucide-react"
 import { VideoTile } from "@/components/video-tile"
 import { cn } from "@/lib/utils"
+import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
 interface Peer {
   peerId: string
@@ -46,6 +47,9 @@ export function RoomVideoGrid({
     onParticipantsHiddenChange?.(next)
   }
 
+  // Click-through для интерактивных областей overlay-режима (Electron)
+  const overlayClickThrough = useOverlayClickThrough()
+
   const allPeers = [...peers.values()]
   const remoteScreens = allPeers.filter((p) => p.screenStream)
 
@@ -65,13 +69,14 @@ export function RoomVideoGrid({
     ]
 
     return (
-      <div className="pointer-events-none fixed inset-y-0 right-0 z-[9998] flex items-center">
-        {/* Toggle handle — sits on the left edge of the sidebar */}
+      <div className="pointer-events-none fixed inset-y-0 left-0 z-[9998] flex items-center">
+        {/* Toggle handle — sits on the RIGHT edge of the left sidebar */}
         <button
+          {...overlayClickThrough}
           onClick={() => onParticipantsHiddenChange?.(!participantsHidden)}
           aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
           className={cn(
-            "pointer-events-auto absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-white/15 bg-black/60 backdrop-blur-md transition-colors hover:bg-black/80",
+            "pointer-events-auto absolute -right-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-r-xl border border-l-0 border-white/15 bg-black/60 backdrop-blur-md transition-colors hover:bg-black/80",
           )}
         >
           <ChevronRight
@@ -82,15 +87,15 @@ export function RoomVideoGrid({
           />
         </button>
 
-        {/* Collapsing sidebar — collapses to the right (width → 0) */}
+        {/* Collapsing sidebar — collapses to the left (width → 0) */}
         <div
           className={cn(
             "grid overflow-hidden transition-all duration-300 ease-in-out",
             participantsHidden ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
           )}
         >
-          <div className="pointer-events-auto min-w-0 overflow-hidden">
-            <div className="flex h-screen flex-col overflow-y-auto border-l border-white/10 bg-black/70 shadow-2xl backdrop-blur-xl lg:w-52">
+          <div {...overlayClickThrough} className="pointer-events-auto min-w-0 overflow-hidden">
+            <div className="flex h-screen flex-col overflow-y-auto border-r border-white/10 bg-black/70 shadow-2xl backdrop-blur-xl lg:w-52">
               {/* Header */}
               <div className="flex items-center gap-2 border-b border-white/10 bg-white/5 px-3 py-2">
                 <span className="text-[10px] font-semibold uppercase tracking-widest text-white/40">

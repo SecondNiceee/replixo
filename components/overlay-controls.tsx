@@ -2,6 +2,7 @@
 
 import { Mic, MicOff, Video, VideoOff, MonitorOff } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
 interface OverlayControlsProps {
   isMicMuted: boolean
@@ -23,9 +24,14 @@ export function OverlayControls({
   onToggleCam,
   onStopScreenShare,
 }: OverlayControlsProps) {
+  const clickThrough = useOverlayClickThrough()
+
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[9999] flex justify-center">
-      <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 shadow-2xl backdrop-blur-xl">
+      <div
+        {...clickThrough}
+        className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 shadow-2xl backdrop-blur-xl"
+      >
         {/* Mic */}
         <button
           onClick={onToggleMic}
