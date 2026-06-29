@@ -1,12 +1,16 @@
 "use client"
 
-import { Mic, MicOff, Video, VideoOff, MonitorOff } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
 interface OverlayControlsProps {
   isMicMuted: boolean
   isCamOff: boolean
+  // Рисование поверх демонстрации экрана (в overlay-режиме). Когда активно —
+  // показывается тулбар, а полноэкранный холст перехватывает клики мыши.
+  annotationActive: boolean
+  onToggleAnnotation: () => void
   onToggleMic: () => void
   onToggleCam: () => void
   onStopScreenShare: () => void
@@ -15,11 +19,13 @@ interface OverlayControlsProps {
 /**
  * Плавающая панель управления в overlay-режиме (демонстрация экрана).
  * Закреплена снизу по центру, всегда поверх содержимого.
- * Показывает только: микрофон, камера, остановить демонстрацию.
+ * Показывает только: микрофон, камера, рисование, остановить демонстрацию.
  */
 export function OverlayControls({
   isMicMuted,
   isCamOff,
+  annotationActive,
+  onToggleAnnotation,
   onToggleMic,
   onToggleCam,
   onStopScreenShare,
@@ -58,6 +64,20 @@ export function OverlayControls({
           )}
         >
           {isCamOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+        </button>
+
+        {/* Annotation (рисование поверх экрана) */}
+        <button
+          onClick={onToggleAnnotation}
+          aria-label={annotationActive ? "Закрыть рисование по экрану" : "Рисовать по экрану"}
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            annotationActive
+              ? "border-white/60 bg-white/20 text-white hover:bg-white/30"
+              : "border-white/10 bg-white/5 text-white hover:bg-white/10",
+          )}
+        >
+          <Pencil className="size-5" />
         </button>
 
         {/* Divider */}
