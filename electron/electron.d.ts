@@ -22,6 +22,8 @@ interface ElectronAPI {
   onMaximizeChange: (callback: (isMaximized: boolean) => void) => () => void
   // Click-through в overlay-режиме
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => void
+  // Позиция курсора относительно окна (надёжный hit-test для click-through)
+  getCursorPoint: () => Promise<{ x: number; y: number } | null>
 }
 
 interface ReplixoDesktop {

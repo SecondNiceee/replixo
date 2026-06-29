@@ -137,6 +137,22 @@ function setupWindowControls() {
     if (!mainWindow) return
     mainWindow.setIgnoreMouseEvents(!!ignore, options || undefined)
   })
+
+  // Глобальная позиция курсора относительно содержимого окна.
+  //
+  // В overlay-режиме окно прозрачное и стоит setIgnoreMouseEvents(true), поэтому
+  // forwarded-события mousemove на Windows доходят до renderer НЕнадёжно (особенно
+  // над полностью прозрачными пикселями). Чтобы click-through работал детерминированно,
+  // renderer опрашивает реальную позицию курсора из ОС через этот хэндлер и сам
+  // делает hit-test (elementFromPoint). screen.getCursorScreenPoint() и
+  // getContentBounds() возвращают DIP-координаты — те же, что использует CSS/DOM.
+  ipcMain.handle("get-cursor-point", () => {
+    if (!mainWindow) return null
+    const { screen } = require("electron")
+    const cursor = screen.getCursorScreenPoint()
+    const bounds = mainWindow.getContentBounds()
+    return { x: cursor.x - bounds.x, y: cursor.y - bounds.y }
+  })
 }
 
 // ---------------------------------------------------------------------------
