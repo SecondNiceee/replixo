@@ -15,6 +15,7 @@ import {
   savePresentationDrawing,
   getPresentationDrawings,
 } from './db'
+import { deleteRoomUploads } from './uploads'
 import type {
   JoinRoomPayload,
   CreateTransportPayload,
@@ -99,9 +100,10 @@ function cleanupRoomIfEmpty(roomId: string): void {
     room.close()
     rooms.delete(roomId)
     console.log(`[room] Removed empty room ${roomId}`)
-    // Комната уничтожена — стираем всю историю её чата. Fire-and-forget:
-    // удаление не должно блокировать управляющий поток сокета.
+    // Комната уничтожена — стираем всю историю её чата и файловые вложения с
+    // диска. Fire-and-forget: удаление не должно блокировать поток сокета.
     void deleteRoomMessages(roomId)
+    void deleteRoomUploads(roomId)
   }
 }
 
@@ -534,13 +536,43 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
         return (payload: unknown) => {
           // --- Input validation ---
           if (!payload || typeof payload !== 'object') return
-          const { roomId: rid, peerId: pid, text, id: clientId } = payload as ChatMessagePayload
+          const { roomId: rid, peerId: pid, text, id: clientId, attachment } = payload as ChatMessagePayload
           if (typeof rid !== 'string' || !rid) return
           if (typeof pid !== 'string' || !pid) return
           if (typeof text !== 'string') return
 
           const trimmed = text.trim().slice(0, MAX_TEXT_LENGTH)
-          if (!trimmed) return
+
+          // --- Validate attachment (optional) ---
+          // url должен указывать строго в папку вложений ЭТОЙ комнаты —
+          // защита от подделки ссылок на чужие/произвольные файлы.
+          let safeAttachment: ChatMessagePayload['attachment'] | undefined
+          if (attachment != null) {
+            if (typeof attachment !== 'object') return
+            const { url, name, size, mime } = attachment
+            const expectedPrefix = `/uploads/${rid}/`
+            if (
+              typeof url !== 'string' ||
+              !url.startsWith(expectedPrefix) ||
+              url.includes('..') ||
+              typeof name !== 'string' ||
+              typeof size !== 'number' ||
+              !Number.isFinite(size) ||
+              size < 0 ||
+              typeof mime !== 'string'
+            ) {
+              return
+            }
+            safeAttachment = {
+              url,
+              name: name.slice(0, 255),
+              size,
+              mime: mime.slice(0, 128),
+            }
+          }
+
+          // Сообщение должно нести хоть что-то: текст или вложение.
+          if (!trimmed && !safeAttachment) return
 
           // --- Auth: sender must own this peerId in this room ---
           const room = rooms.get(rid)
@@ -571,6 +603,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
             peerId: pid,
             displayName: peer.displayName,
             text: trimmed,
+            attachment: safeAttachment ?? null,
             timestamp: now,
           }
 
@@ -582,6 +615,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
             peerId: message.peerId,
             displayName: message.displayName,
             text: message.text,
+            attachment: message.attachment,
             timestamp: message.timestamp,
           })
         }
