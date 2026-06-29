@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session } = require("electron")
+const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer } = require("electron")
 const path = require("path")
 
 // URL задеплоенного приложения. Можно переопределить переменной окружения APP_URL.
@@ -21,7 +21,6 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      // Нужно для корректной работы WebRTC / getUserMedia / демонстрации экрана
       backgroundThrottling: false,
     },
   })
@@ -46,21 +45,56 @@ function createWindow() {
   })
 }
 
-// Автоматически выдаём доступ к камере, микрофону и захвату экрана
+// ---------------------------------------------------------------------------
+// Разрешения медиа (камера, микрофон, захват экрана)
+// ---------------------------------------------------------------------------
 function setupMediaPermissions() {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     const allowed = ["media", "display-capture", "mediaKeySystem", "notifications", "clipboard-read"]
     callback(allowed.includes(permission))
   })
 
-  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
     const allowed = ["media", "display-capture", "mediaKeySystem", "notifications", "clipboard-read"]
     return allowed.includes(permission)
   })
 }
 
+// ---------------------------------------------------------------------------
+// desktopCapturer — IPC-обработчик для демонстрации экрана.
+//
+// В Electron navigator.mediaDevices.getDisplayMedia() не показывает picker
+// операционной системы сам по себе: браузер внутри Electron не имеет доступа к
+// нативному API захвата рабочего стола. Вместо этого нужно:
+//   1. Получить список источников (окна / весь экран) из главного процесса через
+//      desktopCapturer.getSources() — это нативный Node/Electron API.
+//   2. Вернуть источники в renderer, показать там свой picker (или взять первый).
+//   3. Передать выбранный sourceId в getUserMedia с параметром chromeMediaSource.
+//
+// Preload пробрасывает вызов через contextBridge → renderer использует
+// window.electronAPI.getDesktopSources() вместо getDisplayMedia напрямую.
+// ---------------------------------------------------------------------------
+function setupDesktopCapturer() {
+  ipcMain.handle("get-desktop-sources", async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ["screen", "window"],
+      thumbnailSize: { width: 320, height: 180 },
+      fetchWindowIcons: true,
+    })
+
+    // Возвращаем только сериализуемые данные (thumbnail — DataURL)
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumbnail: s.thumbnail.toDataURL(),
+      appIcon: s.appIcon ? s.appIcon.toDataURL() : null,
+    }))
+  })
+}
+
 app.whenReady().then(() => {
   setupMediaPermissions()
+  setupDesktopCapturer()
   createWindow()
 
   app.on("activate", () => {

@@ -1,9 +1,15 @@
-const { contextBridge } = require("electron")
+const { contextBridge, ipcRenderer } = require("electron")
 
 // Безопасный мостик между web-приложением и Electron.
-// Сейчас приложение работает как обычный сайт, поэтому достаточно
-// сообщить ему, что оно запущено внутри десктоп-оболочки.
 contextBridge.exposeInMainWorld("replixoDesktop", {
   isDesktop: true,
   platform: process.platform,
+})
+
+// Electron API — getDesktopSources для захвата экрана.
+// Renderer проверяет window.electronAPI?.isElectron и использует
+// нативный путь вместо navigator.mediaDevices.getDisplayMedia().
+contextBridge.exposeInMainWorld("electronAPI", {
+  isElectron: true,
+  getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
 })
