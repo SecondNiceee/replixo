@@ -1,0 +1,28 @@
+appId: ru.riplexo.desktop
+productName: Replixo
+copyright: Copyright © 2026 Replixo
+
+directories:
+  output: release
+  buildResources: electron/icons
+
+# В .exe попадает только оболочка Electron — само приложение
+# загружается по URL (https://riplexo.ru), поэтому сборка лёгкая.
+files:
+  - electron/**/*
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/icons/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Replixo
