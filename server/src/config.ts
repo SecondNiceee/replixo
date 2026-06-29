@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import path from 'path'
 import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'mediasoup/node/lib/types'
 
 // ---------------------------------------------------------------------------
@@ -8,6 +9,31 @@ import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'medias
 export const PORT = parseInt(process.env.PORT ?? '3001', 10)
 export const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:3000'
 export const MAX_PEERS_PER_ROOM = 5
+
+// ---------------------------------------------------------------------------
+// Вложения чата (файлы хранятся на диске VPS, без внешних blob-хранилищ)
+// ---------------------------------------------------------------------------
+
+// Корневая папка для вложений. Внутри — по подпапке на каждую комнату:
+// <UPLOAD_DIR>/<roomId>/<uuid>.<ext>. Папка комнаты удаляется целиком, когда
+// комната уничтожается (см. socket.ts → cleanupRoomIfEmpty).
+export const UPLOAD_DIR =
+  process.env.UPLOAD_DIR ?? path.join(process.cwd(), 'uploads')
+
+// Максимальный размер одного файла (байты). По умолчанию 25 МБ.
+export const MAX_FILE_SIZE = parseInt(
+  process.env.MAX_FILE_SIZE ?? String(25 * 1024 * 1024),
+  10,
+)
+
+// Подстраховка от "осиротевших" файлов после жёсткого падения сервера (когда
+// штатная очистка при уничтожении комнаты не успела отработать). Папки комнат,
+// не изменявшиеся дольше этого срока, удаляются фоновым сборщиком. По умолчанию
+// 48 часов — заведомо больше любого живого звонка.
+export const UPLOAD_TTL_MS = parseInt(
+  process.env.UPLOAD_TTL_MS ?? String(48 * 60 * 60 * 1000),
+  10,
+)
 
 // ---------------------------------------------------------------------------
 // WebRTC / ICE

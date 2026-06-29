@@ -1,10 +1,26 @@
 import 'dotenv/config'
 import http from 'http'
+import path from 'path'
+import { randomUUID } from 'crypto'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
+import multer from 'multer'
 import * as mediasoup from 'mediasoup'
-import { PORT, CLIENT_ORIGIN, workerSettings } from './config'
+import {
+  PORT,
+  CLIENT_ORIGIN,
+  workerSettings,
+  UPLOAD_DIR,
+  MAX_FILE_SIZE,
+  UPLOAD_TTL_MS,
+} from './config'
 import { setupSocketIO } from './socket'
+import {
+  ensureUploadRoot,
+  ensureRoomDir,
+  isValidRoomId,
+  sweepOrphanUploads,
+} from './uploads'
 
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
@@ -19,6 +35,91 @@ async function main(): Promise<void> {
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', uptime: process.uptime() })
   })
+
+  // ---------------------------------------------------------------------------
+  // Вложения чата (файлы на диске VPS)
+  // ---------------------------------------------------------------------------
+  ensureUploadRoot()
+
+  // Раздача загруженных файлов. Заголовки безопасности:
+  //  - nosniff: браузер не угадывает тип (иначе загруженный .html мог бы
+  //    выполниться как страница);
+  //  - не-картинки отдаём как attachment (скачивание), картинки — inline, чтобы
+  //    показывать превью прямо в чате.
+  app.use(
+    '/uploads',
+    express.static(UPLOAD_DIR, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        res.setHeader('Cache-Control', 'private, max-age=86400')
+        const ext = path.extname(filePath).toLowerCase()
+        const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'].includes(ext)
+        if (!isImage) res.setHeader('Content-Disposition', 'attachment')
+      },
+    }),
+  )
+
+  // Загрузка файла в папку конкретной комнаты. multer кладёт файл на диск с
+  // безопасным случайным именем; оригинальное имя возвращается клиенту и
+  // хранится в сообщении.
+  const storage = multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const roomId = req.params.roomId
+      if (!isValidRoomId(roomId)) {
+        cb(new Error('invalid roomId'), '')
+        return
+      }
+      try {
+        cb(null, ensureRoomDir(roomId))
+      } catch (e) {
+        cb(e as Error, '')
+      }
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).slice(0, 16)
+      cb(null, `${randomUUID()}${ext}`)
+    },
+  })
+
+  const upload = multer({
+    storage,
+    limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+  })
+
+  app.post(
+    '/rooms/:roomId/upload',
+    (req: Request, res: Response) => {
+      const { roomId } = req.params
+      if (!isValidRoomId(roomId)) {
+        res.status(400).json({ error: 'invalid roomId' })
+        return
+      }
+      upload.single('file')(req, res, (uploadErr: unknown) => {
+        if (uploadErr) {
+          const message = (uploadErr as Error).message ?? 'upload failed'
+          const tooLarge = message.includes('File too large')
+          res.status(tooLarge ? 413 : 400).json({
+            error: tooLarge ? 'Файл слишком большой' : message,
+          })
+          return
+        }
+        const file = req.file
+        if (!file) {
+          res.status(400).json({ error: 'no file' })
+          return
+        }
+        // URL относительный — клиент сам подставит адрес сервера. Декодировать
+        // не нужно: имя — это сгенерированный UUID + расширение.
+        res.json({
+          url: `/uploads/${roomId}/${file.filename}`,
+          name: file.originalname.slice(0, 255),
+          size: file.size,
+          mime: file.mimetype || 'application/octet-stream',
+        })
+      })
+    },
+  )
 
   const httpServer = http.createServer(app)
 
@@ -40,11 +141,22 @@ async function main(): Promise<void> {
   setupSocketIO(httpServer, worker)
 
   // ---------------------------------------------------------------------------
+  // Фоновая подчистка осиротевших вложений (защита диска от утечки места).
+  // Запускаем при старте и далее раз в час.
+  // ---------------------------------------------------------------------------
+  void sweepOrphanUploads()
+  const sweepTimer = setInterval(() => {
+    void sweepOrphanUploads()
+  }, Math.min(UPLOAD_TTL_MS, 60 * 60 * 1000))
+  sweepTimer.unref()
+
+  // ---------------------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------------------
   httpServer.listen(PORT, () => {
     console.log(`[server] Replixo mediasoup server running on port ${PORT}`)
     console.log(`[server] CORS allowed origin: ${CLIENT_ORIGIN}`)
+    console.log(`[server] Uploads dir: ${UPLOAD_DIR} (max ${Math.round(MAX_FILE_SIZE / 1024 / 1024)} MB/file)`)
   })
 
   // ---------------------------------------------------------------------------
@@ -52,6 +164,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   const shutdown = (): void => {
     console.log('[server] Shutting down...')
+    clearInterval(sweepTimer)
     worker.close()
     httpServer.close(() => process.exit(0))
   }
