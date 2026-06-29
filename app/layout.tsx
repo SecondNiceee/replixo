@@ -1,6 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
+import { ElectronPatches } from '@/components/electron-patches'
 import './globals.css'
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin', 'cyrillic'] })
@@ -44,6 +45,7 @@ export default function RootLayout({
       className={`${inter.variable} ${jetbrainsMono.variable} bg-background`}
     >
       <body className="font-sans antialiased">
+        <ElectronPatches />
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
