@@ -25,6 +25,8 @@ interface RoomVideoGridProps {
   peers: Map<string, Peer>
   participantsHidden?: boolean
   onParticipantsHiddenChange?: (hidden: boolean) => void
+  /** Electron overlay-режим: показывать только правый сайдбар участников поверх прозрачного окна */
+  overlayMode?: boolean
 }
 
 export function RoomVideoGrid({
@@ -37,6 +39,7 @@ export function RoomVideoGrid({
   peers,
   participantsHidden = false,
   onParticipantsHiddenChange,
+  overlayMode = false,
 }: RoomVideoGridProps) {
   const setParticipantsHidden = (v: boolean | ((prev: boolean) => boolean)) => {
     const next = typeof v === "function" ? v(participantsHidden) : v
@@ -47,6 +50,90 @@ export function RoomVideoGrid({
   const remoteScreens = allPeers.filter((p) => p.screenStream)
 
   const hasScreenShare = (isScreenSharing && localScreenStream) || remoteScreens.length > 0
+
+  // ---------------------------------------------------------------------------
+  // Overlay-режим: окно прозрачное поверх экрана. Показываем только
+  // вертикальный сайдбар участников справа — без видео своего экрана.
+  // ---------------------------------------------------------------------------
+  if (overlayMode) {
+    const allParticipantsOverlay: Array<
+      | { key: string; isLocal: true }
+      | { key: string; isLocal: false; peer: Peer }
+    > = [
+      { key: "local", isLocal: true },
+      ...allPeers.map((peer) => ({ key: peer.peerId, isLocal: false as const, peer })),
+    ]
+
+    return (
+      <div className="pointer-events-none fixed inset-y-0 right-0 z-[9998] flex items-center">
+        {/* Toggle handle — sits on the left edge of the sidebar */}
+        <button
+          onClick={() => onParticipantsHiddenChange?.(!participantsHidden)}
+          aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
+          className={cn(
+            "pointer-events-auto absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-white/15 bg-black/60 backdrop-blur-md transition-colors hover:bg-black/80",
+          )}
+        >
+          <ChevronRight
+            className={cn(
+              "size-4 text-white/60 transition-transform duration-300",
+              participantsHidden ? "rotate-0" : "rotate-180",
+            )}
+          />
+        </button>
+
+        {/* Collapsing sidebar — collapses to the right (width → 0) */}
+        <div
+          className={cn(
+            "grid overflow-hidden transition-all duration-300 ease-in-out",
+            participantsHidden ? "grid-cols-[0fr]" : "grid-cols-[1fr]",
+          )}
+        >
+          <div className="pointer-events-auto min-w-0 overflow-hidden">
+            <div className="flex h-screen flex-col overflow-y-auto border-l border-white/10 bg-black/70 shadow-2xl backdrop-blur-xl lg:w-52">
+              {/* Header */}
+              <div className="flex items-center gap-2 border-b border-white/10 bg-white/5 px-3 py-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/40">
+                  Участники
+                </span>
+                <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-white/10 px-1.5 text-[10px] font-bold tabular-nums text-white/50">
+                  {allParticipantsOverlay.length}
+                </span>
+              </div>
+
+              {/* Tiles */}
+              {allParticipantsOverlay.map((item, idx) => (
+                <div
+                  key={item.key}
+                  className={cn(idx !== 0 && "border-t border-white/10")}
+                >
+                  {item.isLocal ? (
+                    <VideoTile
+                      stream={localStream ?? undefined}
+                      speakingStream={localStream ?? undefined}
+                      displayName={displayName}
+                      isMuted={isMicMuted}
+                      isCamOff={isCamOff}
+                      isLocal
+                      className="aspect-video h-auto w-full rounded-none shadow-none ring-0"
+                    />
+                  ) : (
+                    <VideoTile
+                      stream={item.peer.videoStream}
+                      audioStream={item.peer.audioStream}
+                      displayName={item.peer.displayName}
+                      isMuted={!item.peer.audioStream || !!item.peer.audioMuted}
+                      className="aspect-video h-auto w-full rounded-none shadow-none ring-0"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const totalTiles = allPeers.length + 1 + (isScreenSharing && localScreenStream ? 1 : 0) + remoteScreens.length
 
