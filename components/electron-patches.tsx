@@ -7,6 +7,8 @@ declare global {
     electronAPI?: {
       isElectron: boolean
       getDesktopSources: () => Promise<DesktopSource[]>
+      enterOverlayMode: () => void
+      exitOverlayMode: () => void
     }
     replixoDesktop?: {
       isDesktop: boolean

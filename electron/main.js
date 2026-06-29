@@ -92,9 +92,58 @@ function setupDesktopCapturer() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Overlay-режим: окно становится прозрачным, поверх всего экрана.
+// Используется когда пользователь демонстрирует экран — приложение «уходит»
+// с дороги, оставляя только боковую панель участников и плавающие контролы.
+// ---------------------------------------------------------------------------
+let overlayRestoreState = null
+
+function setupOverlayMode() {
+  ipcMain.on("enter-overlay-mode", () => {
+    if (!mainWindow) return
+
+    // Сохраняем прежнее состояние для восстановления
+    overlayRestoreState = {
+      bounds: mainWindow.getBounds(),
+      isMaximized: mainWindow.isMaximized(),
+      alwaysOnTop: mainWindow.isAlwaysOnTop(),
+      opacity: mainWindow.getOpacity(),
+    }
+
+    const { screen } = require("electron")
+    const display = screen.getDisplayMatching(mainWindow.getBounds())
+    const { x, y, width, height } = display.bounds
+
+    mainWindow.setAlwaysOnTop(true, "screen-saver")
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    mainWindow.setIgnoreMouseEvents(false)
+    mainWindow.setOpacity(1)
+    mainWindow.setBackgroundColor("#00000000")
+    mainWindow.setBounds({ x, y, width, height })
+  })
+
+  ipcMain.on("exit-overlay-mode", () => {
+    if (!mainWindow || !overlayRestoreState) return
+
+    mainWindow.setAlwaysOnTop(overlayRestoreState.alwaysOnTop)
+    mainWindow.setVisibleOnAllWorkspaces(false)
+    mainWindow.setOpacity(overlayRestoreState.opacity)
+    mainWindow.setBackgroundColor("#0a0a0a")
+    mainWindow.setBounds(overlayRestoreState.bounds)
+
+    if (overlayRestoreState.isMaximized) {
+      mainWindow.maximize()
+    }
+
+    overlayRestoreState = null
+  })
+}
+
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
+  setupOverlayMode()
   createWindow()
 
   app.on("activate", () => {

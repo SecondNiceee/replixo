@@ -12,6 +12,7 @@ import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
+import { OverlayControls } from "@/components/overlay-controls"
 import { ChevronRight } from "lucide-react"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
@@ -77,6 +78,22 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
+
+  // Electron overlay-режим: активируется когда мы сами демонстрируем экран.
+  // Окно становится прозрачным и всегда поверх — видим только сайдбар + контролы.
+  const isElectron = typeof window !== "undefined" && !!window.electronAPI?.isElectron
+  const [overlayMode, setOverlayMode] = useState(false)
+
+  useEffect(() => {
+    if (!isElectron) return
+    if (isScreenSharing) {
+      window.electronAPI!.enterOverlayMode()
+      setOverlayMode(true)
+    } else {
+      window.electronAPI!.exitOverlayMode()
+      setOverlayMode(false)
+    }
+  }, [isScreenSharing, isElectron])
 
   // Chat panel open state + unread counter. We track how many messages had been
   // seen the last time the panel was open; anything beyond that is "unread".
@@ -193,7 +210,10 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   }
 
   return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-background">
+    <div className={cn(
+      "relative flex h-screen flex-col overflow-hidden",
+      overlayMode ? "bg-transparent" : "bg-background",
+    )}>
       <EnableSoundBanner />
 
       {/* Permission error banner — shown when the browser blocked mic or cam access */}
@@ -217,15 +237,17 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
       {/* Main column. When the chat opens on >=sm screens we add a right margin
           so the content visibly shrinks beside the panel instead of being
           covered by it. On mobile the chat overlays full-width as before. */}
-      <RoomHeader
-        roomId={roomId}
-        displayName={displayName}
-        status={status}
-        participantCount={peers.size + 1}
-        isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
-        chatOpen={chatOpen}
-        participantsOpen={!participantsHidden && (isScreenSharing || [...peers.values()].some((p) => p.screenStream != null))}
-      />
+      {!overlayMode && (
+        <RoomHeader
+          roomId={roomId}
+          displayName={displayName}
+          status={status}
+          participantCount={peers.size + 1}
+          isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
+          chatOpen={chatOpen}
+          participantsOpen={!participantsHidden && (isScreenSharing || [...peers.values()].some((p) => p.screenStream != null))}
+        />
+      )}
 
       <div
         className={cn(
@@ -251,6 +273,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             peers={peers}
             participantsHidden={participantsHidden}
             onParticipantsHiddenChange={setParticipantsHidden}
+            overlayMode={overlayMode}
           />
         </div>
         {whiteboardOpen && (
@@ -267,27 +290,29 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
       {/* Overflow wrapper: clips the footer when it slides down, and provides
           the anchor point for the toggle handle that peeks above it */}
-      <div className="relative shrink-0 overflow-visible">
-      <RoomControls
-        isMicMuted={isMicMuted}
-        isCamOff={isCamOff}
-        isScreenSharing={isScreenSharing}
-        screenQuality={screenQuality}
-        micDevices={micDevices}
-        selectedMicLabel={selectedMicLabel}
-        collapsed={controlsCollapsed}
-        whiteboardOpen={whiteboardOpen}
-        onToggleWhiteboard={toggleWhiteboard}
-        onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
-        onToggleMic={toggleMic}
-        onToggleCam={toggleCam}
-        onToggleScreenShare={toggleScreenShare}
-        onSetScreenQuality={setScreenQuality}
-        onSwitchMic={switchMic}
-        onSelectMicLabel={setSelectedMicLabel}
-        onLeave={handleLeave}
-      />
-      </div>
+      {!overlayMode && (
+        <div className="relative shrink-0 overflow-visible">
+          <RoomControls
+            isMicMuted={isMicMuted}
+            isCamOff={isCamOff}
+            isScreenSharing={isScreenSharing}
+            screenQuality={screenQuality}
+            micDevices={micDevices}
+            selectedMicLabel={selectedMicLabel}
+            collapsed={controlsCollapsed}
+            whiteboardOpen={whiteboardOpen}
+            onToggleWhiteboard={toggleWhiteboard}
+            onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
+            onToggleMic={toggleMic}
+            onToggleCam={toggleCam}
+            onToggleScreenShare={toggleScreenShare}
+            onSetScreenQuality={setScreenQuality}
+            onSwitchMic={switchMic}
+            onSelectMicLabel={setSelectedMicLabel}
+            onLeave={handleLeave}
+          />
+        </div>
+      )}
       </div>
 
       {/* Chat panel — slides in from the right. A sticky arrow tab peeks out
@@ -324,11 +349,24 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         />
       </div>
 
-      <FloatingChatButton
-        chatOpen={chatOpen}
-        unreadCount={unreadCount}
-        onToggleChat={toggleChat}
-      />
+      {!overlayMode && (
+        <FloatingChatButton
+          chatOpen={chatOpen}
+          unreadCount={unreadCount}
+          onToggleChat={toggleChat}
+        />
+      )}
+
+      {/* Overlay controls: плавающая панель снизу в режиме демонстрации экрана */}
+      {overlayMode && (
+        <OverlayControls
+          isMicMuted={isMicMuted}
+          isCamOff={isCamOff}
+          onToggleMic={toggleMic}
+          onToggleCam={toggleCam}
+          onStopScreenShare={toggleScreenShare}
+        />
+      )}
     </div>
   )
 }
