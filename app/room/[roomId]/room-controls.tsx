@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, Pencil, Presentation,
+  ChevronUp, SquarePen, Presentation,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -205,7 +205,7 @@ export function RoomControls({
         )}
         aria-label={whiteboardOpen ? "Закрыть доску" : "Открыть совместную доску"}
       >
-        <Pencil className="size-5" />
+          <SquarePen className="size-5" />
       </Button>
 
       {/* Chat now lives in a draggable floating button (FloatingChatButton),
