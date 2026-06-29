@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, SquarePen, Presentation,
+  ChevronUp, SquarePen, Presentation, Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -58,6 +58,9 @@ export function RoomControls({
   collapsed,
   whiteboardOpen,
   onToggleWhiteboard,
+  annotationActive,
+  canAnnotate,
+  onToggleAnnotation,
   onToggleCollapsed,
   onToggleMic,
   onToggleCam,
@@ -207,6 +210,23 @@ export function RoomControls({
       >
           <SquarePen className="size-5" />
       </Button>
+
+      {/* Annotation — рисование поверх демонстрации экрана. Показывается только
+          когда идёт демонстрация (своя или чужая). */}
+      {canAnnotate && (
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onToggleAnnotation}
+          className={cn(
+            "size-12 rounded-full",
+            annotationActive && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
+          )}
+          aria-label={annotationActive ? "Закрыть рисование по экрану" : "Рисовать по экрану"}
+        >
+          <Pencil className="size-5" />
+        </Button>
+      )}
 
       {/* Chat now lives in a draggable floating button (FloatingChatButton),
           so it's no longer part of the footer cluster. */}

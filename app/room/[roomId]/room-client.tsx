@@ -13,6 +13,8 @@ import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
 import { OverlayControls } from "@/components/overlay-controls"
+import { AnnotationToolbar } from "@/components/annotation-toolbar"
+import type { AnnotationTool } from "@/components/stream-annotation-canvas"
 import { ChevronRight } from "lucide-react"
 import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
@@ -73,12 +75,35 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     sendWhiteboardChange,
     sendWhiteboardSnapshot,
     subscribeWhiteboardChange,
+    sendAnnotationStroke,
+    sendAnnotationClear,
+    subscribeAnnotationStroke,
+    subscribeAnnotationClear,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
+
+  // Screen-share annotation (рисование поверх стрима). Доступно только пока идёт
+  // демонстрация экрана — своя или чужая. Холст накладывается на тайлы экрана в
+  // RoomVideoGrid; штрихи рассылаются всем и видны у каждого участника.
+  const hasRemoteScreen = [...peers.values()].some((p) => p.screenStream != null)
+  const canAnnotate = isScreenSharing || hasRemoteScreen
+  const [annotationActive, setAnnotationActive] = useState(false)
+  const [annotationTool, setAnnotationTool] = useState<AnnotationTool>("pen")
+  const [annotationColor, setAnnotationColor] = useState("#ef4444")
+  // Bump to broadcast a full clear of all annotations.
+  const [annotationClearSignal, setAnnotationClearSignal] = useState(0)
+
+  // If the screen share ends, leave annotation mode so a dead canvas/toolbar
+  // doesn't linger.
+  useEffect(() => {
+    if (!canAnnotate && annotationActive) setAnnotationActive(false)
+  }, [canAnnotate, annotationActive])
+
+  const toggleAnnotation = useCallback(() => setAnnotationActive((v) => !v), [])
 
   // Electron overlay-режим: активируется когда мы сами демонстрируем экран.
   // Окно становится прозрачным и всегда поверх — видим только сайдбар + контролы.
@@ -236,7 +261,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         <div className="relative z-50 flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-sm text-destructive border-b border-destructive/20">
           <span>
             {permissionError === "mic"
-              ? "Нет доступа к микрофону. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"
+              ? "Нет доступа к ��икрофону. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"
               : "Нет доступа к камере. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"}
           </span>
           <button
@@ -289,6 +314,16 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             participantsHidden={participantsHidden}
             onParticipantsHiddenChange={setParticipantsHidden}
             overlayMode={overlayMode}
+            annotation={{
+              active: annotationActive,
+              tool: annotationTool,
+              color: annotationColor,
+              onStroke: sendAnnotationStroke,
+              onClear: sendAnnotationClear,
+              subscribeRemoteStroke: subscribeAnnotationStroke,
+              subscribeRemoteClear: subscribeAnnotationClear,
+              clearSignal: annotationClearSignal,
+            }}
           />
         </div>
         {whiteboardOpen && (
@@ -317,6 +352,9 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             collapsed={controlsCollapsed}
             whiteboardOpen={whiteboardOpen}
             onToggleWhiteboard={toggleWhiteboard}
+            annotationActive={annotationActive}
+            canAnnotate={canAnnotate}
+            onToggleAnnotation={toggleAnnotation}
             onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
             onToggleMic={toggleMic}
             onToggleCam={toggleCam}
@@ -370,6 +408,20 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           unreadCount={unreadCount}
           onToggleChat={toggleChat}
         />
+      )}
+
+      {/* Annotation toolbar — floats above the controls while drawing is active */}
+      {!overlayMode && annotationActive && canAnnotate && (
+        <div className="fixed bottom-28 left-1/2 z-40 -translate-x-1/2">
+          <AnnotationToolbar
+            tool={annotationTool}
+            color={annotationColor}
+            onToolChange={setAnnotationTool}
+            onColorChange={setAnnotationColor}
+            onClear={() => setAnnotationClearSignal((n) => n + 1)}
+            onClose={() => setAnnotationActive(false)}
+          />
+        </div>
       )}
 
       {/* Overlay controls: плавающая панель снизу в режиме демонстрации экрана */}

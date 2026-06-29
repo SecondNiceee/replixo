@@ -2,7 +2,7 @@
 
 
 import { ChevronRight } from "lucide-react"
-import { VideoTile } from "@/components/video-tile"
+import { VideoTile, type VideoTileAnnotation } from "@/components/video-tile"
 import { cn } from "@/lib/utils"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
@@ -28,6 +28,8 @@ interface RoomVideoGridProps {
   onParticipantsHiddenChange?: (hidden: boolean) => void
   /** Electron overlay-режим: показывать только правый сайдбар участников поверх прозрачного окна */
   overlayMode?: boolean
+  /** Рисование поверх демонстрации экрана — накладывается на тайлы со стримом */
+  annotation?: VideoTileAnnotation
 }
 
 export function RoomVideoGrid({
@@ -41,6 +43,7 @@ export function RoomVideoGrid({
   participantsHidden = false,
   onParticipantsHiddenChange,
   overlayMode = false,
+  annotation,
 }: RoomVideoGridProps) {
   const setParticipantsHidden = (v: boolean | ((prev: boolean) => boolean)) => {
     const next = typeof v === "function" ? v(participantsHidden) : v
@@ -259,6 +262,7 @@ export function RoomVideoGrid({
               displayName={displayName}
               isLocal
               isScreen
+              annotation={annotation}
               className="h-full w-full"
             />
           )}
@@ -269,6 +273,7 @@ export function RoomVideoGrid({
               audioStream={peer.screenAudioStream}
               displayName={peer.displayName}
               isScreen
+              annotation={annotation}
               className="h-full w-full"
             />
           ))}
