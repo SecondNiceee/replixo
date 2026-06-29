@@ -4,6 +4,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ---------------------------------------------------------------------------
+   Electron desktop (безрамочное окно + кастомный титлбар + overlay-режим)
+   --------------------------------------------------------------------------- */
+
+/* Резервируем 32px сверху под кастомный титлбар (DesktopTitlebar h-8). */
+html.is-electron body {
+  padding-top: 32px;
+}
+
+/* Overlay-режим (демонстрация экрана): окно прозрачное, видно рабочий стол.
+   Делаем фон документа полностью прозрачным и убираем резерв под титлбар. */
+html[data-overlay='1'] {
+  background: transparent !important;
+}
+html[data-overlay='1'] body {
+  background: transparent !important;
+  padding-top: 0 !important;
+}
+
+/* В overlay-режиме титлбар не нужен — его место занимает рабочий стол. */
+html[data-overlay='1'] .desktop-titlebar {
+  display: none !important;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-inter), 'Inter Fallback', ui-sans-serif, system-ui, sans-serif;

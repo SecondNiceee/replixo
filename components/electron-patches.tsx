@@ -2,30 +2,8 @@
 
 import { useEffect } from "react"
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      isElectron: boolean
-      getDesktopSources: () => Promise<DesktopSource[]>
-      enterOverlayMode: () => void
-      exitOverlayMode: () => void
-    }
-    replixoDesktop?: {
-      isDesktop: boolean
-      platform: string
-    }
-  }
-  interface Navigator {
-    mediaDevices: MediaDevices & { __electronPatched?: boolean }
-  }
-}
-
-interface DesktopSource {
-  id: string
-  name: string
-  thumbnail: string
-  appIcon: string | null
-}
+// Глобальные типы Electron-моста объявлены в electron/electron.d.ts
+// (interface ElectronAPI / DesktopSource / MediaDevices.__electronPatched).
 
 function showScreenPicker(sources: DesktopSource[]): Promise<string | null> {
   return new Promise((resolve) => {
@@ -158,6 +136,11 @@ function patchElectronDisplayMedia() {
 export function ElectronPatches() {
   useEffect(() => {
     patchElectronDisplayMedia()
+    // Помечаем корень документа, чтобы CSS зарезервировал место под кастомный
+    // титлбар и корректно обрабатывал прозрачность в overlay-режиме.
+    if (typeof window !== "undefined" && window.electronAPI?.isElectron) {
+      document.documentElement.classList.add("is-electron")
+    }
   }, [])
 
   return null

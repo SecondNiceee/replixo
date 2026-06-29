@@ -87,11 +87,19 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   useEffect(() => {
     if (!isElectron) return
     if (isScreenSharing) {
+      // Сначала делаем документ прозрачным (data-overlay), затем растягиваем
+      // окно поверх экрана — чтобы не мелькнул непрозрачный фон.
+      document.documentElement.dataset.overlay = "1"
       window.electronAPI!.enterOverlayMode()
       setOverlayMode(true)
     } else {
       window.electronAPI!.exitOverlayMode()
+      delete document.documentElement.dataset.overlay
       setOverlayMode(false)
+    }
+    return () => {
+      // Подстраховка при размонтировании (например, выход из комнаты во время показа)
+      delete document.documentElement.dataset.overlay
     }
   }, [isScreenSharing, isElectron])
 
@@ -211,10 +219,12 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
   return (
     <div className={cn(
-      "relative flex h-screen flex-col overflow-hidden",
+      "relative flex flex-col overflow-hidden",
+      // В Electron (без overlay) резервируем 32px под кастомный титлбар.
+      isElectron && !overlayMode ? "h-[calc(100vh-32px)]" : "h-screen",
       overlayMode ? "bg-transparent" : "bg-background",
     )}>
-      <EnableSoundBanner />
+      {!overlayMode && <EnableSoundBanner />}
 
       {/* Permission error banner — shown when the browser blocked mic or cam access */}
       {permissionError && (

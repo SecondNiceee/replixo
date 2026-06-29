@@ -12,7 +12,13 @@ function createWindow() {
     height: 800,
     minWidth: 940,
     minHeight: 600,
-    backgroundColor: "#0a0a0a",
+    // Прозрачность на Windows возможна только при frame: false и transparent: true,
+    // причём оба параметра задаются ТОЛЬКО при создании окна (их нельзя
+    // переключить позже). Поэтому окно всегда безрамочное + прозрачное, а
+    // нативную рамку заменяет кастомный титлбар (DesktopTitlebar) в renderer.
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
     show: false,
     autoHideMenuBar: true,
     title: "Replixo",
@@ -93,9 +99,50 @@ function setupDesktopCapturer() {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay-режим: окно становится прозрачным, поверх всего экрана.
-// Используется когда пользователь демонстрирует экран — приложение «уходит»
-// с дороги, оставляя только боковую панель участников и плавающие контролы.
+// Управление безрамочным окном из renderer (кастомный титлбар).
+// Так как frame: false убирает нативные кнопки, их заменяет DesktopTitlebar,
+// который шлёт эти IPC-команды.
+// ---------------------------------------------------------------------------
+function setupWindowControls() {
+  ipcMain.on("window-minimize", () => mainWindow?.minimize())
+
+  ipcMain.on("window-maximize-toggle", () => {
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow.maximize()
+    }
+  })
+
+  ipcMain.on("window-close", () => mainWindow?.close())
+
+  ipcMain.handle("window-is-maximized", () => mainWindow?.isMaximized() ?? false)
+
+  // Уведомляем renderer об изменении состояния развёрнутости (для иконки кнопки)
+  const notifyMaximizeState = () => {
+    if (!mainWindow) return
+    mainWindow.webContents.send("window-maximize-changed", mainWindow.isMaximized())
+  }
+  // Навешиваем слушатели после создания окна
+  app.whenReady().then(() => {
+    if (!mainWindow) return
+    mainWindow.on("maximize", notifyMaximizeState)
+    mainWindow.on("unmaximize", notifyMaximizeState)
+  })
+
+  // Click-through: в overlay-режиме окно по умолчанию пропускает клики на рабочий
+  // стол, а renderer включает перехват только когда курсор над интерактивным UI.
+  ipcMain.on("set-ignore-mouse-events", (_e, ignore, options) => {
+    if (!mainWindow) return
+    mainWindow.setIgnoreMouseEvents(!!ignore, options || undefined)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Overlay-режим: окно растягивается на весь экран поверх всего и пропускает
+// клики на рабочий стол. Само приложение прячется (renderer делает фон
+// прозрачным), остаётся только сайдбар участников слева и плавающие контролы.
 // ---------------------------------------------------------------------------
 let overlayRestoreState = null
 
@@ -108,28 +155,30 @@ function setupOverlayMode() {
       bounds: mainWindow.getBounds(),
       isMaximized: mainWindow.isMaximized(),
       alwaysOnTop: mainWindow.isAlwaysOnTop(),
-      opacity: mainWindow.getOpacity(),
     }
 
     const { screen } = require("electron")
     const display = screen.getDisplayMatching(mainWindow.getBounds())
     const { x, y, width, height } = display.bounds
 
+    // Снимаем maximize, иначе setBounds может игнорироваться
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+
     mainWindow.setAlwaysOnTop(true, "screen-saver")
     mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-    mainWindow.setIgnoreMouseEvents(false)
-    mainWindow.setOpacity(1)
-    mainWindow.setBackgroundColor("#00000000")
     mainWindow.setBounds({ x, y, width, height })
+    // По умолчанию пропускаем клики сквозь окно (на рабочий стол под ним).
+    // forward: true — события мыши всё равно доходят до renderer, чтобы
+    // сработал hover на контролах и мы временно вернули перехват.
+    mainWindow.setIgnoreMouseEvents(true, { forward: true })
   })
 
   ipcMain.on("exit-overlay-mode", () => {
     if (!mainWindow || !overlayRestoreState) return
 
+    mainWindow.setIgnoreMouseEvents(false)
     mainWindow.setAlwaysOnTop(overlayRestoreState.alwaysOnTop)
     mainWindow.setVisibleOnAllWorkspaces(false)
-    mainWindow.setOpacity(overlayRestoreState.opacity)
-    mainWindow.setBackgroundColor("#0a0a0a")
     mainWindow.setBounds(overlayRestoreState.bounds)
 
     if (overlayRestoreState.isMaximized) {
@@ -143,6 +192,7 @@ function setupOverlayMode() {
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
+  setupWindowControls()
   setupOverlayMode()
   createWindow()
 

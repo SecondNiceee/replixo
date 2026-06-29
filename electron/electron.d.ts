@@ -9,7 +9,19 @@ interface DesktopSource {
 
 interface ElectronAPI {
   isElectron: true
+  platform: string
   getDesktopSources: () => Promise<DesktopSource[]>
+  // Overlay-режим (демонстрация экрана)
+  enterOverlayMode: () => void
+  exitOverlayMode: () => void
+  // Управление безрамочным окном (кастомный титлбар)
+  windowMinimize: () => void
+  windowMaximizeToggle: () => void
+  windowClose: () => void
+  isWindowMaximized: () => Promise<boolean>
+  onMaximizeChange: (callback: (isMaximized: boolean) => void) => () => void
+  // Click-through в overlay-режиме
+  setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => void
 }
 
 interface ReplixoDesktop {
@@ -20,4 +32,8 @@ interface ReplixoDesktop {
 declare interface Window {
   electronAPI?: ElectronAPI
   replixoDesktop?: ReplixoDesktop
+}
+
+declare interface MediaDevices {
+  __electronPatched?: boolean
 }
