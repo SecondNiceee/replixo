@@ -37,13 +37,17 @@ export function useOverlayMouseManager(active: boolean) {
     let ignoring = true // стартуем в режиме "клики проходят сквозь"
     api.setIgnoreMouseEvents(true, { forward: true })
 
-    const isOverInteractive = (x: number, y: number) => {
-      const el = document.elementFromPoint(x, y)
-      return !!el?.closest(`[${OVERLAY_INTERACTIVE_ATTR}]`)
-    }
+    // Координаты последнего движения и флаг запланированного кадра — чтобы
+    // выполнять не более одного хит-теста на кадр (rAF-троттлинг), даже если
+    // событий mousemove приходит десятки в секунду.
+    let lastX = 0
+    let lastY = 0
+    let frame = 0
 
-    const handleMove = (e: MouseEvent) => {
-      const overInteractive = isOverInteractive(e.clientX, e.clientY)
+    const evaluate = () => {
+      frame = 0
+      const el = document.elementFromPoint(lastX, lastY)
+      const overInteractive = !!el?.closest(`[${OVERLAY_INTERACTIVE_ATTR}]`)
       if (overInteractive && ignoring) {
         ignoring = false
         api.setIgnoreMouseEvents(false)
@@ -53,10 +57,17 @@ export function useOverlayMouseManager(active: boolean) {
       }
     }
 
+    const handleMove = (e: MouseEvent) => {
+      lastX = e.clientX
+      lastY = e.clientY
+      if (!frame) frame = requestAnimationFrame(evaluate)
+    }
+
     window.addEventListener("mousemove", handleMove)
 
     return () => {
       window.removeEventListener("mousemove", handleMove)
+      if (frame) cancelAnimationFrame(frame)
       // Возвращаем нормальный перехват при выходе из overlay
       api.setIgnoreMouseEvents(false)
     }
