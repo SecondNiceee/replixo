@@ -37,4 +37,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Позиция курсора относительно окна (для надёжного hit-test в overlay-режиме,
   // не зависящего от ненадёжных forwarded mousemove на прозрачном окне).
   getCursorPoint: () => ipcRenderer.invoke("get-cursor-point"),
+
+  // Нативная запись в буфер обмена ОС (надёжнее, чем navigator.clipboard в
+  // безрамочном/прозрачном окне Electron).
+  writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),
 })

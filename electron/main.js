@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer } = require("electron")
+const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, clipboard } = require("electron")
 const path = require("path")
 
 // URL задеплоенного приложения. Можно переопределить переменной окружения APP_URL.
@@ -205,11 +205,24 @@ function setupOverlayMode() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Буфер обмена. navigator.clipboard.writeText в Electron ненадёжен (требует
+// secure context + фокус окна, а наше окно безрамочное/прозрачное), поэтому
+// renderer использует нативный clipboard через этот IPC как основной путь.
+// ---------------------------------------------------------------------------
+function setupClipboard() {
+  ipcMain.handle("clipboard-write-text", (_e, text) => {
+    clipboard.writeText(String(text ?? ""))
+    return true
+  })
+}
+
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
   setupWindowControls()
   setupOverlayMode()
+  setupClipboard()
   createWindow()
 
   app.on("activate", () => {

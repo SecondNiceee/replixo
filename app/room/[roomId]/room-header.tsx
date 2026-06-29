@@ -5,6 +5,7 @@ import { useState, useCallback } from "react"
 import { EditNameDialog } from "@/components/edit-name-dialog"
 import { RoomSettingsDialog } from "./room-settings-dialog"
 import { cn } from "@/lib/utils"
+import { copyText } from "@/lib/clipboard"
 
 interface RoomHeaderProps {
   roomId: string
@@ -21,10 +22,12 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
   const [editNameOpen, setEditNameOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  const handleCopyCode = useCallback(() => {
-    navigator.clipboard.writeText(roomId)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const handleCopyCode = useCallback(async () => {
+    const ok = await copyText(roomId)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }, [roomId])
 
   const handleNameSaved = useCallback(() => {

@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getDisplayName, setDisplayName, DEFAULT_NAME } from "@/lib/display-name"
+import { copyText } from "@/lib/clipboard"
 
 interface StartCallDialogProps {
   open: boolean
@@ -44,18 +45,8 @@ export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialog
   }
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(roomCode)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // fallback
-      const el = document.createElement("textarea")
-      el.value = roomCode
-      document.body.appendChild(el)
-      el.select()
-      document.execCommand("copy")
-      document.body.removeChild(el)
+    const ok = await copyText(roomCode)
+    if (ok) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
