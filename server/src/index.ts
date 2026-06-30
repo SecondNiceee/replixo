@@ -6,6 +6,7 @@ import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import multer from 'multer'
 import * as mediasoup from 'mediasoup'
+import fs from 'fs'
 import {
   PORT,
   CLIENT_ORIGIN,
@@ -13,6 +14,8 @@ import {
   UPLOAD_DIR,
   MAX_FILE_SIZE,
   UPLOAD_TTL_MS,
+  WINDOWS_INSTALLER_PATH,
+  WINDOWS_INSTALLER_NAME,
 } from './config'
 import { setupSocketIO } from './socket'
 import {
@@ -120,6 +123,33 @@ async function main(): Promise<void> {
       })
     },
   )
+
+  // ---------------------------------------------------------------------------
+  // Скачивание установщика приложения (Windows .exe, ~900 МБ).
+  //
+  // Файл лежит на диске VPS (WINDOWS_INSTALLER_PATH) и НЕ хранится в git.
+  // res.download() использует модуль send: он сам выставляет Content-Length,
+  // Accept-Ranges и обрабатывает Range-запросы — то есть поддерживает докачку
+  // и докачивание после обрыва, что критично для большого файла.
+  // ---------------------------------------------------------------------------
+  app.get('/download/windows', (_req: Request, res: Response) => {
+    fs.access(WINDOWS_INSTALLER_PATH, fs.constants.R_OK, (err) => {
+      if (err) {
+        console.error(
+          `[download] Установщик не найден: ${WINDOWS_INSTALLER_PATH}`,
+        )
+        res.status(404).json({ error: 'Установщик временно недоступен' })
+        return
+      }
+      res.download(WINDOWS_INSTALLER_PATH, WINDOWS_INSTALLER_NAME, (dlErr) => {
+        // Частая «ошибка» — клиент оборвал соединение (закрыл вкладку/пауза).
+        // Это не повод шуметь в логах как о настоящей проблеме.
+        if (dlErr && !res.headersSent) {
+          console.error('[download] Ошибка отдачи установщика:', dlErr.message)
+        }
+      })
+    })
+  })
 
   const httpServer = http.createServer(app)
 

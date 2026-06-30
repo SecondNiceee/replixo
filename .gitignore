@@ -16,3 +16,12 @@ node_modules
 
 # Electron build output
 release/
+
+# Uploaded chat attachments (live on the server disk, not in git)
+server/uploads/
+uploads/
+
+# Large app installers (~900MB, kept on the server disk, NOT in git)
+server/downloads/
+downloads/
+*.exe
