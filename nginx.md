@@ -42,6 +42,27 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
+    # ── Скачивание установщика (большой .exe ~900 МБ) ─────────────────
+    # Роут /download/windows живёт на Express (порт 3001), а НЕ в Next.js.
+    # Без этого блока запрос уходит в Next.js (location /) и возвращает 404.
+    location /download/ {
+        proxy_pass         http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # Для большого файла: отключаем буферизацию (иначе Nginx копит файл на
+        # диск перед отдачей), поднимаем таймауты и пропускаем Range-запросы,
+        # чтобы работала докачка.
+        proxy_buffering    off;
+        proxy_request_buffering off;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_max_temp_file_size 0;
+    }
+
     # ── Mediasoup / Socket.io (WebSocket) ─────────────────────────────
     location /socket.io/ {
         proxy_pass         http://127.0.0.1:3001;
@@ -83,6 +104,8 @@ sudo systemctl reload nginx
 ## Важно
 
 - После настройки Nginx обнови `NEXT_PUBLIC_MEDIASOUP_URL` в `.env.local` на `https://replixo.ru` — Socket.io клиент будет коннектиться через `/socket.io/` на том же домене, без порта.
+- Кнопка «Скачать» ведёт на `${NEXT_PUBLIC_MEDIASOUP_URL}/download/windows` = `https://replixo.ru/download/windows`. Чтобы это не упало в 404, в конфиге **обязателен** блок `location /download/` (см. выше) — он отдаёт запрос на Express (порт 3001). Без него весь трафик кроме `/socket.io/` уходит в Next.js, где такого роута нет.
+- Положи установщик на сервер по пути из `WINDOWS_INSTALLER_PATH` (по умолчанию `server/downloads/Replixo-Setup.exe`) — иначе Express вернёт 404 с `{"error":"Установщик временно недоступен"}`.
 - Убедись, что в `server/.env` переменная `CLIENT_ORIGIN` указывает на `https://replixo.ru`.
 - UDP-порты Mediasoup (по умолчанию `10000-10100`) должны быть открыты в firewall:
   ```bash
