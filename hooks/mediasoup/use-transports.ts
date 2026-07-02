@@ -80,7 +80,7 @@ export function useTransports({
             return
           }
           try {
-            await transport.restartIce({ iceParameters: iceParameters as RTCIceParameters })
+            await transport.restartIce({ iceParameters })
             // Re-sync paused state of all producers after ICE recovery
             if (transport === sendTransportRef.current) {
               const syncSocket = socketRef.current
@@ -133,11 +133,13 @@ export function useTransports({
               return
             }
 
+            // Device/Transport типизированы как any (см. types.ts) — mediasoup-client
+            // сам валидирует параметры, дополнительные касты не нужны.
             const opts = {
               id: transportData.transportId,
-              iceParameters: transportData.iceParameters as RTCIceParameters,
+              iceParameters: transportData.iceParameters,
               iceCandidates: transportData.iceCandidates as RTCIceCandidate[],
-              dtlsParameters: transportData.dtlsParameters as RTCDtlsParameters,
+              dtlsParameters: transportData.dtlsParameters,
               iceServers: transportData.iceServers as RTCIceServer[],
             }
 

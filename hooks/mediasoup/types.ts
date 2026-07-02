@@ -73,11 +73,13 @@ export const SCREEN_QUALITY_PRESETS: Record<ScreenQuality, ScreenQualityPreset> 
   },
 }
 
+// Форма совпадает с тем, что возвращает upload-эндпоинт сервера и что
+// сервер рассылает в chatMessage: { url, name, size, mime }.
 export interface ChatAttachment {
-  filename: string
-  size: number
-  mimeType: string
   url: string
+  name: string
+  size: number
+  mime: string
 }
 
 export interface ChatMessage {

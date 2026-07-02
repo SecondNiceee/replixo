@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import type { ScreenQuality } from "@/hooks/use-mediasoup"
+import type { AudioDevice } from "@/hooks/use-audio-devices"
 
 const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
   { value: "auto", label: "Авто" },
@@ -28,7 +29,7 @@ interface RoomControlsProps {
   isCamOff: boolean
   isScreenSharing: boolean
   screenQuality: ScreenQuality
-  micDevices: MediaDeviceInfo[]
+  micDevices: AudioDevice[]
   selectedMicLabel: string | null
   collapsed: boolean
   whiteboardOpen: boolean
