@@ -54,16 +54,18 @@ const TLDRAW_ASSET_URLS: TLUiAssetUrls = {
   icons: Object.fromEntries(
     ALL_ICON_NAMES.map((name) => [name, `${TLDRAW_BASE}/icons/icon/${name}.svg`])
   ),
+  // tldraw объявляет полные Record'ы по всем локалям/типам встраивания; мы
+  // раздаём только реально используемое подмножество, поэтому нужен каст.
   translations: Object.fromEntries(
     ["cs","da","de","en","es","fi","fr","hu","it","ja","pl","pt-br","ro","ru","sv","tr","uk","zh-cn","zh-tw"].map(
       (locale) => [locale, `${TLDRAW_BASE}/translations/${locale}.json`]
     )
-  ),
+  ) as TLUiAssetUrls["translations"],
   embedIcons: Object.fromEntries(
     ["codepen","codesandbox","excalidraw","figma","observable","replit","spotify","tldraw","vimeo","youtube"].map(
       (type) => [type, `${TLDRAW_BASE}/embed-icons/${type}.png`]
     )
-  ),
+  ) as TLUiAssetUrls["embedIcons"],
 }
 
 // tldraw's incremental store diff. We only relay the opaque diff between peers

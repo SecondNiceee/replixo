@@ -240,7 +240,6 @@ export function useMediaControls({
           const sender = producer.rtpSender
           if (sender) {
             const params = sender.getParameters()
-            // @ts-expect-error - degradationPreference valid but missing in some TS DOM libs
             params.degradationPreference = "maintain-resolution"
             await sender.setParameters(params)
           }
@@ -294,7 +293,7 @@ export function useMediaControls({
           const prevOnEnded = videoTrack.onended
           videoTrack.onended = () => {
             navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
-            if (typeof prevOnEnded === "function") prevOnEnded.call(videoTrack)
+            if (typeof prevOnEnded === "function") prevOnEnded.call(videoTrack, new Event("ended"))
             else stopScreenShare()
           }
         }

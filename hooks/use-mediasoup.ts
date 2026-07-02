@@ -207,7 +207,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             return
           }
 
-          await device.load({ routerRtpCapabilities: data.rtpCapabilities as RTCRtpCapabilities })
+          await device.load({
+            routerRtpCapabilities:
+              data.rtpCapabilities as Parameters<typeof device.load>[0]["routerRtpCapabilities"],
+          })
           dispatch({ type: "CONNECTED", localStream })
           hasJoinedRef.current = true
 
