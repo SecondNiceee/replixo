@@ -41,9 +41,12 @@
 - `nodemailer` / `resend` — письма для сброса пароля.
 
 **Бэкенд видеосвязи (`server/`):**
-- Node.js + Express (HTTP-сервер и health-check);
-- `socket.io` (сигналинг, чат, доска);
+- Node.js + Express (health-check, загрузка/раздача вложений чата через
+  `multer`, эндпоинт скачивания Windows-установщика);
+- `socket.io` (сигналинг, чат, доска, аннотации);
 - `mediasoup` (SFU-сервер, маршрутизация медиапотоков);
+- `pg` — персистентность истории чата, доски и маркеров прочтения в той же
+  PostgreSQL;
 - порт по умолчанию `3001`.
 
 **Десктоп (`electron/`):**
@@ -93,9 +96,17 @@
 │   └── ui/                          # Базовые UI-компоненты (button, dialog, input, dropdown-menu, slider)
 │
 ├── hooks/
-│   ├── use-mediasoup.ts             # WebRTC / mediasoup-client, чат, доска
+│   ├── use-mediasoup.ts             # Оркестратор видеосвязи (join/leave, socket-события)
+│   ├── mediasoup/                   # Модули ядра видеосвязи
+│   │   ├── types.ts                 # Типы, константы, пресеты качества
+│   │   ├── reducer.ts               # Reducer состояния комнаты
+│   │   ├── use-transports.ts        # Транспорты, consume, ICE restart
+│   │   ├── use-media-controls.ts    # Микрофон, камера, демонстрация экрана
+│   │   ├── use-chat.ts              # Чат, вложения, маркеры прочтения
+│   │   └── use-whiteboard.ts        # Доска и аннотации поверх экрана
 │   ├── use-audio-devices.ts         # Список доступных микрофонов
 │   ├── use-speaking.ts              # Детектор «говорит сейчас»
+│   ├── use-overlay-click-through.ts # Click-through в overlay-режиме (Electron)
 │   ├── use-chat-button-sync.ts      # Синхронизация настроек кнопки чата с БД
 │   └── use-room-settings-sync.ts    # Синхронизация настроек звуков с БД
 │
@@ -113,11 +124,22 @@
 │
 ├── server/                          # Mediasoup-бэкенд (Node.js)
 │   └── src/
-│       ├── index.ts                 # Точка входа: Express + HTTP + worker
+│       ├── index.ts                 # Точка входа: Express + HTTP + worker, загрузка/раздача вложений, /download/windows
 │       ├── config.ts                # Конфигурация из переменных окружения
 │       ├── Room.ts                  # Комната: router, транспорты, produce/consume
 │       ├── Peer.ts                  # Модель участника
-│       ├── socket.ts                # Все Socket.io события
+│       ├── socket.ts                # Оркестратор Socket.io (регистрирует модули socket/)
+│       ├── socket/                  # Обработчики событий по доменам
+│       │   ├── helpers.ts           # Общие типы, ack/err, rate-limiter
+│       │   ├── room-registry.ts     # In-memory комнаты, grace-window, гидрация из БД
+│       │   ├── media-handlers.ts    # WebRTC-сигналинг
+│       │   ├── chat-handlers.ts     # Чат и маркеры прочтения
+│       │   ├── whiteboard-handlers.ts # Совместная доска
+│       │   ├── presentation-handlers.ts # Слайды (зарезервировано, клиент не использует)
+│       │   ├── annotation-handlers.ts # Рисование поверх демонстрации экрана
+│       │   └── lifecycle-handlers.ts # Реконнект, выход, disconnect
+│       ├── db.ts                    # Персистентность: чат, доска, маркеры (PostgreSQL)
+│       ├── uploads.ts               # Вложения чата на диске VPS
 │       └── types.ts                 # TypeScript-типы payload'ов
 │
 └── electron/                        # Десктоп-оболочка (Electron, Windows)
