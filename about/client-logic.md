@@ -6,12 +6,23 @@
 
 ---
 
-## `hooks/use-mediasoup.ts` — ядро видеосвязи, чата и доски
+## `hooks/use-mediasoup.ts` + `hooks/mediasoup/` — ядро видеосвязи, чата и доски
 
-Главный хук, в котором сосредоточена вся работа с WebRTC через
-`mediasoup-client` и сигналинг через `socket.io-client`, а также чат, статусы
-прочтения и совместная доска. Вызывается на странице комнаты:
-`useMediasoup(roomId, displayName, create)`.
+Главный хук, объединяющий всю работу с WebRTC через `mediasoup-client` и
+сигналинг через `socket.io-client`, а также чат, статусы прочтения и совместную
+доску. Вызывается на странице комнаты: `useMediasoup(roomId, displayName, create)`.
+
+Код разбит на модули в папке `hooks/mediasoup/`, а сам `use-mediasoup.ts` —
+тонкий оркестратор (join/leave, socket-подписки, восстановление соединения):
+
+| Модуль | Назначение |
+|---|---|
+| `mediasoup/types.ts` | Типы (`RemotePeer`, `ChatMessage`, `ChatAttachment` и др.), константы (`SERVER_URL`, `SCREEN_QUALITY_PRESETS`, `CAMERA_ENCODINGS`), `getOrCreatePeerId`. |
+| `mediasoup/reducer.ts` | Reducer состояния комнаты (peers, статус, сообщения, доска). |
+| `mediasoup/use-transports.ts` | Создание send/recv-транспортов, consume, ICE restart. |
+| `mediasoup/use-media-controls.ts` | Микрофон, камера, демонстрация экрана, качество, `permissionError`. |
+| `mediasoup/use-chat.ts` | Отправка сообщений, загрузка вложений (`uploadChatFile`), маркеры прочтения. |
+| `mediasoup/use-whiteboard.ts` | Доска (open/close/diff/snapshot) и аннотации поверх экрана. |
 
 > Примечание: `mediasoup-client` загружается **лениво** (`await import(...)`)
 > внутри `join()`, потому что это CJS-бандл с циклическими зависимостями,
@@ -47,7 +58,8 @@
 1. Создаётся пустой `MediaStream` (без запроса камеры/микрофона — их пользователь
    включает вручную).
 2. Открывается socket-соединение к `NEXT_PUBLIC_MEDIASOUP_URL`
-   (по умолчанию `http://localhost:3001`), транспорт — websocket.
+   (по умолчанию `http://localhost:3001`), транспорты — websocket с fallback на
+   polling, бесконечные реконнекты с backoff (0.5–3 с).
 3. По событию `connect` создаётся mediasoup `Device`, отправляется `joinRoom`
    (с флагом `create`), в ответ приходят RTP-capabilities роутера и список уже
    присутствующих участников.
@@ -107,12 +119,19 @@
 - **`720p`** — 1280×720@30, до ~2.5 Мбит/с;
 - **`1080p`** — 1920×1080@30, до ~5 Мбит/с (резкий текст).
 
-### Чат и статусы прочтения
+### Чат, вложения и статусы прочтения
 
-- **`sendChatMessage(text)`** — обрезает текст до 2000 символов, генерирует `id`,
-  эмитит `chatMessage` на сервер (тот сохраняет и рассылает остальным) и сразу
-  добавляет сообщение локально (оптимистично). Общий `id` исключает дубликаты
-  при перезагрузке истории.
+- **`sendChatMessage(text, attachment?)`** — обрезает текст до 2000 символов,
+  генерирует `id`, эмитит `chatMessage` на сервер (тот сохраняет и рассылает
+  остальным) и сразу добавляет сообщение локально (оптимистично). Общий `id`
+  исключает дубликаты при перезагрузке истории. Сообщение может состоять только
+  из вложения (без текста).
+- **`uploadChatFile(file)`** — загружает файл на mediasoup-сервер
+  (`POST <SERVER_URL>/rooms/<roomId>/upload`, multipart, лимит 25 МБ) и
+  возвращает метаданные вложения (`ChatAttachment`: `url`, `name`, `size`,
+  `mime`). URL относительный — клиент строит абсолютную ссылку через
+  `mediaBaseUrl` (адрес сервера), который хук тоже возвращает. Файлы живут
+  вместе с комнатой и удаляются при её уничтожении.
 - **`markChatRead(ts)`** — сообщает серверу (`chatRead`), что локальный
   пользователь прочитал чат до момента `ts`; сервер рассылает это другим, чтобы
   их сообщения сменили статус на «прочитано». Маркеры двигаются только вперёд.
@@ -127,6 +146,12 @@
   стороне компонента) для тех, кто подключится позже;
 - **`subscribeWhiteboardChange(fn)`** — регистрирует обработчик входящих
   удалённых diff'ов, возвращает функцию отписки.
+
+Тот же модуль (`mediasoup/use-whiteboard.ts`) отдаёт API **аннотаций поверх
+демонстрации экрана**: `sendAnnotationStroke` / `sendAnnotationClear` и
+подписки `subscribeAnnotationStroke` / `subscribeAnnotationClear`. Штрихи —
+векторы в нормализованных координатах, эфемерные (не сохраняются на сервере);
+используются компонентом `stream-annotation-canvas.tsx` (см. [`desktop.md`](./desktop.md)).
 
 Сам компонент доски — `components/whiteboard.tsx`. Локальные правки слушаются
 через `editor.store.listen({ source: "user" })` и рассылаются; удалённые diff'ы

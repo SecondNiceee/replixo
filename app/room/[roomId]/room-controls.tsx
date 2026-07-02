@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, SquarePen, Presentation, Pencil,
+  ChevronUp, SquarePen, Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
