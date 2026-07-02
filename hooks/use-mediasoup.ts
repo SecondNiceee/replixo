@@ -856,6 +856,50 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           }
 
           await setupTransports(socket, device, data.existingPeers)
+
+          // ---------------------------------------------------------------
+          // Catch-up publish: если пользователь включил камеру/микрофон ДО
+          // того как send-транспорт был создан, produce() мог быть пропущен.
+          // Публикуем такие «осиротевшие» живые треки сейчас, чтобы все
+          // остальные участники (включая тех, кто зайдёт позже) их получили.
+          // ---------------------------------------------------------------
+          const st = sendTransportRef.current
+          if (st) {
+            const pendingVideo = localStreamRef.current?.getVideoTracks()[0]
+            if (pendingVideo && pendingVideo.readyState === "live" && !videoProducerRef.current) {
+              try {
+                const producer = await (st as ReturnType<DeviceType["createSendTransport"]>).produce({
+                  track: pendingVideo,
+                  ...CAMERA_PRODUCE_OPTIONS,
+                })
+                videoProducerRef.current = producer
+                if (!pendingVideo.enabled) producer.pause()
+              } catch (e) {
+                console.error("[useMediasoup] catch-up video publish failed:", e)
+              }
+            }
+            const pendingAudio = localStreamRef.current?.getAudioTracks()[0]
+            if (pendingAudio && pendingAudio.readyState === "live" && !audioProducerRef.current) {
+              try {
+                const producer = await (st as ReturnType<DeviceType["createSendTransport"]>).produce({
+                  track: pendingAudio,
+                  codecOptions: { opusFec: true, opusDtx: true },
+                })
+                audioProducerRef.current = producer
+                if (!pendingAudio.enabled) {
+                  producer.pause()
+                  socket.emit("pauseProducer", {
+                    roomId,
+                    peerId: peerId.current,
+                    producerId: producer.id,
+                    paused: true,
+                  })
+                }
+              } catch (e) {
+                console.error("[useMediasoup] catch-up audio publish failed:", e)
+              }
+            }
+          }
         },
       )
     }
@@ -920,7 +964,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               const newSendTransport = sendTransportRef.current
               if (!newSendTransport) return
 
-              if (hadMic) {
+              // `!ref.current` — защита от двойной публикации: catch-up
+              // publish внутри doJoinSequence мог уже опубликовать треки.
+              if (hadMic && !audioProducerRef.current) {
                 const audioTrack = localStreamRef.current?.getAudioTracks()[0]
                 if (audioTrack) {
                   // Ensure track is enabled regardless of previous mute state ���
@@ -945,7 +991,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                 }
               }
 
-              if (hadCam) {
+              if (hadCam && !videoProducerRef.current) {
                 const videoTrack = localStreamRef.current?.getVideoTracks()[0]
                 if (videoTrack) {
                   videoTrack.enabled = true
@@ -1007,21 +1053,24 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // New remote producer appeared
     socket.on("newProducer", async ({ peerId: remotePeerId, displayName: remoteName, producerId, kind, appData }) => {
       // The recv transport may not be ready yet (e.g. we got newProducer before
-      // setupTransports finished). Poll with a hard timeout of 5 s (20 × 250 ms)
+      // setupTransports finished). Poll with a hard timeout of 15 s (60 × 250 ms)
       // rather than an open-ended loop so we never leak a dangling callback.
+      // 15 s covers slow TURN/ICE gathering on restrictive networks — with the
+      // old 5 s limit a slowly-joining desktop client could permanently miss
+      // another peer's already-enabled camera.
       const waitForTransport = (): Promise<boolean> =>
         new Promise((resolve) => {
           if (recvTransportRef.current) { resolve(true); return }
           let attempts = 0
           const id = setInterval(() => {
             if (recvTransportRef.current) { clearInterval(id); resolve(true); return }
-            if (++attempts >= 20) { clearInterval(id); resolve(false) }
+            if (++attempts >= 60) { clearInterval(id); resolve(false) }
           }, 250)
         })
 
       const ready = await waitForTransport()
       if (!ready) {
-        console.warn("[useMediasoup] newProducer: recv transport not ready after 5s — skipping", producerId)
+        console.warn("[useMediasoup] newProducer: recv transport not ready after 15s — skipping", producerId)
         return
       }
       await consumeProducer(remotePeerId, remoteName, producerId, kind as "audio" | "video", appData)
@@ -1227,6 +1276,26 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   }, [roomId])
 
   // -------------------------------------------------------------------------
+  // Ожидание готовности send-транспорта.
+  //
+  // Пользователь может нажать «включить камеру/микрофон» сразу после входа в
+  // комнату, пока транспорты ещё создаются (createWebRtcTransport — это
+  // сетевые round-trip'ы). Раньше produce() в этом случае ТИХО пропускался:
+  // локально камера выглядела включённой (превью работает), но producer так и
+  // не создавался — и все, кто заходил позже, никогда не видели видео.
+  // -------------------------------------------------------------------------
+  const waitForSendTransport = useCallback((timeoutMs = 15000): Promise<Transport | null> => {
+    return new Promise((resolve) => {
+      if (sendTransportRef.current) { resolve(sendTransportRef.current); return }
+      const started = Date.now()
+      const id = setInterval(() => {
+        if (sendTransportRef.current) { clearInterval(id); resolve(sendTransportRef.current); return }
+        if (Date.now() - started >= timeoutMs) { clearInterval(id); resolve(null) }
+      }, 200)
+    })
+  }, [])
+
+  // -------------------------------------------------------------------------
   // Toggle mic — requests permission on first use
   // -------------------------------------------------------------------------
   const toggleMic = useCallback(async () => {
@@ -1248,18 +1317,23 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         setPermissionError(null)
         const track = micStream.getAudioTracks()[0]
         stream.addTrack(track)
-        if (sendTransport) {
+        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
+        // Транспорт может быть ещё не готов (клик сразу после входа) — ждём
+        // его вместо тихого пропуска publish'а.
+        const transport = sendTransport ?? (await waitForSendTransport())
+        if (transport && !audioProducerRef.current && track.readyState === "live") {
           // Negotiate FEC + DTX with the router. FEC lets the receiver
           // reconstruct a lost packet from redundancy in the next packet —
           // critical on inter-city paths with 2–5 % loss. DTX cuts bitrate
           // during silence, reducing congestion-driven loss overall.
-          const producer = await (sendTransport as ReturnType<DeviceType["createSendTransport"]>).produce({
+          const producer = await (transport as ReturnType<DeviceType["createSendTransport"]>).produce({
             track,
             codecOptions: { opusFec: true, opusDtx: true },
           })
           audioProducerRef.current = producer
+        } else if (!transport) {
+          console.warn("[useMediasoup] toggleMic: send transport not ready — will publish after join completes")
         }
-        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
       } catch (err) {
         const name = (err as { name?: string })?.name
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
@@ -1296,7 +1370,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     }
 
     dispatch({ type: "TOGGLE_MIC", isMuted: !nextEnabled })
-  }, [roomId])
+  }, [roomId, waitForSendTransport])
 
   // Switch to a different microphone device mid-call
   const switchMic = useCallback(async (deviceId: string) => {
@@ -1350,14 +1424,20 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         setPermissionError(null)
         const track = camStream.getVideoTracks()[0]
         stream.addTrack(track)
-        // Publish the track if transport is ready.
-        // Camera uses simulcast so weak/remote receivers can drop to a lower
-        // spatial layer instead of stalling the whole stream.
-        if (sendTransport) {
-          const producer = await sendTransport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
-          videoProducerRef.current = producer
-        }
         dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })
+        // Publish the track. Camera uses simulcast so weak/remote receivers can
+        // drop to a lower spatial layer instead of stalling the whole stream.
+        // ВАЖНО: транспорт может быть ещё не готов (клик сразу после входа) —
+        // ждём его вместо тихого пропуска. Раньше здесь была гонка: превью
+        // включалось, но producer не создавался, и другие участники НИКОГДА
+        // не видели камеру.
+        const transport = sendTransport ?? (await waitForSendTransport())
+        if (transport && !videoProducerRef.current && track.readyState === "live") {
+          const producer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
+          videoProducerRef.current = producer
+        } else if (!transport) {
+          console.warn("[useMediasoup] toggleCam: send transport not ready — will publish after join completes")
+        }
       } catch (err) {
         const name = (err as { name?: string })?.name
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
@@ -1388,7 +1468,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     }
 
     dispatch({ type: "TOGGLE_CAM", isOff: true })
-  }, [])
+  }, [roomId, waitForSendTransport])
 
   // -------------------------------------------------------------------------
   // Screen sharing
