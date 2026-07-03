@@ -13,7 +13,9 @@
 доску. Вызывается на странице комнаты: `useMediasoup(roomId, displayName, create)`.
 
 Код разбит на модули в папке `hooks/mediasoup/`, а сам `use-mediasoup.ts` —
-тонкий оркестратор (join/leave, socket-подписки, восстановление соединения):
+тонкий оркестратор (join/leave, восстановление соединения, обработчики
+`connect`/`connect_error`); регистрация остальных socket-событий вынесена в
+`mediasoup/register-socket-listeners.ts`:
 
 | Модуль | Назначение |
 |---|---|
@@ -23,6 +25,7 @@
 | `mediasoup/use-media-controls.ts` | Микрофон, камера, демонстрация экрана, качество, `permissionError`. |
 | `mediasoup/use-chat.ts` | Отправка сообщений, загрузка вложений (`uploadChatFile`), маркеры прочтения. |
 | `mediasoup/use-whiteboard.ts` | Доска (open/close/diff/snapshot) и аннотации поверх экрана. |
+| `mediasoup/register-socket-listeners.ts` | Регистрация доменных socket-событий комнаты (peers, producers, чат, доска, аннотации, `kicked`). Вызывается из `join()`; обработчики `connect`/`connect_error` остаются в `use-mediasoup.ts`, т.к. запускают join/rejoin. |
 
 > Примечание: `mediasoup-client` загружается **лениво** (`await import(...)`)
 > внутри `join()`, потому что это CJS-бандл с циклическими зависимостями,
@@ -57,8 +60,10 @@
 
 1. Создаётся пустой `MediaStream` (без запроса камеры/микрофона — их пользователь
    включает вручную).
-2. Открывается socket-соединение к `NEXT_PUBLIC_MEDIASOUP_URL`
-   (по умолчанию `http://localhost:3001`), транспорты — websocket с fallback на
+2. Открывается socket-соединение к `SERVER_URL` (из
+   `NEXT_PUBLIC_MEDIASOUP_SERVER_URL`, по умолчанию `http://localhost:3001`;
+   этот же адрес возвращается как `mediaBaseUrl` для ссылок на вложения),
+   транспорты — websocket с fallback на
    polling, бесконечные реконнекты с backoff (0.5–3 с).
 3. По событию `connect` создаётся mediasoup `Device`, отправляется `joinRoom`
    (с флагом `create`), в ответ приходят RTP-capabilities роутера и список уже

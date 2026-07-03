@@ -71,10 +71,16 @@
 │   └── room/[roomId]/               # Страница видеозвонка (набор компонентов)
 │       ├── page.tsx                 # Серверная обёртка
 │       ├── room-client.tsx          # Главный клиентский оркестратор
+│       ├── use-chat-panel.ts        # Хук UI-состояния чата (open, unread, хоткей, звук)
+│       ├── use-annotation-overlay.ts # Хук аннотаций + overlay-режима Electron
+│       ├── room-overlay-layer.tsx   # Overlay-слой Electron (холст + тулбар + контролы)
 │       ├── room-header.tsx          # Верхняя панель
 │       ├── room-controls.tsx        # Нижняя панель управления
 │       ├── room-video-grid.tsx      # Раскладки видео
-│       ├── room-chat.tsx            # Панель чата
+│       ├── room-chat.tsx            # Панель чата (оболочка)
+│       ├── chat-message-list.tsx    # Лента сообщений чата
+│       ├── chat-attachment-view.tsx # Отрисовка вложения в сообщении
+│       ├── chat-helpers.ts          # Утилиты чата (цвет имени, формат времени/размера)
 │       ├── room-status.tsx          # Экраны состояний
 │       ├── floating-chat-button.tsx # Плавающая кнопка чата
 │       ├── room-settings-dialog.tsx # Настройки (чат + звуки)
@@ -103,7 +109,8 @@
 │   │   ├── use-transports.ts        # Транспорты, consume, ICE restart
 │   │   ├── use-media-controls.ts    # Микрофон, камера, демонстрация экрана
 │   │   ├── use-chat.ts              # Чат, вложения, маркеры прочтения
-│   │   └── use-whiteboard.ts        # Доска и аннотации поверх экрана
+│   │   ├── use-whiteboard.ts        # Доска и аннотации поверх экрана
+│   │   └── register-socket-listeners.ts # Регистрация доменных socket-событий комнаты
 │   ├── use-audio-devices.ts         # Список доступных микрофонов
 │   ├── use-speaking.ts              # Детектор «говорит сейчас»
 │   ├── use-overlay-click-through.ts # Click-through в overlay-режиме (Electron)

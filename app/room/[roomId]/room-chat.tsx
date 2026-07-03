@@ -3,19 +3,18 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import {
   SendHorizonal,
-  Check,
-  CheckCheck,
   ChevronRight,
   Paperclip,
   X,
   FileText,
-  Download,
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ChatMessage, ChatAttachment } from "@/hooks/use-mediasoup"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
+import { ChatMessageList } from "./chat-message-list"
+import { formatFileSize, isImageAttachment } from "./chat-helpers"
 
 interface RoomChatProps {
   open: boolean
@@ -34,102 +33,6 @@ interface RoomChatProps {
   // Currently connected remote peer ids, used to decide when a message has
   // been read by everyone else in the room.
   peerIds: string[]
-}
-
-// Stable per-name color so each participant's name reads consistently.
-const NAME_COLORS = [
-  "text-sky-400",
-  "text-emerald-400",
-  "text-amber-400",
-  "text-rose-400",
-  "text-violet-400",
-  "text-teal-400",
-]
-
-function colorForPeer(peerId: string): string {
-  let hash = 0
-  for (let i = 0; i < peerId.length; i++) {
-    hash = (hash * 31 + peerId.charCodeAt(i)) >>> 0
-  }
-  return NAME_COLORS[hash % NAME_COLORS.length]
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} КБ`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
-}
-
-function isImageAttachment(a: ChatAttachment): boolean {
-  return a.mime.startsWith("image/")
-}
-
-// A message is "read" once every currently-connected peer has a read marker at
-// or beyond its timestamp. With no other peers in the room it stays "delivered".
-function isReadByEveryone(
-  messageTs: number,
-  peerIds: string[],
-  readMarkers: Record<string, number>,
-): boolean {
-  if (peerIds.length === 0) return false
-  return peerIds.every((id) => (readMarkers[id] ?? 0) >= messageTs)
-}
-
-// Renders an attachment inside a message bubble: image preview for images,
-// a downloadable file card for everything else.
-function AttachmentView({
-  attachment,
-  mediaBaseUrl,
-  self,
-}: {
-  attachment: ChatAttachment
-  mediaBaseUrl: string
-  self: boolean
-}) {
-  const href = `${mediaBaseUrl}${attachment.url}`
-  if (isImageAttachment(attachment)) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block overflow-hidden rounded-xl border border-border/60"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={href || "/placeholder.svg"}
-          alt={attachment.name}
-          className="max-h-60 w-full max-w-[260px] object-cover"
-          loading="lazy"
-        />
-      </a>
-    )
-  }
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      download={attachment.name}
-      className={cn(
-        "flex max-w-[260px] items-center gap-3 rounded-xl border border-border/60 px-3 py-2 transition-colors",
-        self ? "bg-primary-foreground/10 hover:bg-primary-foreground/20" : "bg-background hover:bg-muted",
-      )}
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <FileText className="size-4" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm font-medium">{attachment.name}</span>
-        <span className="text-[11px] opacity-70">{formatFileSize(attachment.size)}</span>
-      </span>
-      <Download className="size-4 shrink-0 opacity-70" />
-    </a>
-  )
 }
 
 export function RoomChat({
@@ -275,71 +178,13 @@ export function RoomChat({
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-center">
-            <p className="text-pretty text-sm text-muted-foreground">
-              Сообщений пока нет. Напишите первым!
-            </p>
-          </div>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {messages.map((m, i) => {
-              const hasUnread = unreadFromIndex !== null
-              const isFirstUnread = hasUnread && i === unreadFromIndex
-              const isUnread = hasUnread && i >= (unreadFromIndex as number)
-              return (
-                <li key={m.id} className="flex flex-col gap-3">
-                  {isFirstUnread && (
-                    <div className="flex items-center gap-2" aria-hidden="true">
-                      <span className="h-px flex-1 bg-primary/40" />
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-primary">
-                        Новые сообщения
-                      </span>
-                      <span className="h-px flex-1 bg-primary/40" />
-                    </div>
-                  )}
-                  <div className={cn("flex flex-col gap-0.5", m.self ? "items-end" : "items-start")}>
-                    <div className="flex items-baseline gap-2">
-                      <span
-                        className={cn(
-                          "text-xs font-medium",
-                          m.self ? "text-muted-foreground" : colorForPeer(m.peerId),
-                        )}
-                      >
-                        {m.self ? "Вы" : m.displayName}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/70">{formatTime(m.timestamp)}</span>
-                      {m.self &&
-                        (isReadByEveryone(m.timestamp, peerIds, readMarkers) ? (
-                          <CheckCheck className="size-3 text-sky-400" aria-label="Прочитано" />
-                        ) : (
-                          <Check className="size-3 text-muted-foreground/70" aria-label="Доставлено" />
-                        ))}
-                    </div>
-                    <div
-                      className={cn(
-                        "flex max-w-[85%] flex-col gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed transition-shadow",
-                        m.self
-                          ? "rounded-br-sm bg-primary text-primary-foreground"
-                          : "rounded-bl-sm bg-secondary text-secondary-foreground",
-                        isUnread && !m.self && "ring-1 ring-primary/50",
-                      )}
-                    >
-                      {m.attachment && (
-                        <AttachmentView
-                          attachment={m.attachment}
-                          mediaBaseUrl={mediaBaseUrl}
-                          self={m.self}
-                        />
-                      )}
-                      {m.text && <span className="whitespace-pre-wrap break-words">{m.text}</span>}
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <ChatMessageList
+          messages={messages}
+          mediaBaseUrl={mediaBaseUrl}
+          unreadFromIndex={unreadFromIndex}
+          readMarkers={readMarkers}
+          peerIds={peerIds}
+        />
       </div>
 
       {/* Pending attachment / upload status */}

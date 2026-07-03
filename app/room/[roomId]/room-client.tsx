@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState, useCallback, useRef, useEffect } from "react"
+import { useState, useCallback } from "react"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
@@ -12,14 +12,13 @@ import { RoomControls } from "./room-controls"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
-import { OverlayControls } from "@/components/overlay-controls"
 import { AnnotationToolbar } from "@/components/annotation-toolbar"
-import { StreamAnnotationCanvas, type AnnotationTool } from "@/components/stream-annotation-canvas"
+import { RoomOverlayLayer } from "./room-overlay-layer"
 import { ChevronRight } from "lucide-react"
-import { playMessageSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
-import { useChatButtonStore } from "@/stores/chat-button-store"
-import { useOverlayMouseManager, OVERLAY_INTERACTIVE_ATTR } from "@/hooks/use-overlay-click-through"
+import { OVERLAY_INTERACTIVE_ATTR } from "@/hooks/use-overlay-click-through"
+import { useChatPanel } from "./use-chat-panel"
+import { useAnnotationOverlay } from "./use-annotation-overlay"
 
 import dynamic from "next/dynamic"
 
@@ -88,148 +87,27 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
 
-  // Screen-share annotation (рисование поверх стрима). Доступно только пока идёт
-  // демонстрация экрана — своя или чужая. Холст накладывается на тайлы экрана в
-  // RoomVideoGrid; штрихи рассылаются всем и видны у каждого участника.
-  const hasRemoteScreen = [...peers.values()].some((p) => p.screenStream != null)
-  const canAnnotate = isScreenSharing || hasRemoteScreen
-  const [annotationActive, setAnnotationActive] = useState(false)
-  const [annotationTool, setAnnotationTool] = useState<AnnotationTool>("pen")
-  const [annotationColor, setAnnotationColor] = useState("#ef4444")
-  // Bump to broadcast a full clear of all annotations.
-  const [annotationClearSignal, setAnnotationClearSignal] = useState(0)
+  // Annotation (drawing over the shared screen) + Electron overlay lifecycle.
+  const {
+    canAnnotate,
+    annotationActive,
+    annotationTool,
+    annotationColor,
+    annotationClearSignal,
+    setAnnotationTool,
+    setAnnotationColor,
+    setAnnotationActive,
+    toggleAnnotation,
+    triggerAnnotationClear,
+    isElectron,
+    overlayMode,
+  } = useAnnotationOverlay({ isScreenSharing, peers })
 
-  // If the screen share ends, leave annotation mode so a dead canvas/toolbar
-  // doesn't linger.
-  useEffect(() => {
-    if (!canAnnotate && annotationActive) setAnnotationActive(false)
-  }, [canAnnotate, annotationActive])
-
-  const toggleAnnotation = useCallback(() => setAnnotationActive((v) => !v), [])
-
-  // Electron overlay-режим: активируется когда мы сами демонстрируем экран.
-  // Окно становится прозрачным и всегда поверх — видим только сайдбар + контролы.
-  const isElectron = typeof window !== "undefined" && !!window.electronAPI?.isElectron
-  const [overlayMode, setOverlayMode] = useState(false)
-
-  useEffect(() => {
-    if (!isElectron) return
-    if (isScreenSharing) {
-      // Сначала делаем документ прозрачным (data-overlay), затем растягиваем
-      // окно поверх экрана — чтобы не мелькнул непрозрачный фон.
-      document.documentElement.dataset.overlay = "1"
-      window.electronAPI!.enterOverlayMode()
-      setOverlayMode(true)
-    } else {
-      window.electronAPI!.exitOverlayMode()
-      delete document.documentElement.dataset.overlay
-      setOverlayMode(false)
-    }
-    return () => {
-      // Подстраховка при размонтировании (например, выход из комнаты во время показа)
-      delete document.documentElement.dataset.overlay
-    }
-  }, [isScreenSharing, isElectron])
-
-  // Глобальный менеджер click-through: пока активен overlay, клики проходят на
-  // рабочий стол, кроме интерактивных областей (контролы, сайдбар участников).
-  useOverlayMouseManager(overlayMode)
-
-  // Chat panel open state + unread counter. We track how many messages had been
-  // seen the last time the panel was open; anything beyond that is "unread".
-  const [chatOpen, setChatOpen] = useState(false)
-  const [seenCount, setSeenCount] = useState(0)
-  // Index of the first unread message captured at the moment the panel opens.
-  // Messages from this index onward get a subtle highlight inside the chat so
-  // it's easy to spot what arrived while you were away. null = nothing unread.
-  const [unreadFromIndex, setUnreadFromIndex] = useState<number | null>(null)
-  const unreadCount = chatOpen ? 0 : Math.max(0, messages.length - seenCount)
-
-  // While the chat is open, keep marking everything as seen so the badge stays
-  // cleared as new messages stream in.
-  useEffect(() => {
-    if (chatOpen) setSeenCount(messages.length)
-  }, [chatOpen, messages.length])
-
-  // Persist a read receipt to the server (and DB) whenever the chat panel is
-  // open and the tab is visible. We mark up to the newest message's timestamp,
-  // which broadcasts to peers so their messages flip to "read". Re-runs when new
-  // messages arrive while the panel is open, and when the tab becomes visible.
-  useEffect(() => {
-    if (!chatOpen || messages.length === 0) return
-    const markLatest = () => {
-      if (document.hidden) return
-      const last = messages[messages.length - 1]
-      if (last) markChatRead(last.timestamp)
-    }
-    markLatest()
-    document.addEventListener("visibilitychange", markLatest)
-    return () => document.removeEventListener("visibilitychange", markLatest)
-  }, [chatOpen, messages, markChatRead])
-
-  // Play a gentle chime for incoming messages when the user can't see them —
-  // i.e. the chat panel is closed OR the browser tab is in the background.
-  const prevMsgLenRef = useRef(messages.length)
-  useEffect(() => {
-    const prev = prevMsgLenRef.current
-    if (messages.length > prev) {
-      const arrived = messages.slice(prev)
-      const hasIncoming = arrived.some((m) => !m.self)
-      if (hasIncoming && (!chatOpen || document.hidden)) {
-        playMessageSound()
-      }
-    }
-    prevMsgLenRef.current = messages.length
-  }, [messages, chatOpen])
-
-  const toggleChat = useCallback(() => {
-    setChatOpen((open) => {
-      const next = !open
-      if (next) {
-        // Freeze the unread boundary so we can highlight what was missed.
-        setUnreadFromIndex(seenCount < messages.length ? seenCount : null)
-        setSeenCount(messages.length)
-      }
-      return next
-    })
-  }, [messages.length, seenCount])
-
-  const closeChat = useCallback(() => setChatOpen(false), [])
-
-  // Global hotkey to toggle the chat. The bound key (KeyboardEvent.code) lives
-  // in the persisted chat-button store and can be rebound from its settings.
-  // We ignore presses while typing in inputs/textareas/contenteditable so the
-  // shortcut never hijacks normal text entry (e.g. the chat composer itself).
-  const chatHotkey = useChatButtonStore((s) => s.hotkey)
-  useEffect(() => {
-    if (!chatHotkey) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.code !== chatHotkey) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      // Only skip the hotkey for keys that actually type a character (e.key
-      // of length 1, e.g. letters/digits) while focused in a text field, so
-      // we never hijack normal text entry in the chat composer. Non-text keys
-      // like Tab/Escape/F-keys (e.key.length > 1) must still toggle the chat
-      // even when the composer is focused — otherwise it could never be closed.
-      const isTypingKey = e.key.length === 1
-      if (isTypingKey) {
-        const t = e.target as HTMLElement | null
-        if (
-          t &&
-          (t.isContentEditable ||
-            t.tagName === "INPUT" ||
-            t.tagName === "TEXTAREA" ||
-            t.tagName === "SELECT")
-        ) {
-          return
-        }
-      }
-      e.preventDefault()
-      toggleChat()
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [chatHotkey, toggleChat])
+  // Chat panel state: open/close, unread counter, read receipts, chime, hotkey.
+  const { chatOpen, unreadCount, unreadFromIndex, toggleChat, closeChat } = useChatPanel({
+    messages,
+    markChatRead,
+  })
 
   const toggleWhiteboard = useCallback(() => {
     if (whiteboardOpen) {
@@ -249,6 +127,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     return <RoomStatus status={status} error={error} roomId={roomId} />
   }
 
+  const anyScreenShared = isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)
+
   return (
     <div className={cn(
       "relative flex flex-col overflow-hidden",
@@ -263,7 +143,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         <div className="relative z-50 flex items-center justify-between gap-3 bg-destructive/10 px-4 py-2 text-sm text-destructive border-b border-destructive/20">
           <span>
             {permissionError === "mic"
-              ? "Нет доступа к ��икрофону. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"
+              ? "Нет доступа к микрофону. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"
               : "Нет доступа к камере. Разрешите его в настройках браузера (возможно, вы нажали «Запретить» при запросе разрешения)"}
           </span>
           <button
@@ -285,9 +165,9 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           displayName={displayName}
           status={status}
           participantCount={peers.size + 1}
-          isFixed={isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)}
+          isFixed={anyScreenShared}
           chatOpen={chatOpen}
-          participantsOpen={!participantsHidden && (isScreenSharing || [...peers.values()].some((p) => p.screenStream != null))}
+          participantsOpen={!participantsHidden && anyScreenShared}
         />
       )}
 
@@ -376,7 +256,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
           OVERLAY_INTERACTIVE_ATTR: в overlay-режиме (Electron) панель и её
           стрелка-хэндл должны «ловить» клики, иначе hit-test через
-          elementFromPoint не найдёт инте��активный маркер и клик уйдёт сквозь
+          elementFromPoint не найдёт интерактивный маркер и клик уйдёт сквозь
           окно на рабочий стол. */}
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
@@ -428,68 +308,36 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             color={annotationColor}
             onToolChange={setAnnotationTool}
             onColorChange={setAnnotationColor}
-            onClear={() => setAnnotationClearSignal((n) => n + 1)}
+            onClear={triggerAnnotationClear}
             onClose={() => setAnnotationActive(false)}
           />
         </div>
       )}
 
       {/* Overlay-режим (Electron, мы демонстрируем экран): рисование поверх
-          рабочего стола. Полноэкранный прозрачный холст накладывается на весь
-          экран — в тех же нормализованных координатах, что и холст на тайле
-          экрана у остальных участников, поэтому штрихи совпадают у всех.
-
-          Click-through: обёртка помечена OVERLAY_INTERACTIVE_ATTR и pointer-
-          events:none, а сам <canvas> включает pointer-events только когда
-          рисование активно. Менеджер мыши (useOverlayMouseManager) делает
-          hit-test через elementFromPoint: пока рисование выключено — клики
-          проходят на рабочий стол; когда включено — окно перехватывает мышь и
-          можно рисовать. */}
+          рабочего стола. Полноэкранный прозрачный холст и контролы вынесены в
+          RoomOverlayLayer. */}
       {overlayMode && (
-        <>
-          <div
-            {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
-            className="pointer-events-none fixed inset-0 z-[9990]"
-          >
-            <StreamAnnotationCanvas
-              active={annotationActive}
-              tool={annotationTool}
-              color={annotationColor}
-              onStroke={sendAnnotationStroke}
-              onClear={sendAnnotationClear}
-              subscribeRemoteStroke={subscribeAnnotationStroke}
-              subscribeRemoteClear={subscribeAnnotationClear}
-              clearSignal={annotationClearSignal}
-            />
-          </div>
-
-          {/* Тулбар рисования — над панелью контролов */}
-          {annotationActive && (
-            <div
-              {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
-              className="pointer-events-none fixed bottom-24 left-1/2 z-[9999] -translate-x-1/2"
-            >
-              <AnnotationToolbar
-                tool={annotationTool}
-                color={annotationColor}
-                onToolChange={setAnnotationTool}
-                onColorChange={setAnnotationColor}
-                onClear={() => setAnnotationClearSignal((n) => n + 1)}
-                onClose={() => setAnnotationActive(false)}
-              />
-            </div>
-          )}
-
-          <OverlayControls
-            isMicMuted={isMicMuted}
-            isCamOff={isCamOff}
-            annotationActive={annotationActive}
-            onToggleAnnotation={toggleAnnotation}
-            onToggleMic={toggleMic}
-            onToggleCam={toggleCam}
-            onStopScreenShare={toggleScreenShare}
-          />
-        </>
+        <RoomOverlayLayer
+          annotationActive={annotationActive}
+          annotationTool={annotationTool}
+          annotationColor={annotationColor}
+          annotationClearSignal={annotationClearSignal}
+          onToolChange={setAnnotationTool}
+          onColorChange={setAnnotationColor}
+          onCloseAnnotation={() => setAnnotationActive(false)}
+          onToggleAnnotation={toggleAnnotation}
+          onClearAnnotation={triggerAnnotationClear}
+          sendAnnotationStroke={sendAnnotationStroke}
+          sendAnnotationClear={sendAnnotationClear}
+          subscribeAnnotationStroke={subscribeAnnotationStroke}
+          subscribeAnnotationClear={subscribeAnnotationClear}
+          isMicMuted={isMicMuted}
+          isCamOff={isCamOff}
+          onToggleMic={toggleMic}
+          onToggleCam={toggleCam}
+          onStopScreenShare={toggleScreenShare}
+        />
       )}
     </div>
   )
