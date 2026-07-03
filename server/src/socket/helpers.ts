@@ -6,13 +6,20 @@ import type { Server, Socket } from 'socket.io'
 
 export type Callback<T = void> = (err: string | null, data?: T) => void
 
-export function ack<T>(cb: Callback<T>, data: T): void {
-  cb(null, data)
+// NOTE: `cb` is typed as required, but at runtime a Socket.io client can emit an
+// event WITHOUT providing an acknowledgement callback. In that case `cb` is
+// `undefined`, and calling it would throw `TypeError: cb is not a function`.
+// Because ack()/err() are often called OUTSIDE the handler's try/catch (e.g. the
+// early `return err(...)` guards), that throw is uncaught and crashes the whole
+// Node process — taking down every room. Guarding with a typeof check makes a
+// missing ack a harmless no-op instead of a fatal error.
+export function ack<T>(cb: Callback<T> | undefined, data: T): void {
+  if (typeof cb === 'function') cb(null, data)
 }
 
-export function err(cb: Callback<never>, message: string): void {
+export function err(cb: Callback<never> | undefined, message: string): void {
   console.error(`[socket] Error: ${message}`)
-  cb(message)
+  if (typeof cb === 'function') cb(message)
 }
 
 /**
