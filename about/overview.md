@@ -38,7 +38,7 @@
 - `better-auth` — авторизация (email + пароль), сессии;
 - `drizzle-orm` + `pg` — PostgreSQL (схема в `lib/db/schema.ts`,
   миграции в `drizzle/`);
-- `nodemailer` / `resend` — письма для сброса пароля.
+- `nodemailer` — письма для сброса пароля.
 
 **Бэкенд видеосвязи (`server/`):**
 - Node.js + Express (health-check, загрузка/раздача вложений чата через
