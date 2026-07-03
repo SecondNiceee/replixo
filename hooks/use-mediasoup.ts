@@ -350,6 +350,41 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   }, [])
 
   // ---------------------------------------------------------------------------
+  // Fast leave on real tab/browser close
+  //
+  // A socket "disconnect" alone can't tell "user closed the tab" from "phone
+  // locked / network hiccup", so the server keeps a long grace window and other
+  // participants would see the person hang around for ~a minute. When the page
+  // is genuinely being unloaded the browser fires pagehide/beforeunload, so we
+  // send a reliable navigator.sendBeacon telling the server we're leaving — it
+  // then evicts us on a short window (~6s) instead of the full grace.
+  //
+  // We deliberately skip bfcache freezes (pagehide with event.persisted), which
+  // is what fires on mobile backgrounding / screen-lock — those must keep the
+  // long grace so a quick return doesn't kick the user out.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const sendLeaveBeacon = () => {
+      if (!hasJoinedRef.current) return
+      if (typeof navigator === "undefined" || !navigator.sendBeacon) return
+      const url = `${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/leave?peerId=${encodeURIComponent(peerIdRef.current)}`
+      try { navigator.sendBeacon(url) } catch { /* best-effort */ }
+    }
+    const onPageHide = (e: PageTransitionEvent) => {
+      if (e.persisted) return
+      sendLeaveBeacon()
+    }
+    const onBeforeUnload = () => { sendLeaveBeacon() }
+    window.addEventListener("pagehide", onPageHide)
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => {
+      window.removeEventListener("pagehide", onPageHide)
+      window.removeEventListener("beforeunload", onBeforeUnload)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId])
+
+  // ---------------------------------------------------------------------------
   // Return
   // ---------------------------------------------------------------------------
   return {
