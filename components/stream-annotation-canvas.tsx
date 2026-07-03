@@ -57,7 +57,7 @@ interface StreamAnnotationCanvasProps {
 const REF_WIDTH = 1000
 // Selectable pen thicknesses, as a fraction of the reference width (1000px).
 // The user picks one from the toolbar; the default is the middle option.
-export const PEN_WIDTH_OPTIONS = [0.002, 0.004, 0.008, 0.014] as const
+export const PEN_WIDTH_OPTIONS = [0.001, 0.004, 0.008, 0.014] as const
 export const DEFAULT_PEN_WIDTH = PEN_WIDTH_OPTIONS[1] // ~4px at 1000px
 const ERASER_WIDTH = 0.03 // ~30px at 1000px
 
