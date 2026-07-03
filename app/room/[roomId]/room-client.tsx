@@ -54,6 +54,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     localStream,
     isMicMuted,
     isCamOff,
+    isCamStarting,
     isScreenSharing,
     localScreenStream,
     toggleMic,
@@ -93,9 +94,11 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     annotationActive,
     annotationTool,
     annotationColor,
+    annotationPenWidth,
     annotationClearSignal,
     setAnnotationTool,
     setAnnotationColor,
+    setAnnotationPenWidth,
     setAnnotationActive,
     toggleAnnotation,
     triggerAnnotationClear,
@@ -200,6 +203,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
               active: annotationActive,
               tool: annotationTool,
               color: annotationColor,
+              penWidth: annotationPenWidth,
               onStroke: sendAnnotationStroke,
               onClear: sendAnnotationClear,
               subscribeRemoteStroke: subscribeAnnotationStroke,
@@ -227,6 +231,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           <RoomControls
             isMicMuted={isMicMuted}
             isCamOff={isCamOff}
+            isCamStarting={isCamStarting}
             isScreenSharing={isScreenSharing}
             screenQuality={screenQuality}
             micDevices={micDevices}
@@ -306,8 +311,10 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           <AnnotationToolbar
             tool={annotationTool}
             color={annotationColor}
+            penWidth={annotationPenWidth}
             onToolChange={setAnnotationTool}
             onColorChange={setAnnotationColor}
+            onPenWidthChange={setAnnotationPenWidth}
             onClear={triggerAnnotationClear}
             onClose={() => setAnnotationActive(false)}
           />
@@ -322,9 +329,11 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           annotationActive={annotationActive}
           annotationTool={annotationTool}
           annotationColor={annotationColor}
+          annotationPenWidth={annotationPenWidth}
           annotationClearSignal={annotationClearSignal}
           onToolChange={setAnnotationTool}
           onColorChange={setAnnotationColor}
+          onPenWidthChange={setAnnotationPenWidth}
           onCloseAnnotation={() => setAnnotationActive(false)}
           onToggleAnnotation={toggleAnnotation}
           onClearAnnotation={triggerAnnotationClear}

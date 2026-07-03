@@ -41,6 +41,9 @@ export function useMediaControls({
 }: UseMediaControlsParams) {
   const [permissionError, setPermissionError] = useState<string | null>(null)
   const [screenQuality, setScreenQualityState] = useState<ScreenQuality>("auto")
+  // True while the camera is being turned on (getUserMedia + publish can take a
+  // few seconds). The UI shows a loader on the camera button during this window.
+  const [isCamStarting, setIsCamStarting] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Wait for the send transport to be ready (user can click mic/cam before join)
@@ -144,6 +147,9 @@ export function useMediaControls({
     const existing = stream.getVideoTracks()[0]
 
     if (!existing) {
+      // Turning the camera ON — this can take a few seconds (permission prompt,
+      // device warm-up, publishing). Surface a loader on the button meanwhile.
+      setIsCamStarting(true)
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
         setPermissionError(null)
@@ -162,6 +168,8 @@ export function useMediaControls({
         } else {
           dispatch({ type: "ERROR", error: "Нет доступа к камере" })
         }
+      } finally {
+        setIsCamStarting(false)
       }
       return
     }
@@ -326,6 +334,7 @@ export function useMediaControls({
     permissionError,
     clearPermissionError: () => setPermissionError(null),
     screenQuality,
+    isCamStarting,
     toggleMic,
     switchMic,
     toggleCam,

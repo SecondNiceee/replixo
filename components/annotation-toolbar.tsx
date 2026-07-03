@@ -2,18 +2,24 @@
 
 import { Pencil, Eraser, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { AnnotationTool } from "@/components/stream-annotation-canvas"
+import { PEN_WIDTH_OPTIONS, type AnnotationTool } from "@/components/stream-annotation-canvas"
 
 // Compact floating toolbar shown while annotation mode is active. Lets the user
-// switch between pen/eraser, pick a colour, clear all annotations, or exit.
+// switch between pen/eraser, pick a colour, adjust pen thickness, clear all
+// annotations, or exit.
 
 const COLORS = ["#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#ffffff"] as const
+
+// Visual dot size (px) shown in the toolbar for each selectable pen thickness.
+const PEN_WIDTH_DOTS = [4, 7, 11, 16] as const
 
 interface AnnotationToolbarProps {
   tool: AnnotationTool
   color: string
+  penWidth: number
   onToolChange: (tool: AnnotationTool) => void
   onColorChange: (color: string) => void
+  onPenWidthChange: (width: number) => void
   onClear: () => void
   onClose: () => void
 }
@@ -21,8 +27,10 @@ interface AnnotationToolbarProps {
 export function AnnotationToolbar({
   tool,
   color,
+  penWidth,
   onToolChange,
   onColorChange,
+  onPenWidthChange,
   onClear,
   onClose,
 }: AnnotationToolbarProps) {
@@ -71,6 +79,37 @@ export function AnnotationToolbar({
             style={{ backgroundColor: c }}
           />
         ))}
+      </div>
+
+      <div className="mx-0.5 h-6 w-px bg-white/15" />
+
+      {/* Pen thickness */}
+      <div className="flex items-center gap-1">
+        {PEN_WIDTH_OPTIONS.map((w, i) => {
+          const selected = tool === "pen" && penWidth === w
+          return (
+            <button
+              key={w}
+              onClick={() => {
+                onPenWidthChange(w)
+                onToolChange("pen")
+              }}
+              aria-label={`Толщина ${i + 1}`}
+              className={cn(
+                "flex size-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10",
+                selected && "bg-white/15",
+              )}
+            >
+              <span
+                className={cn(
+                  "block rounded-full bg-white/70",
+                  selected && "bg-white",
+                )}
+                style={{ width: PEN_WIDTH_DOTS[i], height: PEN_WIDTH_DOTS[i] }}
+              />
+            </button>
+          )
+        })}
       </div>
 
       <div className="mx-0.5 h-6 w-px bg-white/15" />
