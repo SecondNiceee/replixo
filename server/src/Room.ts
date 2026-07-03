@@ -291,16 +291,28 @@ export class Room {
 
     await consumer.resume()
 
-    // Force a fresh keyframe as soon as a video consumer resumes. The consumer
-    // was created paused, so the producer's earlier keyframe(s) were never
-    // forwarded to this peer; without an explicit request the decoder can sit on
+    // Force a fresh keyframe once a video consumer resumes. The consumer was
+    // created paused, so the producer's earlier keyframe(s) were never forwarded
+    // to this peer; without an explicit request the decoder can sit on
     // undecodable inter-frames and render a black frame until the next natural
-    // keyframe. Requesting one here makes the picture appear immediately.
+    // keyframe (which is why toggling the sender's camera "fixes" it).
+    //
+    // A single request right after resume is unreliable: at that instant the
+    // recv transport may have only just connected and the keyframe request (a
+    // one-shot PLI/FIR) can be dropped before RTP is actually flowing, leaving
+    // the newcomer on a permanent black frame. So we retry a few times with
+    // increasing delays — the first request that lands after the path is live
+    // makes the picture appear, and the extras are cheap no-ops.
     if (consumer.kind === 'video') {
-      try {
-        await consumer.requestKeyFrame()
-      } catch {
-        // requestKeyFrame can throw if the consumer/producer closed meanwhile.
+      const requestKeyFrameSafely = () => {
+        if (consumer.closed) return
+        consumer.requestKeyFrame().catch(() => {
+          // Can reject if the consumer/producer closed meanwhile — ignore.
+        })
+      }
+      requestKeyFrameSafely()
+      for (const delay of [200, 600, 1200, 2500]) {
+        setTimeout(requestKeyFrameSafely, delay)
       }
     }
   }
