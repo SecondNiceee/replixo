@@ -3,10 +3,12 @@ import {
   rooms,
   peerSockets,
   clearPendingDisconnect,
-  setPendingDisconnect,
+  scheduleEviction,
   deletePendingDisconnect,
-  cleanupRoomIfEmpty,
+  evictPeer,
+  isClosing,
   DISCONNECT_GRACE_MS,
+  CLOSE_GRACE_MS,
 } from './room-registry'
 
 // ---------------------------------------------------------------------------
@@ -18,37 +20,13 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
 
   // -----------------------------------------------------------------------
   // Internal helper — remove a peer from its room and notify everyone.
+  // The heavy lifting (presenter cleanup, peerLeft broadcast, peerSockets +
+  // room cleanup) lives in evictPeer so the sendBeacon HTTP endpoint and the
+  // grace-window timers can reuse the exact same logic.
   // -----------------------------------------------------------------------
   function handleLeave(roomId: string, peerId: string): void {
-    // An explicit leave (or grace-window expiry) supersedes any pending timer.
-    clearPendingDisconnect(peerId)
-
-    const room = rooms.get(roomId)
-    if (!room) return
-
-    // If the leaving peer was the presenter, clear the slide state and notify.
-    // Use io.to() instead of socket.to() — handleLeave may be called from a
-    // grace-window setTimeout after the socket has already disconnected and
-    // left the room, in which case socket.to() would be a no-op.
-    if (room.currentSlide?.peerId === peerId) {
-      room.currentSlide = null
-      io.to(roomId).emit('presentationEnded', { peerId })
-    }
-
-    room.removePeer(peerId)
-    io.to(roomId).emit('peerLeft', { peerId })
+    evictPeer(io, roomId, peerId)
     socket.leave(roomId)
-
-    // Only clear the global peerSockets entry if this socket is still the
-    // authoritative one for that peerId (it won't be if a new tab already
-    // took over via the kick-duplicate logic above).
-    if (peerSockets.get(peerId) === socket.id) {
-      peerSockets.delete(peerId)
-    }
-
-    console.log(`[room] Peer ${peerId} left room ${roomId}`)
-    cleanupRoomIfEmpty(roomId)
-
     session.roomId = null
     session.peerId = null
   }
@@ -108,14 +86,18 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
     // fast reconnect), this stale socket must not touch the peer at all.
     if (peerSockets.get(peerId) !== socket.id) return
 
-    clearPendingDisconnect(peerId)
+    // If the client explicitly told us it was closing (sendBeacon on
+    // pagehide/beforeunload), evict on the short window so the other
+    // participants don't wait out the full grace period. Otherwise this looks
+    // like a network drop / phone lock and we keep the generous grace.
+    const graceMs = isClosing(peerId) ? CLOSE_GRACE_MS : DISCONNECT_GRACE_MS
     const timer = setTimeout(() => {
       deletePendingDisconnect(peerId)
       // Re-check: the peer may have reconnected on a new socket meanwhile.
       if (peerSockets.get(peerId) !== socket.id) return
       console.log(`[room] Peer ${peerId} did not return within grace window — evicting`)
-      handleLeave(roomId, peerId)
-    }, DISCONNECT_GRACE_MS)
-    setPendingDisconnect(peerId, timer)
+      evictPeer(io, roomId, peerId)
+    }, graceMs)
+    scheduleEviction(peerId, timer)
   })
 }

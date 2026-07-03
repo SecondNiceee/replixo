@@ -18,6 +18,7 @@ import {
   WINDOWS_INSTALLER_NAME,
 } from './config'
 import { setupSocketIO } from './socket'
+import { evictPeer, markClosing, scheduleEviction, CLOSE_GRACE_MS } from './socket/room-registry'
 import {
   ensureUploadRoot,
   ensureRoomDir,
@@ -168,7 +169,34 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // Socket.io
   // ---------------------------------------------------------------------------
-  setupSocketIO(httpServer, worker)
+  const io = setupSocketIO(httpServer, worker)
+
+  // ---------------------------------------------------------------------------
+  // "Я закрываю вкладку" — beacon от клиента (navigator.sendBeacon на
+  // pagehide/beforeunload). sendBeacon надёжно доставляется во время выгрузки
+  // страницы, в отличие от socket.emit. Мы НЕ удаляем участника мгновенно:
+  // ставим короткое окно CLOSE_GRACE_MS, чтобы перезагрузка страницы или
+  // случайный быстрый возврат успели отменить удаление через
+  // rejoinProbe/joinRoom. Реальное закрытие вкладки/браузера — никто не
+  // вернётся, и остальные увидят выход почти сразу (а не через полное
+  // grace-окно, как при обычном обрыве сети). sendBeacon шлёт POST; мы читаем
+  // peerId из query, тела нет — парсер не нужен.
+  // ---------------------------------------------------------------------------
+  app.post('/rooms/:roomId/leave', (req: Request, res: Response) => {
+    const { roomId } = req.params
+    const peerId = typeof req.query.peerId === 'string' ? req.query.peerId : ''
+    if (!isValidRoomId(roomId) || !peerId) {
+      res.status(204).end()
+      return
+    }
+    markClosing(peerId)
+    const timer = setTimeout(() => {
+      evictPeer(io, roomId, peerId)
+    }, CLOSE_GRACE_MS)
+    scheduleEviction(peerId, timer)
+    // Ответ телу sendBeacon не важен — отвечаем сразу.
+    res.status(204).end()
+  })
 
   // ---------------------------------------------------------------------------
   // Фоновая подчистка осиротевших вложений (защита диска от утечки места).
