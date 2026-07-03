@@ -9,6 +9,7 @@ import {
   isClosing,
   DISCONNECT_GRACE_MS,
   CLOSE_GRACE_MS,
+  CLEAN_CLOSE_GRACE_MS,
 } from './room-registry'
 
 // ---------------------------------------------------------------------------
@@ -75,8 +76,8 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   // cancel the eviction and media resumes seamlessly. Only if it never comes
   // back do we finally remove it.
   // -----------------------------------------------------------------------
-  socket.on('disconnect', () => {
-    console.log(`[socket] Client disconnected: ${socket.id}`)
+  socket.on('disconnect', (reason: string) => {
+    console.log(`[socket] Client disconnected: ${socket.id} (${reason})`)
     if (!session.roomId || !session.peerId) return
 
     const roomId = session.roomId
@@ -86,11 +87,29 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
     // fast reconnect), this stale socket must not touch the peer at all.
     if (peerSockets.get(peerId) !== socket.id) return
 
-    // If the client explicitly told us it was closing (sendBeacon on
-    // pagehide/beforeunload), evict on the short window so the other
-    // participants don't wait out the full grace period. Otherwise this looks
-    // like a network drop / phone lock and we keep the generous grace.
-    const graceMs = isClosing(peerId) ? CLOSE_GRACE_MS : DISCONNECT_GRACE_MS
+    // Choose how long to wait before evicting, most-decisive signal first:
+    //
+    //  1. Beacon received  -> the client positively told us it's closing.
+    //     Shortest window (CLOSE_GRACE_MS).
+    //  2. Clean socket close ("transport close" / a namespace disconnect) that
+    //     arrived with no ping-timeout latency -> the tab was almost certainly
+    //     closed/navigated away, even though no beacon made it. Short window
+    //     (CLEAN_CLOSE_GRACE_MS) so the other participants don't hang for a
+    //     minute, while still leaving room for a reload / network hand-off to
+    //     reconnect. This is the fix for "closed tab lingers ~2 min".
+    //  3. Anything else ("ping timeout", "transport error") -> looks like a
+    //     real network drop / phone lock. Keep the generous grace so a brief
+    //     outage doesn't kick the user (DISCONNECT_GRACE_MS).
+    const isCleanClose =
+      reason === 'transport close' ||
+      reason === 'client namespace disconnect' ||
+      reason === 'server namespace disconnect' ||
+      reason === 'forced close'
+    const graceMs = isClosing(peerId)
+      ? CLOSE_GRACE_MS
+      : isCleanClose
+        ? CLEAN_CLOSE_GRACE_MS
+        : DISCONNECT_GRACE_MS
     const timer = setTimeout(() => {
       deletePendingDisconnect(peerId)
       // Re-check: the peer may have reconnected on a new socket meanwhile.

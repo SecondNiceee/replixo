@@ -35,6 +35,17 @@ export const DISCONNECT_GRACE_MS = 45000
 // almost right away instead of waiting out the full grace window.
 export const CLOSE_GRACE_MS = 6000
 
+// Fallback window for a *clean* socket close that arrived WITHOUT a beacon.
+// When a tab/browser is closed, the WebSocket is closed gracefully and Socket.io
+// reports the disconnect reason as "transport close" / "client namespace
+// disconnect" — this fires immediately, with no ping-timeout latency. The beacon
+// is unreliable (it can be dropped on abrupt tab kills, some mobile browsers,
+// blocked requests, Electron, etc.), so we must NOT depend on it: a clean close
+// is itself strong evidence the user is gone. We still allow a small window so a
+// page reload or a mobile WiFi↔4G hand-off (which can also surface as a clean
+// close) has time to reconnect via rejoinProbe before we evict.
+export const CLEAN_CLOSE_GRACE_MS = 10000
+
 // peerIds that announced an intentional close. When such a peer's socket also
 // drops we use CLOSE_GRACE_MS instead of DISCONNECT_GRACE_MS.
 const closingPeers = new Set<string>()
