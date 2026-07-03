@@ -8,6 +8,26 @@ import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
 import { CAMERA_PRODUCE_OPTIONS } from "./types"
 
+// When capturing screen/system audio we must exclude the audio that originates
+// from THIS tab — i.e. our own WebRTC playback of the other participants. If we
+// don't, sharing the screen "with system sound" re-captures everyone else's
+// voices and streams them back, so a viewer ends up hearing their own voice
+// echoed with a delay. `restrictOwnAudio` (Chrome 141+, desktop) is the
+// purpose-built constraint for exactly this; on browsers/OSes that don't
+// support it we fall back to a plain audio request (no behaviour change there).
+function getScreenAudioConstraint(): boolean | MediaTrackConstraints {
+  try {
+    const supported = navigator.mediaDevices.getSupportedConstraints() as
+      MediaTrackSupportedConstraints & { restrictOwnAudio?: boolean }
+    if (supported.restrictOwnAudio) {
+      return { restrictOwnAudio: true } as MediaTrackConstraints
+    }
+  } catch {
+    /* getSupportedConstraints unavailable — fall through to plain audio */
+  }
+  return true
+}
+
 interface UseMediaControlsParams {
   roomId: string
   peerIdRef: React.MutableRefObject<string>
@@ -218,7 +238,7 @@ export function useMediaControls({
       const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current]
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: preset.video,
-        audio: true,
+        audio: getScreenAudioConstraint(),
       })
       screenStreamRef.current = displayStream
 
@@ -267,7 +287,7 @@ export function useMediaControls({
           const currentProducer = screenAudioProducerRef.current
           if (!currentProducer || currentProducer.closed || !screenVideoProducerRef.current) return
           try {
-            const freshStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: false })
+            const freshStream = await navigator.mediaDevices.getDisplayMedia({ audio: getScreenAudioConstraint(), video: false })
             const freshAudio = freshStream.getAudioTracks()[0]
             if (!freshAudio) { freshStream.getTracks().forEach((t) => t.stop()); return }
             await currentProducer.replaceTrack({ track: freshAudio })
