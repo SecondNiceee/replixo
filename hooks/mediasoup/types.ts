@@ -117,8 +117,38 @@ export function streamKeyFor(source: MediaSource, kind: "video" | "audio"): Stre
   return kind === "video" ? "videoStream" : "audioStream"
 }
 
-export const SERVER_URL =
-  process.env.NEXT_PUBLIC_MEDIASOUP_SERVER_URL ?? "http://localhost:3001"
+/**
+ * Резолвит URL Mediasoup/Socket.io сервера.
+ *
+ * Приоритет:
+ * 1. Явная переменная `NEXT_PUBLIC_MEDIASOUP_URL` (вшивается на этапе сборки).
+ * 2. В браузере на проде — тот же origin, что и приложение: nginx проксирует
+ *    `/socket.io/` на mediasoup, поэтому отдельный хост/порт не нужен.
+ * 3. Локальная разработка (localhost/127.0.0.1) — `http://localhost:3001`.
+ *
+ * Также поддерживается легаси-имя `NEXT_PUBLIC_MEDIASOUP_SERVER_URL`.
+ */
+function resolveServerUrl(): string {
+  const explicit =
+    process.env.NEXT_PUBLIC_MEDIASOUP_URL ??
+    process.env.NEXT_PUBLIC_MEDIASOUP_SERVER_URL
+  if (explicit && explicit.length > 0) {
+    return explicit.replace(/\/+$/, "")
+  }
+
+  if (typeof window !== "undefined") {
+    const { hostname, origin } = window.location
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:3001"
+    }
+    // Прод: коннектимся на тот же домен, nginx роутит /socket.io/ на mediasoup.
+    return origin
+  }
+
+  return "http://localhost:3001"
+}
+
+export const SERVER_URL = resolveServerUrl()
 
 export const PEER_ID_KEY = "replixo_peer_id"
 

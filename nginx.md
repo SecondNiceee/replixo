@@ -82,7 +82,19 @@ sudo systemctl reload nginx
 
 ## Важно
 
-- После настройки Nginx обнови `NEXT_PUBLIC_MEDIASOUP_URL` в `.env.local` на `https://replixo.ru` — Socket.io клиент будет коннектиться через `/socket.io/` на том же домене, без порта.
+- **Socket.io URL резолвится автоматически.** Клиент (`hooks/mediasoup/types.ts`,
+  функция `resolveServerUrl`) в проде по умолчанию коннектится на **тот же origin**,
+  что и приложение (`https://replixo.ru`), а nginx проксирует `/socket.io/` на
+  mediasoup. Поэтому отдельная переменная в проде **не обязательна** — достаточно,
+  чтобы nginx проксировал `/socket.io/` (см. конфиг выше).
+- Если хочешь задать URL сокет-сервера явно (например, mediasoup на другом домене),
+  выстави `NEXT_PUBLIC_MEDIASOUP_URL=https://replixo.ru`.
+  ⚠️ Это переменная `NEXT_PUBLIC_*` — она **вшивается в бандл на этапе `next build`**.
+  После её изменения нужно **пересобрать фронтенд** (`pnpm build`) и перезапустить,
+  иначе в браузере останется старое значение (частая причина `ws://localhost:3001`
+  на проде).
+- Легаси-имя `NEXT_PUBLIC_MEDIASOUP_SERVER_URL` всё ещё поддерживается как fallback,
+  но новое каноничное имя — `NEXT_PUBLIC_MEDIASOUP_URL`.
 - Убедись, что в `server/.env` переменная `CLIENT_ORIGIN` указывает на `https://replixo.ru`.
 - UDP-порты Mediasoup (по умолчанию `10000-10100`) должны быть открыты в firewall:
   ```bash
