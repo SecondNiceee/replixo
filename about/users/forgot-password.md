@@ -95,23 +95,33 @@ SMTP_PASS=<пароль приложения>
 
 ## Ручной сброс (для администратора)
 
-Если SMTP-сервер недоступен, администратор может сбросить пароль вручную через БД:
+Если SMTP-сервер недоступен, администратор может задать пароль вручную. Важно:
+Better Auth хранит пароль в `account.password` как **scrypt**-хэш (формат
+`salt:key`), а не bcrypt. Поэтому нельзя вставить в БД bcrypt-хэш — он не
+пройдёт проверку при входе. Совместимый хэш нужно сгенерировать через сам
+Better Auth.
+
+Генерация scrypt-хэша и обновление БД (Node.js, из корня проекта):
+```js
+import { auth } from '@/lib/auth'
+
+const ctx = await auth.$context
+const hash = await ctx.password.hash('ВременныйПароль123')
+console.log(hash) // salt:key — этот формат понимает Better Auth
+```
 
 ```sql
 -- 1. Найти userId
 SELECT id FROM "user" WHERE email = 'user@example.com';
 
--- 2. Обновить хэш пароля (генерируется отдельно, см. ниже)
+-- 2. Записать сгенерированный scrypt-хэш
 UPDATE account
-SET password = '$2a$10$...'
+SET password = '<scrypt-хэш из скрипта выше>'
 WHERE "userId" = '<id>' AND "providerId" = 'credential';
 ```
 
-Генерация нового bcrypt-хэша (Node.js):
-```js
-import bcrypt from 'bcryptjs'
-console.log(await bcrypt.hash('ВременныйПароль123', 10))
-```
+Проще и надёжнее — воспользоваться встроенным серверным API Better Auth
+(`ctx.internalAdapter` / `auth.api`), не трогая таблицы напрямую.
 
 ---
 

@@ -52,6 +52,28 @@ export function useTransports({
     }
   }, [iceRetryTimersRef])
 
+  // Resolves once the transport's ICE/DTLS is actually connected (or it closes,
+  // or we hit the timeout as a safety fallback). Used to avoid resuming a video
+  // consumer before its recv transport is ready — see consumeProducer below.
+  const waitForTransportConnected = useCallback(
+    (transport: Transport, timeoutMs = 8000): Promise<void> =>
+      new Promise((resolve) => {
+        if (transport.closed || transport.connectionState === "connected") { resolve(); return }
+        const started = Date.now()
+        const id = setInterval(() => {
+          if (
+            transport.closed ||
+            transport.connectionState === "connected" ||
+            Date.now() - started >= timeoutMs
+          ) {
+            clearInterval(id)
+            resolve()
+          }
+        }, 100)
+      }),
+    [],
+  )
+
   const restartIceForTransport = useCallback(
     (transport: Transport | null, attempt = 0) => {
       const socket = socketRef.current
@@ -300,6 +322,19 @@ export function useTransports({
             dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: true })
           }
 
+          // Wait until the recv transport is actually connected before resuming.
+          // The transport starts its DTLS/ICE handshake when the first consumer
+          // is created (the `consume` above), so on the very first stream in a
+          // room `connectionState` is still "connecting" here. mediasoup asks the
+          // producer for a keyframe the moment a consumer resumes — if we resume
+          // before the transport is connected that keyframe is dropped and the
+          // decoder is left waiting, which shows up as a permanent black frame
+          // until the next keyframe (e.g. after the sender toggles the camera).
+          // Gating resume on "connected" guarantees the keyframe lands on a live
+          // path. Subsequent consumers reuse the already-connected transport and
+          // resolve immediately.
+          await waitForTransportConnected(recvTransport)
+
           socket.emit("resumeConsumer", {
             roomId,
             peerId: peerIdRef.current,
@@ -309,7 +344,7 @@ export function useTransports({
       )
     },
     [roomId, peerIdRef, socketRef, deviceRef, recvTransportRef, consumersRef,
-     pendingClosedProducersRef, dispatch],
+     pendingClosedProducersRef, dispatch, waitForTransportConnected],
   )
 
   return { createTransport, setupTransports, consumeProducer, restartIceForTransport, clearIceRetry }

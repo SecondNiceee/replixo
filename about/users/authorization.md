@@ -58,7 +58,7 @@
 - password: `minLength={8}`
 
 Форма (`AuthForm`) используется на обеих страницах через проп
-`mode: 'sign-in' | 'sign-out'`; при `sign-in` поле username скрыто и рядом с
+`mode: 'sign-in' | 'sign-up'`; при `sign-in` поле username скрыто и рядом с
 паролем показана ссылка «Забыли пароль?».
 
 ## Смена username (`PATCH /api/user/username`)

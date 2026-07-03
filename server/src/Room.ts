@@ -290,6 +290,19 @@ export class Room {
     if (!consumer) throw new Error(`Consumer ${consumerId} not found`)
 
     await consumer.resume()
+
+    // Force a fresh keyframe as soon as a video consumer resumes. The consumer
+    // was created paused, so the producer's earlier keyframe(s) were never
+    // forwarded to this peer; without an explicit request the decoder can sit on
+    // undecodable inter-frames and render a black frame until the next natural
+    // keyframe. Requesting one here makes the picture appear immediately.
+    if (consumer.kind === 'video') {
+      try {
+        await consumer.requestKeyFrame()
+      } catch {
+        // requestKeyFrame can throw if the consumer/producer closed meanwhile.
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
