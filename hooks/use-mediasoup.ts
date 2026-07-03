@@ -249,8 +249,30 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           if (!newSendTransport) return
 
           if (hasMicRef.current && !audioProducerRef.current) {
-            const audioTrack = localStreamRef.current?.getAudioTracks()[0]
-            if (audioTrack) {
+            let audioTrack = localStreamRef.current?.getAudioTracks()[0]
+            // The previous mic track may have ended while we were disconnected
+            // (device change, OS reclaim, long background). Producing an ended
+            // track throws "InvalidStateError: track ended" and leaves us
+            // silent, so re-acquire a live one before publishing.
+            if (!audioTrack || audioTrack.readyState === "ended") {
+              try {
+                if (audioTrack) {
+                  audioTrack.stop()
+                  localStreamRef.current?.removeTrack(audioTrack)
+                }
+                const constraints: MediaStreamConstraints = {
+                  audio: selectedMicIdRef.current
+                    ? { deviceId: { exact: selectedMicIdRef.current } }
+                    : true,
+                }
+                const micStream = await navigator.mediaDevices.getUserMedia(constraints)
+                audioTrack = micStream.getAudioTracks()[0]
+                if (audioTrack) localStreamRef.current?.addTrack(audioTrack)
+              } catch {
+                audioTrack = undefined
+              }
+            }
+            if (audioTrack && audioTrack.readyState === "live") {
               audioTrack.enabled = true
               const producer = await newSendTransport.produce({
                 track: audioTrack,
@@ -269,7 +291,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
           if (hasCamRef.current && !videoProducerRef.current) {
             const videoTrack = localStreamRef.current?.getVideoTracks()[0]
-            if (videoTrack) {
+            if (videoTrack && videoTrack.readyState === "live") {
               const { CAMERA_PRODUCE_OPTIONS } = await import("./mediasoup/types")
               const producer = await newSendTransport.produce({ track: videoTrack, ...CAMERA_PRODUCE_OPTIONS })
               videoProducerRef.current = producer
