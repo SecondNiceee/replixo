@@ -214,6 +214,9 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 ## Связь с клиентом
 
 Все эти события вызываются из клиентского хука `useMediasoup`
-(см. [`client-logic.md`](./client-logic.md)). Клиент задаёт адрес сервера через
-`NEXT_PUBLIC_MEDIASOUP_URL`. Переменные окружения и запуск подробно описаны в
-корневом `README.md` проекта.
+(см. [`client-logic.md`](./client-logic.md)). Клиент задаёт адрес сервера для
+подключения к комнате через `NEXT_PUBLIC_MEDIASOUP_SERVER_URL`
+(`hooks/mediasoup/types.ts`). Отдельная переменная `NEXT_PUBLIC_MEDIASOUP_URL`
+используется только в `components/site-header.tsx` — для ссылки на скачивание
+Windows-установщика (`/download/windows` с того же сервера). Переменные
+окружения и запуск подробно описаны в корневом `README.md` проекта.
