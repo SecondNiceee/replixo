@@ -93,8 +93,9 @@ sudo systemctl reload nginx
   После её изменения нужно **пересобрать фронтенд** (`pnpm build`) и перезапустить,
   иначе в браузере останется старое значение (частая причина `ws://localhost:3001`
   на проде).
-- Легаси-имя `NEXT_PUBLIC_MEDIASOUP_SERVER_URL` всё ещё поддерживается как fallback,
-  но новое каноничное имя — `NEXT_PUBLIC_MEDIASOUP_URL`.
+- Единственное каноничное имя переменной для URL сокет/mediasoup сервера —
+  `NEXT_PUBLIC_MEDIASOUP_URL`. Старое `NEXT_PUBLIC_MEDIASOUP_SERVER_URL` из кода
+  удалено — если оно осталось в `.env`, его можно удалить.
 - Убедись, что в `server/.env` переменная `CLIENT_ORIGIN` указывает на `https://replixo.ru`.
 - UDP-порты Mediasoup (по умолчанию `10000-10100`) должны быть открыты в firewall:
   ```bash

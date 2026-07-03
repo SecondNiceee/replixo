@@ -60,10 +60,10 @@
 
 1. Создаётся пустой `MediaStream` (без запроса камеры/микрофона — их пользователь
    включает вручную).
-2. Открывается socket-соединение к `SERVER_URL` (из
-   `NEXT_PUBLIC_MEDIASOUP_SERVER_URL`, по умолчанию `http://localhost:3001`;
-   этот же адрес возвращается как `mediaBaseUrl` для ссылок на вложения),
-   транспорты — websocket с fallback на
+2. Открывается socket-соединение к `SERVER_URL` (резолвится в
+   `resolveServerUrl`: `NEXT_PUBLIC_MEDIASOUP_URL` → в проде тот же origin →
+   на localhost `http://localhost:3001`; этот же адрес возвращается как
+   `mediaBaseUrl` для ссылок на вложения), транспорты — websocket с fallback на
    polling, бесконечные реконнекты с backoff (0.5–3 с).
 3. По событию `connect` создаётся mediasoup `Device`, отправляется `joinRoom`
    (с флагом `create`), в ответ приходят RTP-capabilities роутера и список уже

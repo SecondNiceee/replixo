@@ -125,13 +125,9 @@ export function streamKeyFor(source: MediaSource, kind: "video" | "audio"): Stre
  * 2. В браузере на проде — тот же origin, что и приложение: nginx проксирует
  *    `/socket.io/` на mediasoup, поэтому отдельный хост/порт не нужен.
  * 3. Локальная разработка (localhost/127.0.0.1) — `http://localhost:3001`.
- *
- * Также поддерживается легаси-имя `NEXT_PUBLIC_MEDIASOUP_SERVER_URL`.
  */
 function resolveServerUrl(): string {
-  const explicit =
-    process.env.NEXT_PUBLIC_MEDIASOUP_URL ??
-    process.env.NEXT_PUBLIC_MEDIASOUP_SERVER_URL
+  const explicit = process.env.NEXT_PUBLIC_MEDIASOUP_URL
   if (explicit && explicit.length > 0) {
     return explicit.replace(/\/+$/, "")
   }
