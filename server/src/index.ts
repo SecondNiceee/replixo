@@ -18,7 +18,7 @@ import {
   WINDOWS_INSTALLER_NAME,
 } from './config'
 import { setupSocketIO } from './socket'
-import { evictPeer, markClosing, scheduleEviction, CLOSE_GRACE_MS } from './socket/room-registry'
+import { evictPeer, markClosing, scheduleEviction, peerSockets, CLOSE_GRACE_MS } from './socket/room-registry'
 import {
   ensureUploadRoot,
   ensureRoomDir,
@@ -191,6 +191,13 @@ async function main(): Promise<void> {
     }
     markClosing(peerId)
     const timer = setTimeout(() => {
+      // Спурьёзные pagehide/beforeunload (сворачивание вкладки на мобильном,
+      // переключение приложений и т.п.) не должны выкидывать активного
+      // участника. Удаляем ТОЛЬКО если сокет действительно пропал — при
+      // настоящем закрытии вкладки он отвалится в пределах CLOSE_GRACE_MS.
+      const activeSocketId = peerSockets.get(peerId)
+      const activeSocket = activeSocketId ? io.sockets.sockets.get(activeSocketId) : undefined
+      if (activeSocket && activeSocket.connected) return
       evictPeer(io, roomId, peerId)
     }, CLOSE_GRACE_MS)
     scheduleEviction(peerId, timer)

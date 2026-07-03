@@ -211,6 +211,16 @@ export function useTransports({
       sendTransportRef.current = send
       recvTransportRef.current = recv
 
+      // Register every existing peer FIRST, before consuming their producers.
+      // A peer sitting with mic muted and camera off has no producers, so if we
+      // only created peer entries while consuming media (as below) such peers
+      // would be invisible to a newcomer — they'd see fewer participants than
+      // everyone else. Dispatching PEER_JOINED here guarantees the roster is
+      // complete regardless of who is currently sending audio/video.
+      for (const { peerId: remotePeerId, displayName } of existingPeers) {
+        dispatch({ type: "PEER_JOINED", peerId: remotePeerId, displayName })
+      }
+
       await Promise.all(
         existingPeers.flatMap(({ peerId: remotePeerId, displayName, producers }) =>
           producers.map(({ producerId, kind, appData }) =>
