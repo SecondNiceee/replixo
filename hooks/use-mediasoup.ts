@@ -423,6 +423,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Media state
     isMicMuted: state.isMicMuted,
     isCamOff: state.isCamOff,
+    isCamStarting: mediaControls.isCamStarting,
     isScreenSharing: state.isScreenSharing,
     hasMic: state.hasMic,
     hasCam: state.hasCam,

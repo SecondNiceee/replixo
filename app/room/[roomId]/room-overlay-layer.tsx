@@ -9,9 +9,11 @@ interface RoomOverlayLayerProps {
   annotationActive: boolean
   annotationTool: AnnotationTool
   annotationColor: string
+  annotationPenWidth: number
   annotationClearSignal: number
   onToolChange: (tool: AnnotationTool) => void
   onColorChange: (color: string) => void
+  onPenWidthChange: (width: number) => void
   onCloseAnnotation: () => void
   onToggleAnnotation: () => void
   onClearAnnotation: () => void
@@ -40,9 +42,11 @@ export function RoomOverlayLayer({
   annotationActive,
   annotationTool,
   annotationColor,
+  annotationPenWidth,
   annotationClearSignal,
   onToolChange,
   onColorChange,
+  onPenWidthChange,
   onCloseAnnotation,
   onToggleAnnotation,
   onClearAnnotation,
@@ -66,6 +70,7 @@ export function RoomOverlayLayer({
           active={annotationActive}
           tool={annotationTool}
           color={annotationColor}
+          penWidth={annotationPenWidth}
           onStroke={sendAnnotationStroke}
           onClear={sendAnnotationClear}
           subscribeRemoteStroke={subscribeAnnotationStroke}
@@ -83,8 +88,10 @@ export function RoomOverlayLayer({
           <AnnotationToolbar
             tool={annotationTool}
             color={annotationColor}
+            penWidth={annotationPenWidth}
             onToolChange={onToolChange}
             onColorChange={onColorChange}
+            onPenWidthChange={onPenWidthChange}
             onClear={onClearAnnotation}
             onClose={onCloseAnnotation}
           />

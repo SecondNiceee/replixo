@@ -18,6 +18,7 @@ export interface VideoTileAnnotation {
   active: boolean
   tool: AnnotationTool
   color: string
+  penWidth: number
   onStroke: (stroke: AnnotationStroke) => void
   onClear: () => void
   subscribeRemoteStroke: (fn: (stroke: unknown) => void) => () => void
@@ -217,6 +218,7 @@ export function VideoTile({
             active={annotation.active}
             tool={annotation.tool}
             color={annotation.color}
+            penWidth={annotation.penWidth}
             onStroke={annotation.onStroke}
             onClear={annotation.onClear}
             subscribeRemoteStroke={annotation.subscribeRemoteStroke}

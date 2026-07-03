@@ -38,6 +38,9 @@ interface StreamAnnotationCanvasProps {
   active: boolean
   tool: AnnotationTool
   color: string
+  // Pen thickness as a fraction of the reference width (see PEN_WIDTH_OPTIONS).
+  // Optional so existing callers keep the default medium width.
+  penWidth?: number
   // Broadcast one stroke (incremental while drawing, final on pointer up).
   onStroke: (stroke: AnnotationStroke) => void
   // Broadcast a full clear.
@@ -52,13 +55,17 @@ interface StreamAnnotationCanvasProps {
 }
 
 const REF_WIDTH = 1000
-const PEN_WIDTH = 0.004 // ~4px at 1000px
+// Selectable pen thicknesses, as a fraction of the reference width (1000px).
+// The user picks one from the toolbar; the default is the middle option.
+export const PEN_WIDTH_OPTIONS = [0.002, 0.004, 0.008, 0.014] as const
+export const DEFAULT_PEN_WIDTH = PEN_WIDTH_OPTIONS[1] // ~4px at 1000px
 const ERASER_WIDTH = 0.03 // ~30px at 1000px
 
 export function StreamAnnotationCanvas({
   active,
   tool,
   color,
+  penWidth = DEFAULT_PEN_WIDTH,
   onStroke,
   onClear,
   subscribeRemoteStroke,
@@ -76,8 +83,10 @@ export function StreamAnnotationCanvas({
   // Keep latest tool/color in refs so pointer handlers don't need to rebind.
   const toolRef = useRef(tool)
   const colorRef = useRef(color)
+  const penWidthRef = useRef(penWidth)
   toolRef.current = tool
   colorRef.current = color
+  penWidthRef.current = penWidth
 
   // ----- Rendering ---------------------------------------------------------
   const render = useCallback(() => {
@@ -200,7 +209,7 @@ export function StreamAnnotationCanvas({
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         tool: toolRef.current,
         color: isEraser ? "#000000" : colorRef.current,
-        lineWidth: isEraser ? ERASER_WIDTH : PEN_WIDTH,
+        lineWidth: isEraser ? ERASER_WIDTH : penWidthRef.current,
         points: [pointFromEvent(e)],
       }
       drawingRef.current = stroke

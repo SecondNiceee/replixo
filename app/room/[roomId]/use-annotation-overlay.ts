@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react"
 import { useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
-import type { AnnotationTool } from "@/components/stream-annotation-canvas"
+import { DEFAULT_PEN_WIDTH, type AnnotationTool } from "@/components/stream-annotation-canvas"
 import type { RemotePeer } from "@/hooks/use-mediasoup"
 
 interface UseAnnotationOverlayArgs {
@@ -15,9 +15,11 @@ interface UseAnnotationOverlayResult {
   annotationActive: boolean
   annotationTool: AnnotationTool
   annotationColor: string
+  annotationPenWidth: number
   annotationClearSignal: number
   setAnnotationTool: (tool: AnnotationTool) => void
   setAnnotationColor: (color: string) => void
+  setAnnotationPenWidth: (width: number) => void
   setAnnotationActive: (active: boolean) => void
   toggleAnnotation: () => void
   triggerAnnotationClear: () => void
@@ -42,6 +44,7 @@ export function useAnnotationOverlay({
   const [annotationActive, setAnnotationActive] = useState(false)
   const [annotationTool, setAnnotationTool] = useState<AnnotationTool>("pen")
   const [annotationColor, setAnnotationColor] = useState("#ef4444")
+  const [annotationPenWidth, setAnnotationPenWidth] = useState<number>(DEFAULT_PEN_WIDTH)
   // Bump to broadcast a full clear of all annotations.
   const [annotationClearSignal, setAnnotationClearSignal] = useState(0)
 
@@ -87,9 +90,11 @@ export function useAnnotationOverlay({
     annotationActive,
     annotationTool,
     annotationColor,
+    annotationPenWidth,
     annotationClearSignal,
     setAnnotationTool,
     setAnnotationColor,
+    setAnnotationPenWidth,
     setAnnotationActive,
     toggleAnnotation,
     triggerAnnotationClear,

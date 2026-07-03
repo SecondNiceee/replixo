@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, SquarePen, Pencil,
+  ChevronUp, SquarePen, Pencil, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +27,8 @@ const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
 interface RoomControlsProps {
   isMicMuted: boolean
   isCamOff: boolean
+  // True while the camera is turning on — the camera button shows a loader.
+  isCamStarting: boolean
   isScreenSharing: boolean
   screenQuality: ScreenQuality
   micDevices: AudioDevice[]
@@ -52,6 +54,7 @@ interface RoomControlsProps {
 export function RoomControls({
   isMicMuted,
   isCamOff,
+  isCamStarting,
   isScreenSharing,
   screenQuality,
   micDevices,
@@ -148,13 +151,21 @@ export function RoomControls({
         variant="outline"
         size="icon"
         onClick={onToggleCam}
+        disabled={isCamStarting}
         className={cn(
           "size-12 rounded-full",
-          isCamOff && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+          isCamOff && !isCamStarting && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
         )}
-        aria-label={isCamOff ? "Включить камеру" : "Выключить камеру"}
+        aria-label={isCamStarting ? "Включение камеры…" : isCamOff ? "Включить камеру" : "Выключить камеру"}
+        aria-busy={isCamStarting}
       >
-        {isCamOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+        {isCamStarting ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : isCamOff ? (
+          <VideoOff className="size-5" />
+        ) : (
+          <Video className="size-5" />
+        )}
       </Button>
 
       {/* Screen share + quality picker */}
