@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   isElectron: true,
   platform: process.platform,
   getDesktopSources: () => ipcRenderer.invoke("get-desktop-sources"),
+  // Передаёт выбранный в кастомном пикере источник в main до вызова
+  // штатного navigator.mediaDevices.getDisplayMedia().
+  setDisplaySource: (sourceId) => ipcRenderer.invoke("set-display-source", sourceId),
   // Переход в прозрачный overlay-режим (демонстрация экрана)
   enterOverlayMode: () => ipcRenderer.send("enter-overlay-mode"),
   // Выход из overlay-режима (восстановление нормального окна)
