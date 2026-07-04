@@ -90,6 +90,14 @@ function patchElectronDisplayMedia() {
 
   const _original = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
 
+  // В Electron мы НЕ подменяем захват на legacy-getUserMedia(chromeMediaSource):
+  // тот путь игнорирует constraints (включая restrictOwnAudio), из-за чего в
+  // аудиодорожку экрана попадал звук самого звонка и зритель слышал себя (эхо).
+  //
+  // Вместо этого показываем свой кастомный пикер, передаём выбранный источник в
+  // main (setDisplayMediaRequestHandler), а затем вызываем НАСТОЯЩИЙ
+  // getDisplayMedia(constraints). Так Chromium честно применяет restrictOwnAudio
+  // и исключает наш собственный звук из системного loopback.
   navigator.mediaDevices.getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
     const sources = await window.electronAPI!.getDesktopSources()
 
@@ -103,26 +111,11 @@ function patchElectronDisplayMedia() {
       throw new DOMException("Screen share cancelled", "AbortError")
     }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: constraints?.audio
-        ? ({ mandatory: { chromeMediaSource: "desktop" } } as MediaTrackConstraints)
-        : false,
-      video: {
-        // @ts-expect-error — chromeMediaSource — нестандартное свойство Electron/Chrome
-        mandatory: {
-          chromeMediaSource: "desktop",
-          chromeMediaSourceId: sourceId,
-          minWidth: 1280,
-          maxWidth: 1920,
-          minHeight: 720,
-          maxHeight: 1080,
-          minFrameRate: 15,
-          maxFrameRate: 30,
-        },
-      },
-    })
+    // Сообщаем main, какой источник вернуть в setDisplayMediaRequestHandler
+    await window.electronAPI!.setDisplaySource(sourceId)
 
-    return stream
+    // Штатный путь: constraints (в т.ч. restrictOwnAudio) доходят до захвата
+    return _original(constraints)
   }
 
   navigator.mediaDevices.__electronPatched = true

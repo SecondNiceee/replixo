@@ -11,6 +11,8 @@ interface ElectronAPI {
   isElectron: true
   platform: string
   getDesktopSources: () => Promise<DesktopSource[]>
+  // Передаёт выбранный источник в main для setDisplayMediaRequestHandler
+  setDisplaySource: (sourceId: string) => Promise<boolean>
   // Overlay-режим (демонстрация экрана)
   enterOverlayMode: () => void
   exitOverlayMode: () => void
