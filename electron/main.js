@@ -112,24 +112,22 @@ function setupDesktopCapturer() {
   // ---------------------------------------------------------------------------
   // Нативный обработчик демонстрации экрана.
   //
-  // renderer вызывает настоящий navigator.mediaDevices.getDisplayMedia(),
-  // а мы лишь подставляем выбранный в кастомном пикере источник.
+  // Раньше renderer подменял getDisplayMedia() на legacy-getUserMedia c
+  // chromeMediaSource:"desktop". Этот старый путь захватывает системный звук
+  // целиком (loopback) и ПОЛНОСТЬЮ игнорирует constraints — в частности
+  // restrictOwnAudio. Из-за этого при "демонстрации со звуком" в аудиодорожку
+  // попадал звук самого звонка (голоса других участников, которые проигрываются
+  // на машине демонстрирующего), возвращался обратно, и зритель слышал самого
+  // себя с задержкой (эхо).
   //
-  // ВАЖНО про звук: в Electron единственный доступный способ захвата звука при
-  // демонстрации — audio:"loopback", то есть СИСТЕМНЫЙ звук целиком. В него
-  // неизбежно попадает и звук самого звонка (голоса участников, которые
-  // проигрываются в динамиках демонстрирующего). Constraint restrictOwnAudio,
-  // который в браузере исключает собственный звук вкладки, для системного
-  // loopback НЕ применяется — Chromium не может вычесть звук конкретного
-  // приложения из общего системного микса. В результате голоса участников
-  // возвращались обратно, и зритель слышал самого себя с задержкой (эхо).
-  //
-  // Поэтому на десктопе (Electron) демонстрация идёт БЕЗ системного звука:
-  // отдаём только видео (audio: undefined). Это гарантированно убирает эхо.
-  // Микрофон демонстрирующего при этом продолжает работать как обычно.
+  // Здесь мы используем штатный путь: renderer вызывает настоящий
+  // navigator.mediaDevices.getDisplayMedia(constraints), Chromium (в Electron 42
+  // это Chromium 148, где restrictOwnAudio уже поддержан) применяет
+  // restrictOwnAudio к аудиодорожке, а мы лишь подставляем выбранный источник и
+  // включаем системный loopback только если звук действительно запрошен.
   // ---------------------------------------------------------------------------
   session.defaultSession.setDisplayMediaRequestHandler(
-    async (_request, callback) => {
+    async (request, callback) => {
       try {
         const sources = await desktopCapturer.getSources({ types: ["screen", "window"] })
         const chosen = sources.find((s) => s.id === pendingDisplaySourceId) || sources[0]
@@ -138,8 +136,9 @@ function setupDesktopCapturer() {
           callback({})
           return
         }
-        // Только видео экрана, без системного звука — иначе неизбежное эхо (см. выше).
-        callback({ video: chosen, audio: undefined })
+        // audio:"loopback" — системный звук; собственный звук вкладки исключает
+        // restrictOwnAudio (constraint из renderer), поэтому эха больше нет.
+        callback({ video: chosen, audio: request.audioRequested ? "loopback" : undefined })
       } catch {
         callback({})
       }
