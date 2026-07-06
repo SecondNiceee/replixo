@@ -26,6 +26,6 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Replixo
-  # Фиксированное имя установщика без пробелов и версии, чтобы ссылка
-  # /download/windows не ломалась при выходе новых версий.
-  artifactName: Replixo-Setup.exe
+  # Имя установщика без пробелов, чтобы ссылка /download/windows отдавала файл
+  # с корректным именем.
+  artifactName: Replixo-Setup-version-1.exe

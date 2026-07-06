@@ -255,6 +255,33 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   )
 
   // -----------------------------------------------------------------------
+  // requestConsumerKeyFrame  (client-driven black-frame recovery)
+  //
+  // Emitted by a viewer whose video consumer has resumed but is still showing
+  // a black frame (no decoded frames yet). We push a fresh keyframe on demand;
+  // the client keeps asking until its decoder actually produces a picture.
+  // -----------------------------------------------------------------------
+  socket.on(
+    'requestConsumerKeyFrame',
+    async (payload: ResumeConsumerPayload, callback?: Callback<void>) => {
+      const { roomId, peerId, consumerId } = payload
+
+      try {
+        const room = rooms.get(roomId)
+        if (!room) {
+          if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
+          return
+        }
+
+        await room.requestConsumerKeyFrame(peerId, consumerId)
+        if (callback) ack(callback, undefined)
+      } catch (e) {
+        if (callback) err(callback as Callback<never>, (e as Error).message)
+      }
+    },
+  )
+
+  // -----------------------------------------------------------------------
   // closeProducer  (e.g. stop screen sharing)
   // -----------------------------------------------------------------------
   socket.on(

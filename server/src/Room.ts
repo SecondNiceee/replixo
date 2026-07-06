@@ -318,6 +318,31 @@ export class Room {
   }
 
   // ---------------------------------------------------------------------------
+  // On-demand keyframe request.
+  //
+  // The fixed keyframe schedule in resumeConsumer() fires blind — it doesn't
+  // know whether the frames actually reached the viewer. On slow / TURN-relayed
+  // paths (common in the Electron desktop build) every one of those early
+  // PLI/FIR requests can be sent before RTP is truly flowing, so they're
+  // dropped and the newcomer is stuck on a permanent black frame while audio
+  // works fine. The client watches its own decoded-frame stats and calls this
+  // whenever the picture is still black, giving us a feedback loop: keep
+  // pushing fresh keyframes until one lands on a live path and the image
+  // appears. Cheap no-op once frames are flowing.
+  // ---------------------------------------------------------------------------
+  async requestConsumerKeyFrame(peerId: string, consumerId: string): Promise<void> {
+    const peer = this.peers.get(peerId)
+    if (!peer) return
+    const consumer = peer.getConsumer(consumerId)
+    if (!consumer || consumer.closed || consumer.kind !== 'video') return
+    try {
+      await consumer.requestKeyFrame()
+    } catch {
+      // consumer / producer may have closed meanwhile — ignore.
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Router capabilities
   // ---------------------------------------------------------------------------
 
