@@ -4,9 +4,6 @@ import { auth } from '@/lib/auth'
 import { Logo } from "@/components/logo"
 import { AuthButtons } from "@/components/auth-buttons"
 
-const MEDIASOUP_URL =
-  process.env.NEXT_PUBLIC_MEDIASOUP_URL ?? 'http://localhost:3001'
-
 export async function SiteHeader() {
   const session = await auth.api.getSession({ headers: await headers() })
   const user = session?.user
@@ -30,7 +27,7 @@ export async function SiteHeader() {
         </nav>
         <div className="flex items-center gap-2">
           <a
-            href={`${MEDIASOUP_URL}/download/windows`}
+            href="/download/windows"
             download="Replixo-Setup-version-1.exe"
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 active:scale-95"
           >
