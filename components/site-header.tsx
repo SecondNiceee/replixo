@@ -31,6 +31,7 @@ export async function SiteHeader() {
         <div className="flex items-center gap-2">
           <a
             href={`${MEDIASOUP_URL}/download/windows`}
+            download="Replixo-Setup-version-1.exe"
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-all hover:opacity-90 active:scale-95"
           >
             <Download className="size-4" aria-hidden="true" />

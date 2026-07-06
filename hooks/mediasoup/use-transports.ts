@@ -255,6 +255,63 @@ export function useTransports({
   )
 
   // ---------------------------------------------------------------------------
+  // Black-frame watchdog for a freshly-resumed video consumer.
+  //
+  // A newcomer consuming an already-running camera gets its consumer created
+  // paused, then resumed. mediasoup requests a keyframe on resume (and the
+  // server retries on a fixed schedule), but on slow / TURN-relayed paths —
+  // very common in the Electron desktop build — those early keyframe requests
+  // can all fire before RTP is actually flowing and get dropped, leaving the
+  // viewer on a permanent black frame while audio plays fine.
+  //
+  // The reliable fix is a feedback loop: watch this consumer's own decoded-
+  // frame stats and, while no frame has decoded yet, keep asking the server to
+  // push a fresh keyframe. As soon as `framesDecoded > 0` the picture is live
+  // and we stop. If stats are unavailable we simply retry a bounded number of
+  // times (still cheap and harmless).
+  // ---------------------------------------------------------------------------
+  const startVideoFrameWatchdog = useCallback(
+    (consumer: Consumer, consumerId: string) => {
+      let attempts = 0
+      const MAX_ATTEMPTS = 15
+
+      const tick = async () => {
+        if (consumer.closed) return
+        const socket = socketRef.current
+        if (!socket) return
+
+        let framesDecoded = 0
+        try {
+          const stats: RTCStatsReport = await consumer.getStats()
+          stats.forEach((report: Record<string, unknown>) => {
+            if (report.type === "inbound-rtp" && typeof report.framesDecoded === "number") {
+              framesDecoded = Math.max(framesDecoded, report.framesDecoded)
+            }
+          })
+        } catch {
+          // getStats may briefly be unavailable — treat as "no frames yet".
+        }
+
+        // Picture is live — nothing more to do.
+        if (framesDecoded > 0) return
+        if (++attempts > MAX_ATTEMPTS) return
+
+        // Still black: ask the server to push a fresh keyframe on a live path.
+        socket.emit("requestConsumerKeyFrame", {
+          roomId,
+          peerId: peerIdRef.current,
+          consumerId,
+        })
+        setTimeout(tick, 800)
+      }
+
+      // Give the transport connect + resume a brief head start first.
+      setTimeout(tick, 600)
+    },
+    [roomId, peerIdRef, socketRef],
+  )
+
+  // ---------------------------------------------------------------------------
   // Consume a remote producer
   // ---------------------------------------------------------------------------
   const consumeProducer = useCallback(
@@ -340,11 +397,17 @@ export function useTransports({
             peerId: peerIdRef.current,
             consumerId: data.consumerId,
           })
+
+          // Guard against a persistent black frame (see watchdog above): keep
+          // nudging the server for a keyframe until frames actually decode.
+          if (kind === "video") {
+            startVideoFrameWatchdog(consumer, data.consumerId)
+          }
         },
       )
     },
     [roomId, peerIdRef, socketRef, deviceRef, recvTransportRef, consumersRef,
-     pendingClosedProducersRef, dispatch, waitForTransportConnected],
+     pendingClosedProducersRef, dispatch, waitForTransportConnected, startVideoFrameWatchdog],
   )
 
   return { createTransport, setupTransports, consumeProducer, restartIceForTransport, clearIceRetry }

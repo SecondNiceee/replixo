@@ -93,6 +93,29 @@ export function VideoTile({
     const video = videoRef.current
     if (!video || !stream) return
     video.srcObject = stream
+    // Electron/Chromium sometimes leaves a freshly-attached remote stream
+    // paused (the `autoPlay` attribute doesn't always fire when srcObject is
+    // set imperatively), which shows up as a black tile even though frames are
+    // arriving. Kick playback explicitly, retrying briefly and again once the
+    // metadata is ready. Video-only muted playback is always autoplay-allowed,
+    // so this never prompts a gesture.
+    let cancelled = false
+    let tries = 0
+    const play = () => {
+      if (cancelled) return
+      const p = video.play()
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          if (!cancelled && tries++ < 5) setTimeout(play, 300)
+        })
+      }
+    }
+    play()
+    video.addEventListener("loadedmetadata", play)
+    return () => {
+      cancelled = true
+      video.removeEventListener("loadedmetadata", play)
+    }
   }, [stream])
 
   // Play remote audio through a dedicated <audio> element. Local audio is
