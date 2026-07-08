@@ -33,7 +33,7 @@ export interface ScreenAudioAEC {
 
 // Flip to true to log AEC convergence (ERLE / delay coverage) to the console.
 // Handy for verifying the echo canceller actually locks on across browsers.
-const AEC_DEBUG = false
+const AEC_DEBUG = true
 
 let workletModuleLoaded = false
 
@@ -55,10 +55,25 @@ export async function createScreenShareAEC(
   rawTrack: MediaStreamTrack,
 ): Promise<ScreenAudioAEC | null> {
   try {
-    if (!rawTrack || rawTrack.kind !== "audio") return null
+    if (!rawTrack || rawTrack.kind !== "audio") {
+      if (AEC_DEBUG) console.log("[v0] AEC skipped: no audio track", { rawTrack })
+      return null
+    }
+
+    if (AEC_DEBUG) {
+      const s = rawTrack.getSettings() as MediaTrackSettings & { displaySurface?: string; restrictOwnAudio?: boolean }
+      console.log("[v0] AEC setup: captured audio settings", {
+        displaySurface: s.displaySurface,
+        restrictOwnAudio: s.restrictOwnAudio,
+        label: rawTrack.label,
+      })
+    }
 
     const ctx = getSharedAudioContext()
-    if (!ctx) return null
+    if (!ctx) {
+      if (AEC_DEBUG) console.log("[v0] AEC returned null: no AudioContext")
+      return null
+    }
     if (ctx.state === "suspended") {
       try {
         await ctx.resume()
@@ -66,12 +81,20 @@ export async function createScreenShareAEC(
         /* ignore — we're likely inside a user gesture already */
       }
     }
+    if (AEC_DEBUG) console.log("[v0] AEC: AudioContext state =", ctx.state)
 
     const ok = await ensureWorklet(ctx)
-    if (!ok) return null
+    if (!ok) {
+      if (AEC_DEBUG) console.log("[v0] AEC returned null: worklet module failed to load (/aec-worklet.js)")
+      return null
+    }
 
     const reference = getRemoteAudioReferenceNode()
-    if (!reference) return null
+    if (!reference) {
+      if (AEC_DEBUG) console.log("[v0] AEC returned null: no remote-audio reference node (nobody's audio routed yet?)")
+      return null
+    }
+    if (AEC_DEBUG) console.log("[v0] AEC: reference bus acquired, wiring worklet…")
 
     // Source: the captured system audio track only (isolated stream).
     const primaryStream = new MediaStream([rawTrack])
@@ -152,8 +175,10 @@ export async function createScreenShareAEC(
       }
     }
 
+    if (AEC_DEBUG) console.log("[v0] AEC active: publishing echo-cancelled track")
     return { track, stop }
-  } catch {
+  } catch (err) {
+    if (AEC_DEBUG) console.log("[v0] AEC returned null: exception during setup", err)
     return null
   }
 }
