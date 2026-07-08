@@ -9,28 +9,62 @@
 // Fix (the same idea Discord/WebRTC use): we have a perfectly clean, digital
 // copy of exactly what this machine is playing — the mix of all remote voices
 // (the "far-end reference"). This worklet adaptively estimates how that
-// reference leaks into the captured system audio (level + delay introduced by
-// the OS loopback path) and subtracts it, leaving only the genuine screen
-// content (YouTube, games, music, ...).
+// reference leaks into the captured system audio and subtracts it, leaving
+// only the genuine screen content (YouTube, games, music, ...).
+//
+// IMPORTANT: unlike a microphone picking up speakers, this echo comes from a
+// *digital* loopback of the OS mix. The relationship between the reference and
+// the leaked echo is therefore almost perfectly LINEAR (a gain + a bulk delay,
+// plus slow clock drift between the AudioContext and the OS mixer). A linear
+// adaptive filter can consequently cancel it extremely well — the only hard
+// requirements are (a) the filter must be long enough to cover the real loop
+// delay and (b) it must not diverge during "double-talk" (content playing at
+// the same time as remote voices) or when there is no reference at all.
 //
 // Algorithm: partitioned frequency-domain normalized LMS adaptive filter
 // (a.k.a. Multi-Delay block Frequency-domain adaptive Filter, MDF), using
-// overlap-save with a from-scratch radix-2 FFT. Input 0 = primary (captured
-// system audio), input 1 = reference (remote voices this machine plays).
-// Output 0 = primary with the echo removed.
+// overlap-save with a from-scratch radix-2 FFT, followed by a gentle,
+// far-end-gated residual echo suppressor. Input 0 = primary (captured system
+// audio), input 1 = reference (remote voices this machine plays). Output 0 =
+// primary with the echo removed.
 //
 // Graceful degradation: the filter starts at zero, so before it converges the
-// output equals the raw captured audio. If the reference is silent or absent
-// (nothing being played), it converges toward passing the primary through
-// unchanged. Any numerical blow-up resets the filter instead of emitting noise.
+// output equals the raw captured audio. Adaptation only runs while there is
+// real reference energy, so silence/content-only periods never corrupt the
+// filter. The residual suppressor is bypassed entirely when no reference is
+// playing, so pure screen content is passed through untouched. Any numerical
+// blow-up resets the filter instead of emitting noise.
 // ---------------------------------------------------------------------------
 
 const BLOCK = 128 // AudioWorklet render quantum
 const N = 256 // FFT size (2 * BLOCK, overlap-save)
-const PARTITIONS = 32 // 32 * 128 / 48000 ≈ 85 ms of echo tail coverage
-const MU = 0.3 // adaptation step size
-const LEAK = 0.99999 // tiny leakage keeps the filter from drifting
+
+// Echo-tail coverage. Real-world output+loopback latency ranges from ~20 ms
+// (wired) to ~200 ms (Bluetooth). We size the adaptive filter from the actual
+// sample rate to cover ~260 ms so the delay almost always falls inside the
+// filter — the single most common reason a screen-share AEC "does nothing" is
+// a tail that is too short to reach the delayed echo.
+const TAIL_MS = 260
+const PARTITIONS = Math.max(
+  8,
+  Math.round((TAIL_MS / 1000) * sampleRate / BLOCK), // `sampleRate` is a worklet global
+)
+
+const MU = 0.5 // adaptation step size (per-bin power-normalised below)
+const LEAK = 0.9998 // leakage — lets the filter track volume/drift changes
 const EPS = 1e-3 // regularisation for the power normalisation
+
+// Adaptation gating.
+const REF_ACTIVE = 1e-5 // min reference block energy to consider "playing"
+const DIVERGE_RATIO = 2.0 // freeze adapting if error grows past this × input
+
+// Residual echo suppressor (post linear filter). Conservative on purpose: it
+// only ever engages while the far-end is active, is heavily time-smoothed to
+// avoid block-edge clicks, and keeps a high gain floor so genuine screen
+// content is never gutted.
+const RES_BETA = 0.5 // how aggressively residual echo is subtracted
+const RES_GMIN = 0.15 // max ~16 dB suppression per bin
+const RES_SMOOTH = 0.85 // per-bin gain smoothing across frames
 
 class FFT {
   constructor(n) {
@@ -102,6 +136,7 @@ class ScreenAEC extends AudioWorkletProcessor {
   constructor() {
     super()
     this.enabled = true
+    this.suppressor = true
     this.fft = new FFT(N)
 
     // Far-end (reference) frequency-domain partitions, newest at index 0.
@@ -117,13 +152,27 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.im = new Float32Array(N)
     this.yr = new Float32Array(N)
     this.yi = new Float32Array(N)
+    this.magY = new Float32Array(N) // |echo estimate| per bin (for suppressor)
     this.er = new Float32Array(N)
     this.ei = new Float32Array(N)
+    this.sr = new Float32Array(N) // suppressor output scratch
+    this.si = new Float32Array(N)
+    this.gain = new Float32Array(N) // smoothed residual-suppression gain
+    this.gain.fill(1)
     this.denom = new Float32Array(N)
 
+    // Metrics accumulation (~0.5 s windows).
+    this.mPrimary = 0
+    this.mErr = 0
+    this.mSamples = 0
+    this.metricInterval = Math.max(BLOCK, Math.round(sampleRate * 0.5))
+
     this.port.onmessage = (e) => {
-      if (e.data && e.data.type === "stop") this.enabled = false
-      if (e.data && e.data.type === "reset") this.resetWeights()
+      const d = e.data
+      if (!d) return
+      if (d.type === "stop") this.enabled = false
+      else if (d.type === "reset") this.resetWeights()
+      else if (d.type === "suppressor") this.suppressor = !!d.value
     }
   }
 
@@ -135,6 +184,7 @@ class ScreenAEC extends AudioWorkletProcessor {
       this.Xi[p].fill(0)
     }
     this.refPrev.fill(0)
+    this.gain.fill(1)
   }
 
   process(inputs, outputs) {
@@ -153,9 +203,16 @@ class ScreenAEC extends AudioWorkletProcessor {
     const reference = inputs[1] && inputs[1][0]
     const hasRef = !!reference && reference.length === BLOCK
 
-    const { re, im, yr, yi, er, ei, denom, fft, Xr, Xi, Wr, Wi, refPrev } = this
+    const { re, im, yr, yi, magY, er, ei, sr, si, gain, denom, fft, Xr, Xi, Wr, Wi, refPrev } = this
 
-    // --- 1. Far-end (reference) analysis frame: [prevBlock | currentBlock] ---
+    // --- 1. Reference block energy (drives adaptation gating) ---
+    let refPow = 0
+    if (hasRef) {
+      for (let n = 0; n < BLOCK; n++) refPow += reference[n] * reference[n]
+    }
+    const refActive = refPow > REF_ACTIVE
+
+    // --- 2. Far-end analysis frame: [prevBlock | currentBlock] ---
     for (let n = 0; n < BLOCK; n++) {
       re[n] = refPrev[n]
       re[n + BLOCK] = hasRef ? reference[n] : 0
@@ -164,7 +221,7 @@ class ScreenAEC extends AudioWorkletProcessor {
     }
     fft.transform(re, im, false)
 
-    // --- 2. Shift partition buffer, store newest reference spectrum at 0 ---
+    // --- 3. Shift partition buffer, store newest reference spectrum at 0 ---
     const oldestR = Xr[PARTITIONS - 1]
     const oldestI = Xi[PARTITIONS - 1]
     for (let p = PARTITIONS - 1; p > 0; p--) {
@@ -176,7 +233,7 @@ class ScreenAEC extends AudioWorkletProcessor {
     Xr[0].set(re)
     Xi[0].set(im)
 
-    // --- 3. Estimated echo spectrum Y = sum_p W_p * X_p, plus power denom ---
+    // --- 4. Estimated echo spectrum Y = sum_p W_p * X_p, plus power denom ---
     yr.fill(0)
     yi.fill(0)
     for (let k = 0; k < N; k++) denom[k] = EPS
@@ -193,21 +250,28 @@ class ScreenAEC extends AudioWorkletProcessor {
         denom[k] += xrk * xrk + xik * xik
       }
     }
+    // Magnitude of the modeled echo per bin — used by the residual suppressor.
+    for (let k = 0; k < N; k++) magY[k] = Math.sqrt(yr[k] * yr[k] + yi[k] * yi[k])
 
-    // --- 4. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
+    // --- 5. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
     fft.transform(yr, yi, true)
 
-    // --- 5. Error (cleaned) block e = d - echoEstimate ---
+    // --- 6. Error (cleaned) block e = d - echoEstimate ---
     let unstable = false
+    let primaryPow = 0
+    let errPow = 0
     for (let n = 0; n < BLOCK; n++) {
-      let e = primary[n] - yr[n + BLOCK]
+      const d = primary[n]
+      let e = d - yr[n + BLOCK]
       if (!Number.isFinite(e)) {
         unstable = true
-        e = primary[n]
+        e = d
       }
       if (e > 1) e = 1
       else if (e < -1) e = -1
-      output[n] = e
+      output[n] = e // linear-AEC output (default; may be refined in step 9)
+      primaryPow += d * d
+      errPow += e * e
       // Error analysis frame: [zeros | e]
       er[n] = 0
       er[n + BLOCK] = e
@@ -221,28 +285,84 @@ class ScreenAEC extends AudioWorkletProcessor {
       return true
     }
 
-    // --- 6. FFT of error, then NLMS weight update per partition ---
+    // --- 7. FFT of error ---
     fft.transform(er, ei, false)
-    for (let p = 0; p < PARTITIONS; p++) {
-      const xr = Xr[p]
-      const xi = Xi[p]
-      const wr = Wr[p]
-      const wi = Wi[p]
-      for (let k = 0; k < N; k++) {
-        const f = MU / denom[k]
-        const xrk = xr[k]
-        const xik = xi[k]
-        // conj(X) * E
-        const gr = xrk * er[k] + xik * ei[k]
-        const gi = xrk * ei[k] - xik * er[k]
-        wr[k] = LEAK * wr[k] + f * gr
-        wi[k] = LEAK * wi[k] + f * gi
+
+    // --- 8. NLMS weight update per partition (gated to avoid divergence) ---
+    // Adapt only while the far-end is actually playing (there is an echo to
+    // model) and the filter is not diverging (error not exploding past the
+    // input). This single guard cleanly handles double-talk and silence: when
+    // content dominates or nothing plays, we simply hold the current filter.
+    const adapt = refActive && errPow < primaryPow * DIVERGE_RATIO
+    if (adapt) {
+      for (let p = 0; p < PARTITIONS; p++) {
+        const xr = Xr[p]
+        const xi = Xi[p]
+        const wr = Wr[p]
+        const wi = Wi[p]
+        for (let k = 0; k < N; k++) {
+          const f = MU / denom[k]
+          const xrk = xr[k]
+          const xik = xi[k]
+          // conj(X) * E
+          const gr = xrk * er[k] + xik * ei[k]
+          const gi = xrk * ei[k] - xik * er[k]
+          wr[k] = LEAK * wr[k] + f * gr
+          wi[k] = LEAK * wi[k] + f * gi
+        }
       }
     }
 
-    // --- 7. Remember this reference block for the next overlap frame ---
+    // --- 9. Residual echo suppressor (far-end-gated, smoothed) ---
+    // Mops up the echo tail the linear filter leaves behind. Only runs while
+    // the far-end is active so pure screen content is never touched. Operates
+    // on a copy of the error spectrum (the NLMS update above already consumed
+    // the un-suppressed error), then re-synthesises the output.
+    if (this.suppressor && refActive) {
+      for (let k = 0; k < N; k++) {
+        const em = Math.sqrt(er[k] * er[k] + ei[k] * ei[k])
+        // Wiener-style gain: attenuate bins where modeled echo dominates the
+        // remaining error. Floored so content is preserved, smoothed over time.
+        const target = em / (em + RES_BETA * magY[k] + 1e-9)
+        let g = target < RES_GMIN ? RES_GMIN : target
+        g = RES_SMOOTH * gain[k] + (1 - RES_SMOOTH) * g
+        gain[k] = g
+        sr[k] = er[k] * g
+        si[k] = ei[k] * g
+      }
+      fft.transform(sr, si, true)
+      for (let n = 0; n < BLOCK; n++) {
+        let e = sr[n + BLOCK]
+        if (e > 1) e = 1
+        else if (e < -1) e = -1
+        output[n] = e
+      }
+    } else {
+      // Relax the gains back toward unity while idle so re-engagement is smooth.
+      for (let k = 0; k < N; k++) gain[k] = RES_SMOOTH * gain[k] + (1 - RES_SMOOTH)
+    }
+
+    // --- 10. Remember this reference block for the next overlap frame ---
     if (hasRef) refPrev.set(reference)
     else refPrev.fill(0)
+
+    // --- 11. Metrics (~0.5 s): report echo return loss enhancement ---
+    this.mPrimary += primaryPow
+    this.mErr += errPow
+    this.mSamples += BLOCK
+    if (this.mSamples >= this.metricInterval) {
+      const erle = this.mErr > 0 ? 10 * Math.log10(this.mPrimary / this.mErr) : 0
+      this.port.postMessage({
+        type: "metrics",
+        erle: Math.round(erle * 10) / 10,
+        partitions: PARTITIONS,
+        tailMs: Math.round((PARTITIONS * BLOCK * 1000) / sampleRate),
+        adapting: adapt,
+      })
+      this.mPrimary = 0
+      this.mErr = 0
+      this.mSamples = 0
+    }
 
     return true
   }
