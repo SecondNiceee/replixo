@@ -13,19 +13,18 @@ import { CAMERA_PRODUCE_OPTIONS } from "./types"
 // don't, sharing the screen "with system sound" re-captures everyone else's
 // voices and streams them back, so a viewer ends up hearing their own voice
 // echoed with a delay. `restrictOwnAudio` (Chrome 141+, desktop) is the
-// purpose-built constraint for exactly this; on browsers/OSes that don't
-// support it we fall back to a plain audio request (no behaviour change there).
+// purpose-built constraint for exactly this.
+//
+// We ALWAYS pass `restrictOwnAudio: true` rather than gating it behind
+// `getSupportedConstraints().restrictOwnAudio`. Chromium is known to omit some
+// newer screen-capture constraints from that dictionary even when the feature
+// actually works, so the old feature-detection gate silently disabled the
+// echo fix on machines where it would have applied. Passing an unknown
+// constraint is harmless per the Media Capture spec: browsers that don't
+// support `restrictOwnAudio` simply ignore the unrecognised member and still
+// capture system audio, so there is no regression on older browsers.
 function getScreenAudioConstraint(): boolean | MediaTrackConstraints {
-  try {
-    const supported = navigator.mediaDevices.getSupportedConstraints() as
-      MediaTrackSupportedConstraints & { restrictOwnAudio?: boolean }
-    if (supported.restrictOwnAudio) {
-      return { restrictOwnAudio: true } as MediaTrackConstraints
-    }
-  } catch {
-    /* getSupportedConstraints unavailable — fall through to plain audio */
-  }
-  return true
+  return { restrictOwnAudio: true } as MediaTrackConstraints
 }
 
 interface UseMediaControlsParams {
