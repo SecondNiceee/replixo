@@ -31,6 +31,10 @@ export interface ScreenAudioAEC {
   stop: () => void
 }
 
+// Flip to true to log AEC convergence (ERLE / delay coverage) to the console.
+// Handy for verifying the echo canceller actually locks on across browsers.
+const AEC_DEBUG = false
+
 let workletModuleLoaded = false
 
 async function ensureWorklet(ctx: AudioContext): Promise<boolean> {
@@ -82,6 +86,17 @@ export async function createScreenShareAEC(
       channelCountMode: "explicit",
       channelInterpretation: "speakers",
     })
+
+    if (AEC_DEBUG) {
+      aecNode.port.onmessage = (e) => {
+        const d = e.data
+        if (d && d.type === "metrics") {
+          console.log(
+            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}`,
+          )
+        }
+      }
+    }
 
     primarySource.connect(aecNode, 0, 0) // input 0 = captured system audio
     reference.connect(aecNode, 0, 1) // input 1 = remote voices reference
