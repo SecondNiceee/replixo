@@ -25,6 +25,30 @@ let gestureBound = false
 // Shared AudioContext — created/resumed on first user gesture.
 let sharedAudioContext: AudioContext | null = null
 
+// A silent "tap" bus that carries the exact mix of every remote voice this
+// machine plays. It is NOT connected to the speakers (ctx.destination already
+// handles playback) — it exists purely so the screen-share echo canceller can
+// use "what we're playing" as its far-end reference. See lib/screen-audio-aec.
+let referenceBus: GainNode | null = null
+
+function getReferenceBus(ctx: AudioContext): GainNode {
+  if (!referenceBus) {
+    referenceBus = ctx.createGain()
+    referenceBus.gain.value = 1
+    // Intentionally left unconnected to ctx.destination — it's a pure tap.
+  }
+  return referenceBus
+}
+
+// The mix of all remote participant audio currently being played, exposed as
+// an AudioNode so the screen-share AEC can subtract it from captured system
+// audio. Returns null when no AudioContext is available.
+export function getRemoteAudioReferenceNode(): AudioNode | null {
+  const ctx = getAudioContext()
+  if (!ctx) return null
+  return getReferenceBus(ctx)
+}
+
 // stream → { source, destination } nodes kept alive while the stream is registered.
 interface AudioNodes {
   source: MediaStreamAudioSourceNode
@@ -111,6 +135,9 @@ function connectStreamToContext(stream: MediaStream): boolean {
     gain.gain.value = desired ?? 1
     source.connect(gain)
     gain.connect(ctx.destination)
+    // Also feed the AEC reference tap so the screen-share echo canceller knows
+    // exactly which remote voices this machine is playing (see screen-audio-aec).
+    gain.connect(getReferenceBus(ctx))
     streamNodes.set(stream, { source, gain })
     return true
   } catch {
