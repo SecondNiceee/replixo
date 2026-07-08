@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
+import { createScreenShareAEC, type ScreenAudioAEC } from "@/lib/screen-audio-aec"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -60,6 +61,8 @@ export function useMediaControls({
 }: UseMediaControlsParams) {
   const [permissionError, setPermissionError] = useState<string | null>(null)
   const [screenQuality, setScreenQualityState] = useState<ScreenQuality>("auto")
+  // Active echo-canceller wrapping the current screen-audio track (if any).
+  const screenAecRef = useRef<ScreenAudioAEC | null>(null)
   // True while the camera is being turned on (getUserMedia + publish can take a
   // few seconds). The UI shows a loader on the camera button during this window.
   const [isCamStarting, setIsCamStarting] = useState(false)
@@ -222,6 +225,8 @@ export function useMediaControls({
     }
     screenVideoProducerRef.current = null
     screenAudioProducerRef.current = null
+    screenAecRef.current?.stop()
+    screenAecRef.current = null
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
     dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
@@ -276,8 +281,18 @@ export function useMediaControls({
       }
 
       if (audioTrack) {
+        // Route the captured system audio through echo cancellation so viewers
+        // don't hear themselves (the sharer's machine re-captures the remote
+        // voices it plays). Falls back to the raw track if AEC can't be set up.
+        let audioTrackToPublish = audioTrack
+        const aec = await createScreenShareAEC(audioTrack)
+        if (aec) {
+          screenAecRef.current = aec
+          audioTrackToPublish = aec.track
+        }
+
         const producer = await sendTransport.produce({
-          track: audioTrack,
+          track: audioTrackToPublish,
           appData: { source: "screen" },
         })
         screenAudioProducerRef.current = producer
@@ -289,7 +304,16 @@ export function useMediaControls({
             const freshStream = await navigator.mediaDevices.getDisplayMedia({ audio: getScreenAudioConstraint(), video: false })
             const freshAudio = freshStream.getAudioTracks()[0]
             if (!freshAudio) { freshStream.getTracks().forEach((t) => t.stop()); return }
-            await currentProducer.replaceTrack({ track: freshAudio })
+            // Tear down the previous echo canceller and wrap the fresh track.
+            screenAecRef.current?.stop()
+            screenAecRef.current = null
+            let freshToPublish = freshAudio
+            const freshAec = await createScreenShareAEC(freshAudio)
+            if (freshAec) {
+              screenAecRef.current = freshAec
+              freshToPublish = freshAec.track
+            }
+            await currentProducer.replaceTrack({ track: freshToPublish })
             const prevTrack = screenStreamRef.current?.getAudioTracks()[0]
             if (prevTrack && prevTrack !== freshAudio) {
               prevTrack.onended = null
