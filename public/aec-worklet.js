@@ -1,70 +1,77 @@
 // ---------------------------------------------------------------------------
-// Screen-share Acoustic Echo Canceller (AudioWorklet)
+// Screen-share Echo Canceller (AudioWorklet)
 //
 // Problem: when a participant shares "the whole screen with system sound", the
 // OS loopback capture also grabs the OTHER participants' voices that this
 // machine is currently playing through its output. That mixed audio is sent
 // back to everyone, so a listener hears their own voice echoed.
 //
-// Fix (the same idea Discord/WebRTC use): we have a perfectly clean, digital
-// copy of exactly what this machine is playing — the mix of all remote voices
-// (the "far-end reference"). This worklet adaptively estimates how that
-// reference leaks into the captured system audio and subtracts it, leaving
-// only the genuine screen content (YouTube, games, music, ...).
+// Fix: we have a perfectly clean, digital copy of exactly what this machine is
+// playing — the mix of all remote voices (the "far-end reference"). This
+// worklet adaptively estimates how that reference leaks into the captured
+// system audio and subtracts it, leaving only the genuine screen content
+// (YouTube, games, music, ...).
 //
-// IMPORTANT: unlike a microphone picking up speakers, this echo comes from a
-// *digital* loopback of the OS mix. The relationship between the reference and
-// the leaked echo is therefore almost perfectly LINEAR (a gain + a bulk delay,
-// plus slow clock drift between the AudioContext and the OS mixer). A linear
-// adaptive filter can consequently cancel it extremely well — the only hard
-// requirements are (a) the filter must be long enough to cover the real loop
-// delay and (b) it must not diverge during "double-talk" (content playing at
-// the same time as remote voices) or when there is no reference at all.
+// WHY THIS CASE IS SPECIAL
+// ------------------------
+// In a normal mic/speaker AEC the "near-end" (your own voice) is INTERMITTENT,
+// so classic designs freeze adaptation during "double-talk". Here the near-end
+// is the shared CONTENT (a movie, YouTube, a game) which plays essentially
+// ALL THE TIME. If we froze adaptation whenever content was present, the
+// filter would never converge.
 //
-// Algorithm: partitioned frequency-domain normalized LMS adaptive filter
-// (a.k.a. Multi-Delay block Frequency-domain adaptive Filter, MDF), using
-// overlap-save with a from-scratch radix-2 FFT, followed by a gentle,
-// far-end-gated residual echo suppressor. Input 0 = primary (captured system
-// audio), input 1 = reference (remote voices this machine plays). Output 0 =
-// primary with the echo removed.
+// The saving grace: the content is statistically UNCORRELATED with the remote
+// voices. A normalized LMS filter therefore naturally converges to cancel only
+// the correlated part (the echo) and treats the content as zero-mean gradient
+// noise, which the leakage term averages out. So the correct strategy here is:
+//   • adapt CONTINUOUSLY while the far-end reference is playing,
+//   • use a small, power-normalized step + leakage (clean, slow, stable),
+//   • output the LINEAR residual only (no spectral gating), so the content is
+//     passed through completely untouched — no musical noise, no pumping.
 //
-// Graceful degradation: the filter starts at zero, so before it converges the
-// output equals the raw captured audio. Adaptation only runs while there is
-// real reference energy, so silence/content-only periods never corrupt the
-// filter. The residual suppressor is bypassed entirely when no reference is
-// playing, so pure screen content is passed through untouched. Any numerical
-// blow-up resets the filter instead of emitting noise.
+// This is the opposite of a speakerphone AEC and is exactly why the previous
+// version (double-talk freeze + aggressive spectral suppressor) sounded bad:
+// it both starved the filter of adaptation and mangled the continuous content.
+//
+// Algorithm: partitioned frequency-domain NLMS (Multi-delay block Frequency-
+// domain adaptive Filter, MDF) via overlap-save with a from-scratch radix-2
+// FFT, WITH a gradient constraint (applied round-robin, one partition per
+// block, Speex-style) so the estimate is a true linear convolution.
+//
+// Inputs:  0 = primary (captured system audio),  1 = reference (remote voices).
+// Output:  0 = primary with the echo removed.
+//
+// Graceful degradation: weights start at zero, so before convergence the output
+// equals the raw captured audio. Any numerical blow-up resets the filter
+// instead of emitting noise.
 // ---------------------------------------------------------------------------
 
 const BLOCK = 128 // AudioWorklet render quantum
 const N = 256 // FFT size (2 * BLOCK, overlap-save)
 
 // Echo-tail coverage. Real-world output+loopback latency ranges from ~20 ms
-// (wired) to ~200 ms (Bluetooth). We size the adaptive filter from the actual
-// sample rate to cover ~260 ms so the delay almost always falls inside the
-// filter — the single most common reason a screen-share AEC "does nothing" is
-// a tail that is too short to reach the delayed echo.
-const TAIL_MS = 260
+// (wired) to ~200 ms (Bluetooth). Size the adaptive filter from the actual
+// sample rate to cover ~250 ms so the delay almost always falls inside the
+// filter — a tail too short to reach the delayed echo is the single most
+// common reason a screen-share AEC "does nothing".
+const TAIL_MS = 250
 const PARTITIONS = Math.max(
   8,
   Math.round((TAIL_MS / 1000) * sampleRate / BLOCK), // `sampleRate` is a worklet global
 )
 
-const MU = 0.5 // adaptation step size (per-bin power-normalised below)
-const LEAK = 0.9998 // leakage — lets the filter track volume/drift changes
-const EPS = 1e-3 // regularisation for the power normalisation
+// Adaptation. MU is deliberately small: the continuous, uncorrelated content
+// acts as gradient noise, so a gentle step + leakage converges cleanly without
+// letting the content perturb the filter (which would modulate the residual
+// echo and sound "swirly"). REG keeps the power-normalisation stable on quiet
+// bins.
+const MU = 0.2 // NLMS step size (power-normalised per bin below)
+const LEAK = 0.99995 // leakage — lets the filter track OS volume/clock drift
+const REG = 1e-6 // absolute regularisation floor for the normaliser
 
-// Adaptation gating.
-const REF_ACTIVE = 1e-5 // min reference block energy to consider "playing"
-const DIVERGE_RATIO = 2.0 // freeze adapting if error grows past this × input
-
-// Residual echo suppressor (post linear filter). Conservative on purpose: it
-// only ever engages while the far-end is active, is heavily time-smoothed to
-// avoid block-edge clicks, and keeps a high gain floor so genuine screen
-// content is never gutted.
-const RES_BETA = 0.5 // how aggressively residual echo is subtracted
-const RES_GMIN = 0.15 // max ~16 dB suppression per bin
-const RES_SMOOTH = 0.85 // per-bin gain smoothing across frames
+// A reference block quieter than this carries no usable echo to model, so we
+// hold the filter (nothing to learn) rather than divide by ~0.
+const REF_ACTIVE = 1e-6
 
 class FFT {
   constructor(n) {
@@ -136,7 +143,6 @@ class ScreenAEC extends AudioWorkletProcessor {
   constructor() {
     super()
     this.enabled = true
-    this.suppressor = true
     this.fft = new FFT(N)
 
     // Far-end (reference) frequency-domain partitions, newest at index 0.
@@ -147,19 +153,19 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.Wi = Array.from({ length: PARTITIONS }, () => new Float32Array(N))
 
     this.refPrev = new Float32Array(BLOCK) // previous reference block (overlap)
+
     // Scratch buffers reused every render quantum.
     this.re = new Float32Array(N)
     this.im = new Float32Array(N)
     this.yr = new Float32Array(N)
     this.yi = new Float32Array(N)
-    this.magY = new Float32Array(N) // |echo estimate| per bin (for suppressor)
     this.er = new Float32Array(N)
     this.ei = new Float32Array(N)
-    this.sr = new Float32Array(N) // suppressor output scratch
-    this.si = new Float32Array(N)
-    this.gain = new Float32Array(N) // smoothed residual-suppression gain
-    this.gain.fill(1)
-    this.denom = new Float32Array(N)
+    this.denom = new Float32Array(N) // per-bin input power (normaliser)
+    this.cr = new Float32Array(N) // constraint scratch
+    this.ci = new Float32Array(N)
+
+    this.constrainIdx = 0 // round-robin gradient-constraint cursor
 
     // Metrics accumulation (~0.5 s windows).
     this.mPrimary = 0
@@ -172,7 +178,6 @@ class ScreenAEC extends AudioWorkletProcessor {
       if (!d) return
       if (d.type === "stop") this.enabled = false
       else if (d.type === "reset") this.resetWeights()
-      else if (d.type === "suppressor") this.suppressor = !!d.value
     }
   }
 
@@ -184,7 +189,25 @@ class ScreenAEC extends AudioWorkletProcessor {
       this.Xi[p].fill(0)
     }
     this.refPrev.fill(0)
-    this.gain.fill(1)
+  }
+
+  // Project one partition's weights back onto the space of length-BLOCK time-
+  // domain filters (zero the wrap-around tail). Applied round-robin so that
+  // over PARTITIONS blocks the whole filter stays constrained — this is what
+  // makes the frequency-domain estimate a true linear convolution, and it is
+  // cheap (2 FFTs per block total).
+  constrainPartition(p) {
+    const { cr, ci, fft, Wr, Wi } = this
+    cr.set(Wr[p])
+    ci.set(Wi[p])
+    fft.transform(cr, ci, true) // → time domain
+    for (let n = BLOCK; n < N; n++) {
+      cr[n] = 0
+      ci[n] = 0
+    }
+    fft.transform(cr, ci, false) // → frequency domain
+    Wr[p].set(cr)
+    Wi[p].set(ci)
   }
 
   process(inputs, outputs) {
@@ -203,7 +226,7 @@ class ScreenAEC extends AudioWorkletProcessor {
     const reference = inputs[1] && inputs[1][0]
     const hasRef = !!reference && reference.length === BLOCK
 
-    const { re, im, yr, yi, magY, er, ei, sr, si, gain, denom, fft, Xr, Xi, Wr, Wi, refPrev } = this
+    const { re, im, yr, yi, er, ei, denom, fft, Xr, Xi, Wr, Wi, refPrev } = this
 
     // --- 1. Reference block energy (drives adaptation gating) ---
     let refPow = 0
@@ -221,7 +244,7 @@ class ScreenAEC extends AudioWorkletProcessor {
     }
     fft.transform(re, im, false)
 
-    // --- 3. Shift partition buffer, store newest reference spectrum at 0 ---
+    // --- 3. Shift partition ring, store newest reference spectrum at index 0 ---
     const oldestR = Xr[PARTITIONS - 1]
     const oldestI = Xi[PARTITIONS - 1]
     for (let p = PARTITIONS - 1; p > 0; p--) {
@@ -236,7 +259,7 @@ class ScreenAEC extends AudioWorkletProcessor {
     // --- 4. Estimated echo spectrum Y = sum_p W_p * X_p, plus power denom ---
     yr.fill(0)
     yi.fill(0)
-    for (let k = 0; k < N; k++) denom[k] = EPS
+    for (let k = 0; k < N; k++) denom[k] = REG
     for (let p = 0; p < PARTITIONS; p++) {
       const xr = Xr[p]
       const xi = Xi[p]
@@ -250,13 +273,11 @@ class ScreenAEC extends AudioWorkletProcessor {
         denom[k] += xrk * xrk + xik * xik
       }
     }
-    // Magnitude of the modeled echo per bin — used by the residual suppressor.
-    for (let k = 0; k < N; k++) magY[k] = Math.sqrt(yr[k] * yr[k] + yi[k] * yi[k])
 
     // --- 5. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
     fft.transform(yr, yi, true)
 
-    // --- 6. Error (cleaned) block e = d - echoEstimate ---
+    // --- 6. Error (cleaned) block e = d - echoEstimate → this IS the output ---
     let unstable = false
     let primaryPow = 0
     let errPow = 0
@@ -269,10 +290,10 @@ class ScreenAEC extends AudioWorkletProcessor {
       }
       if (e > 1) e = 1
       else if (e < -1) e = -1
-      output[n] = e // linear-AEC output (default; may be refined in step 9)
+      output[n] = e
       primaryPow += d * d
       errPow += e * e
-      // Error analysis frame: [zeros | e]
+      // Error analysis frame for the gradient: [zeros | e]
       er[n] = 0
       er[n + BLOCK] = e
       ei[n] = 0
@@ -288,13 +309,12 @@ class ScreenAEC extends AudioWorkletProcessor {
     // --- 7. FFT of error ---
     fft.transform(er, ei, false)
 
-    // --- 8. NLMS weight update per partition (gated to avoid divergence) ---
-    // Adapt only while the far-end is actually playing (there is an echo to
-    // model) and the filter is not diverging (error not exploding past the
-    // input). This single guard cleanly handles double-talk and silence: when
-    // content dominates or nothing plays, we simply hold the current filter.
-    const adapt = refActive && errPow < primaryPow * DIVERGE_RATIO
-    if (adapt) {
+    // --- 8. NLMS weight update (adapt continuously while far-end is active) ---
+    // The content is uncorrelated with the reference, so continuous adaptation
+    // converges onto the echo path only; leakage bleeds off the uncorrelated
+    // gradient noise. No double-talk freeze here — that is intentional and is
+    // the key to this working on continuously-playing content.
+    if (refActive) {
       for (let p = 0; p < PARTITIONS; p++) {
         const xr = Xr[p]
         const xi = Xi[p]
@@ -311,42 +331,17 @@ class ScreenAEC extends AudioWorkletProcessor {
           wi[k] = LEAK * wi[k] + f * gi
         }
       }
+
+      // --- 8b. Round-robin gradient constraint (one partition per block) ---
+      this.constrainPartition(this.constrainIdx)
+      this.constrainIdx = (this.constrainIdx + 1) % PARTITIONS
     }
 
-    // --- 9. Residual echo suppressor (far-end-gated, smoothed) ---
-    // Mops up the echo tail the linear filter leaves behind. Only runs while
-    // the far-end is active so pure screen content is never touched. Operates
-    // on a copy of the error spectrum (the NLMS update above already consumed
-    // the un-suppressed error), then re-synthesises the output.
-    if (this.suppressor && refActive) {
-      for (let k = 0; k < N; k++) {
-        const em = Math.sqrt(er[k] * er[k] + ei[k] * ei[k])
-        // Wiener-style gain: attenuate bins where modeled echo dominates the
-        // remaining error. Floored so content is preserved, smoothed over time.
-        const target = em / (em + RES_BETA * magY[k] + 1e-9)
-        let g = target < RES_GMIN ? RES_GMIN : target
-        g = RES_SMOOTH * gain[k] + (1 - RES_SMOOTH) * g
-        gain[k] = g
-        sr[k] = er[k] * g
-        si[k] = ei[k] * g
-      }
-      fft.transform(sr, si, true)
-      for (let n = 0; n < BLOCK; n++) {
-        let e = sr[n + BLOCK]
-        if (e > 1) e = 1
-        else if (e < -1) e = -1
-        output[n] = e
-      }
-    } else {
-      // Relax the gains back toward unity while idle so re-engagement is smooth.
-      for (let k = 0; k < N; k++) gain[k] = RES_SMOOTH * gain[k] + (1 - RES_SMOOTH)
-    }
-
-    // --- 10. Remember this reference block for the next overlap frame ---
+    // --- 9. Remember this reference block for the next overlap frame ---
     if (hasRef) refPrev.set(reference)
     else refPrev.fill(0)
 
-    // --- 11. Metrics (~0.5 s): report echo return loss enhancement ---
+    // --- 10. Metrics (~0.5 s): report echo return loss enhancement ---
     this.mPrimary += primaryPow
     this.mErr += errPow
     this.mSamples += BLOCK
@@ -357,7 +352,7 @@ class ScreenAEC extends AudioWorkletProcessor {
         erle: Math.round(erle * 10) / 10,
         partitions: PARTITIONS,
         tailMs: Math.round((PARTITIONS * BLOCK * 1000) / sampleRate),
-        adapting: adapt,
+        adapting: refActive,
       })
       this.mPrimary = 0
       this.mErr = 0
