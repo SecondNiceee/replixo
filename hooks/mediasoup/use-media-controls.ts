@@ -289,6 +289,9 @@ export function useMediaControls({
         if (aec) {
           screenAecRef.current = aec
           audioTrackToPublish = aec.track
+          console.log("[v0] Screen audio: publishing AEC-cleaned track")
+        } else {
+          console.log("[v0] Screen audio: AEC unavailable, publishing RAW track (echo possible)")
         }
 
         const producer = await sendTransport.produce({
