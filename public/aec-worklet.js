@@ -50,11 +50,13 @@ const BLOCK = 128 // AudioWorklet render quantum
 const N = 256 // FFT size (2 * BLOCK, overlap-save)
 
 // Echo-tail coverage. Real-world output+loopback latency ranges from ~20 ms
-// (wired) to ~200 ms (Bluetooth). Size the adaptive filter from the actual
-// sample rate to cover ~250 ms so the delay almost always falls inside the
-// filter — a tail too short to reach the delayed echo is the single most
-// common reason a screen-share AEC "does nothing".
-const TAIL_MS = 250
+// (wired) to ~200 ms (Bluetooth) — and on Windows the OS audio engine buffer
+// plus a Bluetooth headset can together push the round-trip PAST 250 ms, which
+// drops the echo OUTSIDE the filter entirely (the AEC then "does nothing" no
+// matter how healthy it looks). We size the tail to ~400 ms so even worst-case
+// Bluetooth + OS buffering falls inside the filter. The extra partitions cost a
+// little CPU but eliminate the most common silent failure mode.
+const TAIL_MS = 400
 const PARTITIONS = Math.max(
   8,
   Math.round((TAIL_MS / 1000) * sampleRate / BLOCK), // `sampleRate` is a worklet global
@@ -138,6 +140,18 @@ const RES_RELEASE = 0.82 // gain-smoothing weight when RELEASING suppression (sl
 // while the far-end is active.
 const COUPLING_EMA = 0.985 // slow: learns the stable echo-path gain per bin
 const ECHO_EMA = 0.6 // faster: tracks the robust echo-power envelope
+
+// --- Delay diagnostic --------------------------------------------------------
+// If the true echo delay exceeds the filter tail, NOTHING the DSP does can
+// cancel it — the reference for that echo simply isn't in the filter's window.
+// To make that failure mode VISIBLE (instead of guessing), we estimate the
+// bulk echo delay by cross-correlating the short-term power envelopes of the
+// captured audio (primary) and the reference. This is diagnostic only: it does
+// NOT touch the audio path, so it can never cause a regression. The estimate
+// (ms + normalised peak correlation) is reported alongside ERLE, so the logs
+// tell us directly whether to grow TAIL_MS further.
+const BLOCK_MS = (BLOCK / sampleRate) * 1000 // ms per render quantum
+const ENV_LEN = PARTITIONS + 8 // power-envelope history length (blocks)
 
 class FFT {
   constructor(n) {
@@ -251,6 +265,14 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.mSamples = 0
     this.metricInterval = Math.max(BLOCK, Math.round(sampleRate * 0.5))
 
+    // Delay-diagnostic ring buffers of per-block power (oldest→newest via idx).
+    this.dEnv = new Float32Array(ENV_LEN) // captured (primary) power envelope
+    this.xEnv = new Float32Array(ENV_LEN) // reference power envelope
+    this.envIdx = 0 // circular write cursor
+    this.envFilled = 0 // how many slots have real data yet
+    this.estDelayMs = 0 // last estimated bulk echo delay (ms)
+    this.estDelayCorr = 0 // normalised correlation peak [0..1] (confidence)
+
     this.port.onmessage = (e) => {
       const d = e.data
       if (!d) return
@@ -289,6 +311,63 @@ class ScreenAEC extends AudioWorkletProcessor {
     fft.transform(cr, ci, false) // → frequency domain
     Wr[p].set(cr)
     Wi[p].set(ci)
+  }
+
+  // Estimate the bulk echo delay by cross-correlating the primary and reference
+  // power envelopes. Returns { ms, corr } where corr is a normalised [0..1]
+  // confidence. Echo appears in `primary` LATER than in `reference`, so we
+  // search lags where primary[i] aligns with reference[i - lag], lag ≥ 0.
+  // Diagnostic only — never alters the audio path.
+  estimateDelay() {
+    const n = this.envFilled
+    if (n < 16) return { ms: 0, corr: 0 } // not enough history yet
+    // Linearise the circular buffers oldest→newest.
+    const d = new Float32Array(n)
+    const x = new Float32Array(n)
+    const start = this.envFilled < ENV_LEN ? 0 : this.envIdx
+    for (let i = 0; i < n; i++) {
+      const j = (start + i) % ENV_LEN
+      d[i] = this.dEnv[j]
+      x[i] = this.xEnv[j]
+    }
+    // Zero-mean both envelopes so silence/DC bias doesn't dominate.
+    let dm = 0
+    let xm = 0
+    for (let i = 0; i < n; i++) {
+      dm += d[i]
+      xm += x[i]
+    }
+    dm /= n
+    xm /= n
+    let dEnergy = 0
+    for (let i = 0; i < n; i++) {
+      d[i] -= dm
+      x[i] -= xm
+      dEnergy += d[i] * d[i]
+    }
+    if (dEnergy < 1e-12) return { ms: 0, corr: 0 }
+    const maxLag = Math.min(PARTITIONS, n - 8)
+    let bestLag = 0
+    let bestScore = -Infinity
+    let bestNorm = 0
+    for (let lag = 0; lag <= maxLag; lag++) {
+      let dot = 0
+      let xe = 0
+      for (let i = lag; i < n; i++) {
+        const xv = x[i - lag]
+        dot += d[i] * xv
+        xe += xv * xv
+      }
+      if (xe < 1e-12) continue
+      const norm = dot / Math.sqrt(dEnergy * xe) // normalised correlation
+      if (norm > bestNorm) {
+        bestNorm = norm
+        bestScore = dot
+        bestLag = lag
+      }
+    }
+    void bestScore
+    return { ms: bestLag * BLOCK_MS, corr: bestNorm > 0 ? bestNorm : 0 }
   }
 
   process(inputs, outputs) {
@@ -525,19 +604,35 @@ class ScreenAEC extends AudioWorkletProcessor {
     if (hasRef) refPrev.set(reference)
     else refPrev.fill(0)
 
+    // --- 9b. Feed the delay-diagnostic power envelopes (per block). ---
+    this.dEnv[this.envIdx] = primaryPow
+    this.xEnv[this.envIdx] = refPow
+    this.envIdx = (this.envIdx + 1) % ENV_LEN
+    if (this.envFilled < ENV_LEN) this.envFilled++
+
     // --- 10. Metrics (~0.5 s): report echo return loss enhancement ---
     this.mPrimary += primaryPow
     this.mErr += emittedPow
     this.mSamples += BLOCK
     if (this.mSamples >= this.metricInterval) {
       const erle = this.mErr > 0 ? 10 * Math.log10(this.mPrimary / this.mErr) : 0
+      const tailMs = Math.round((PARTITIONS * BLOCK * 1000) / sampleRate)
+      const { ms: delayMs, corr: delayCorr } = this.estimateDelay()
+      this.estDelayMs = delayMs
+      this.estDelayCorr = delayCorr
+      // If a confident delay estimate sits near/beyond the tail, the echo is
+      // (partly) outside the filter — flag it so the logs explain leftover echo.
+      const delayOutOfRange = delayCorr > 0.3 && delayMs > tailMs * 0.8
       this.port.postMessage({
         type: "metrics",
         erle: Math.round(erle * 10) / 10,
         partitions: PARTITIONS,
-        tailMs: Math.round((PARTITIONS * BLOCK * 1000) / sampleRate),
+        tailMs,
         adapting: refActive,
         diverging,
+        delayMs: Math.round(delayMs),
+        delayCorr: Math.round(delayCorr * 100) / 100,
+        delayOutOfRange,
       })
       this.mPrimary = 0
       this.mErr = 0
