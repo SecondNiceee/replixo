@@ -112,10 +112,14 @@ const DEADAPT = 0.5 // per-block weight shrink while diverging (fast recovery)
 // So it removes the audible echo without the "musical noise / pumping" that a
 // naive spectral gate would inflict on continuously-playing media.
 const RES_ENABLED = true
-const RES_OVERSUB = 1.6 // over-subtraction factor on the echo-power estimate
-const RES_FLOOR = 0.05 // min gain (~ -26 dB) — never fully mute, keeps it natural
-const RES_ATTACK = 0.3 // gain-smoothing weight when INCREASING suppression (fast)
-const RES_RELEASE = 0.85 // gain-smoothing weight when RELEASING suppression (slow)
+// Aggressive tuning: a linear ERLE of only ~10-15 dB leaves the remote voice
+// clearly audible (echo needs ~30-45 dB total to vanish). The RES has to close
+// that gap, so we over-subtract hard and allow a very deep floor. Content bins
+// are protected by the self-gating gain, so this stays clean on media audio.
+const RES_OVERSUB = 3.0 // over-subtraction factor on the echo-power estimate
+const RES_FLOOR = 0.015 // min gain (~ -36 dB) — deep cut on echo-only bins
+const RES_ATTACK = 0.2 // gain-smoothing weight when INCREASING suppression (fast)
+const RES_RELEASE = 0.8 // gain-smoothing weight when RELEASING suppression (slow)
 
 class FFT {
   constructor(n) {
