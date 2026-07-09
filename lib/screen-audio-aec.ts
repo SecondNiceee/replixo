@@ -40,7 +40,7 @@ const AEC_DEBUG = true
 // AudioWorklet modules are cached aggressively, so without this a fresh deploy
 // can keep running the OLD echo-cancellation code (e.g. missing the residual
 // suppressor) even after `pnpm build` + restart.
-const AEC_WORKLET_VERSION = "5-delay-diag-tail400"
+const AEC_WORKLET_VERSION = "6-echo-dominance-adaptive-res"
 
 let workletModuleLoaded = false
 
@@ -126,8 +126,15 @@ export async function createScreenShareAEC(
             typeof d.delayMs === "number"
               ? ` | echo delay ~${d.delayMs}ms (corr ${d.delayCorr})${d.delayOutOfRange ? " ⚠ OUT OF RANGE" : ""}`
               : ""
+          // linear-only vs post-RES ERLE + how much the RES added + the echo-
+          // dominance that is driving the adaptive suppressor. This tells us
+          // exactly which stage is the bottleneck when echo is still audible.
+          const stages =
+            typeof d.linErle === "number"
+              ? ` (lin ${d.linErle} dB, RES +${d.resDb} dB, dom ${d.echoDom})`
+              : ""
           console.log(
-            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}${d.diverging ? " | BYPASS (diverging)" : ""}${delay}`,
+            `[v0] AEC ERLE ${d.erle} dB${stages} | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}${d.diverging ? " | BYPASS (diverging)" : ""}${delay}`,
           )
         }
       }

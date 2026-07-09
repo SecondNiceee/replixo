@@ -123,6 +123,23 @@ const RES_FLOOR = 0.012 // min gain (~ -38 dB) — deep cut on echo-only bins
 const RES_ATTACK = 0.15 // gain-smoothing weight when INCREASING suppression (fast)
 const RES_RELEASE = 0.82 // gain-smoothing weight when RELEASING suppression (slow)
 
+// --- Echo-dominance-adaptive RES (the "I still hear voices, no media" fix) ---
+// The self-gating Wiener gain protects real content, but in the reported
+// failure case there IS no content — the demonstrator shares a static window
+// while people talk, so the captured audio is essentially PURE echo (a delayed
+// copy of the reference; the delay-diagnostic corr sits at ~0.9). In that
+// regime it is always safe to suppress far harder, because there is nothing to
+// protect. We already compute a robust echo-dominance signal every metric
+// window: the normalised primary↔reference envelope correlation (`delayCorr`).
+// We map it to [0..1] and use it to slide the RES between "gentle, content-
+// safe" (corr low ⇒ media present) and "deep kill" (corr high ⇒ pure echo).
+// This is the balance the user asked for: media stays clean, voice echo dies.
+const RES_OVERSUB_MAX = 6.0 // over-subtraction when captured audio is pure echo
+const RES_FLOOR_ECHO = 0.002 // ~ -54 dB floor when fully echo-dominated
+const DOM_CORR_LO = 0.3 // corr ≤ this ⇒ treat as content present (dominance 0)
+const DOM_CORR_HI = 0.85 // corr ≥ this ⇒ treat as pure echo (dominance 1)
+const DOM_EMA = 0.7 // smoothing of the dominance estimate between windows
+
 // --- Robust residual-echo estimate (the fix for "I still hear myself") -------
 // Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
 // whenever the linear filter momentarily loses lock (the 3-5 dB ERLE dips seen
@@ -261,9 +278,15 @@ class ScreenAEC extends AudioWorkletProcessor {
 
     // Metrics accumulation (~0.5 s windows).
     this.mPrimary = 0
-    this.mErr = 0
+    this.mErr = 0 // post-RES (actual emitted) error power
+    this.mErrLin = 0 // linear-stage-only residual power (RES disambiguation)
     this.mSamples = 0
     this.metricInterval = Math.max(BLOCK, Math.round(sampleRate * 0.5))
+
+    // Smoothed echo-dominance [0..1] driving the adaptive RES (see notes above).
+    // 0 = content present (be gentle), 1 = pure echo (suppress hard). Starts at
+    // 0 so we never over-suppress before we have a confident delay/corr estimate.
+    this.echoDom = 0
 
     // Delay-diagnostic ring buffers of per-block power (oldest→newest via idx).
     this.dEnv = new Float32Array(ENV_LEN) // captured (primary) power envelope
@@ -539,14 +562,21 @@ class ScreenAEC extends AudioWorkletProcessor {
         const gr = this.gr
         const gi = this.gi
         const echoPowSm = this.echoPowSm
+        // Slide RES aggressiveness by the current echo-dominance. When the
+        // captured audio is pure echo (no content to protect) we over-subtract
+        // much harder and allow a far deeper floor; when media is present we
+        // fall back to the gentle, content-safe base values.
+        const dom = this.echoDom
+        const oversubDyn = RES_OVERSUB + dom * (RES_OVERSUB_MAX - RES_OVERSUB)
+        const floorDyn = RES_FLOOR + dom * (RES_FLOOR_ECHO - RES_FLOOR)
         for (let k = 0; k < N; k++) {
           const s = er[k] * er[k] + ei[k] * ei[k] // post-linear output power
           // Robust echo proxy (survives linear-filter dips) instead of the raw,
           // fragile instantaneous |Y|². This is the key change that stops the
           // remote voice leaking through when ERLE momentarily drops.
-          const echo = RES_OVERSUB * echoPowSm[k]
+          const echo = oversubDyn * echoPowSm[k]
           let g = s / (s + echo + 1e-12)
-          if (g < RES_FLOOR) g = RES_FLOOR
+          if (g < floorDyn) g = floorDyn
           // Fast attack (suppress quickly), slow release (avoid echo bursts).
           const prev = gain[k]
           const w = g < prev ? RES_ATTACK : RES_RELEASE
@@ -612,20 +642,39 @@ class ScreenAEC extends AudioWorkletProcessor {
 
     // --- 10. Metrics (~0.5 s): report echo return loss enhancement ---
     this.mPrimary += primaryPow
-    this.mErr += emittedPow
+    this.mErr += emittedPow // actual emitted output (post-RES)
+    this.mErrLin += errPow // linear-stage residual only (before RES)
     this.mSamples += BLOCK
     if (this.mSamples >= this.metricInterval) {
+      // Post-RES ERLE (what the listener actually hears) AND linear-only ERLE.
+      // Splitting these tells us WHICH stage is the bottleneck: if erle ≈ linErle
+      // the RES is not adding suppression (tune the RES); if linErle is low but
+      // erle is high the linear stage is weak but the RES rescues it; if BOTH are
+      // low despite high corr the echo path is nonlinear (only the RES can help).
       const erle = this.mErr > 0 ? 10 * Math.log10(this.mPrimary / this.mErr) : 0
+      const linErle = this.mErrLin > 0 ? 10 * Math.log10(this.mPrimary / this.mErrLin) : 0
       const tailMs = Math.round((PARTITIONS * BLOCK * 1000) / sampleRate)
       const { ms: delayMs, corr: delayCorr } = this.estimateDelay()
       this.estDelayMs = delayMs
       this.estDelayCorr = delayCorr
+
+      // Update the smoothed echo-dominance that drives the adaptive RES. A high
+      // primary↔reference envelope correlation means the captured audio is
+      // basically a delayed copy of the reference (pure echo, no content), so
+      // it is safe to suppress hard; low corr means media is present, so back
+      // off to protect it.
+      const domRaw = Math.max(0, Math.min(1, (delayCorr - DOM_CORR_LO) / (DOM_CORR_HI - DOM_CORR_LO)))
+      this.echoDom = DOM_EMA * this.echoDom + (1 - DOM_EMA) * domRaw
+
       // If a confident delay estimate sits near/beyond the tail, the echo is
       // (partly) outside the filter — flag it so the logs explain leftover echo.
       const delayOutOfRange = delayCorr > 0.3 && delayMs > tailMs * 0.8
       this.port.postMessage({
         type: "metrics",
         erle: Math.round(erle * 10) / 10,
+        linErle: Math.round(linErle * 10) / 10,
+        resDb: Math.round((erle - linErle) * 10) / 10,
+        echoDom: Math.round(this.echoDom * 100) / 100,
         partitions: PARTITIONS,
         tailMs,
         adapting: refActive,
@@ -636,6 +685,7 @@ class ScreenAEC extends AudioWorkletProcessor {
       })
       this.mPrimary = 0
       this.mErr = 0
+      this.mErrLin = 0
       this.mSamples = 0
     }
 
