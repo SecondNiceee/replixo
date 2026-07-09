@@ -94,6 +94,29 @@ const DIV_EMA = 0.9 // smoothing for the input/output power detector
 const DIV_RATIO = 1.06 // output louder than input by >6% ⇒ diverging
 const DEADAPT = 0.5 // per-block weight shrink while diverging (fast recovery)
 
+// --- Residual echo suppressor (RES) -----------------------------------------
+// The linear NLMS stage above realistically reaches only ~10–20 dB ERLE in a
+// browser. That is NOT enough: your own voice, delayed ~200 ms and attenuated
+// by only 15 dB, is still clearly audible as echo (this is the "I still hear
+// myself" report — the linear filter is healthy, it just cannot go deep
+// enough). WebRTC solves this exactly the same way: a nonlinear post-filter
+// after the linear canceller.
+//
+// This RES is a per-frequency-bin Wiener gain driven by the linear stage's own
+// echo estimate |Y[k]|². Crucially it is SELF-GATING on genuine content:
+//   • a bin carrying real screen content has large output power S[k], so
+//     G[k] = S / (S + echo) ≈ 1  → content passes through untouched;
+//   • an echo-only bin (remote voices, no content — e.g. sharing a static
+//     window while people talk) has small S and large echo → G[k] → floor,
+//     killing the residual you were hearing.
+// So it removes the audible echo without the "musical noise / pumping" that a
+// naive spectral gate would inflict on continuously-playing media.
+const RES_ENABLED = true
+const RES_OVERSUB = 1.6 // over-subtraction factor on the echo-power estimate
+const RES_FLOOR = 0.05 // min gain (~ -26 dB) — never fully mute, keeps it natural
+const RES_ATTACK = 0.3 // gain-smoothing weight when INCREASING suppression (fast)
+const RES_RELEASE = 0.85 // gain-smoothing weight when RELEASING suppression (slow)
+
 class FFT {
   constructor(n) {
     this.n = n
@@ -191,6 +214,12 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.cand = new Float32Array(BLOCK) // candidate cleaned block (pre-guard)
     this.pAvg = 0 // smoothed input power  (divergence detector)
     this.eAvg = 0 // smoothed output power (divergence detector)
+
+    // Residual echo suppressor state.
+    this.yPow = new Float32Array(N) // |Y[k]|² echo-estimate power (saved pre-IFFT)
+    this.resGain = new Float32Array(N).fill(1) // smoothed per-bin suppression gain
+    this.gr = new Float32Array(N) // RES output FFT scratch (real)
+    this.gi = new Float32Array(N) // RES output FFT scratch (imag)
 
     // Metrics accumulation (~0.5 s windows).
     this.mPrimary = 0
@@ -299,6 +328,11 @@ class ScreenAEC extends AudioWorkletProcessor {
       }
     }
 
+    // --- 4b. Save |Y[k]|² for the residual suppressor BEFORE the IFFT below
+    // overwrites yr/yi with the time-domain echo estimate. ---
+    const yPow = this.yPow
+    for (let k = 0; k < N; k++) yPow[k] = yr[k] * yr[k] + yi[k] * yi[k]
+
     // --- 5. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
     fft.transform(yr, yi, true)
 
@@ -369,6 +403,40 @@ class ScreenAEC extends AudioWorkletProcessor {
 
       // --- 7. FFT of error ---
       fft.transform(er, ei, false)
+
+      // --- 7b. Residual echo suppressor (nonlinear post-filter) ---
+      // Apply a self-gating Wiener gain to the LINEAR residual spectrum, then
+      // overlap-save back to time domain. The ungained er/ei are kept intact
+      // for the NLMS gradient below — adaptation must see the true linear
+      // error, never the suppressed signal, or the filter would mis-converge.
+      if (RES_ENABLED) {
+        const gain = this.resGain
+        const gr = this.gr
+        const gi = this.gi
+        for (let k = 0; k < N; k++) {
+          const s = er[k] * er[k] + ei[k] * ei[k] // post-linear output power
+          const echo = RES_OVERSUB * yPow[k] // residual echo power proxy
+          let g = s / (s + echo + 1e-12)
+          if (g < RES_FLOOR) g = RES_FLOOR
+          // Fast attack (suppress quickly), slow release (avoid echo bursts).
+          const prev = gain[k]
+          const w = g < prev ? RES_ATTACK : RES_RELEASE
+          g = w * prev + (1 - w) * g
+          gain[k] = g
+          gr[k] = er[k] * g
+          gi[k] = ei[k] * g
+        }
+        fft.transform(gr, gi, true) // → time domain suppressed block
+        let outPow = 0
+        for (let n = 0; n < BLOCK; n++) {
+          let o = gr[n + BLOCK]
+          if (o > 1) o = 1
+          else if (o < -1) o = -1
+          output[n] = o
+          outPow += o * o
+        }
+        emittedPow = outPow // metrics/ERLE reflect the REAL suppressed output
+      }
 
       // --- 8. NLMS weight update (adapt continuously while far-end is active) ---
       // The content is uncorrelated with the reference, so continuous adaptation
