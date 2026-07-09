@@ -73,6 +73,27 @@ const REG = 1e-6 // absolute regularisation floor for the normaliser
 // hold the filter (nothing to learn) rather than divide by ~0.
 const REF_ACTIVE = 1e-6
 
+// --- Stability guards -------------------------------------------------------
+// The frequency-domain gradient constraint (constrainPartition) is what keeps
+// the estimate a TRUE linear convolution. Applying it to only one partition
+// per block means the whole filter is only fully constrained every PARTITIONS
+// blocks (~250 ms with an 86-partition tail) — far too slow, so circular-
+// convolution aliasing accumulates in the un-constrained partitions and the
+// filter drifts into divergence (the classic "ERLE climbs, then falls below 0
+// and sticks there"). Constrain several partitions per block so the full
+// sweep completes in ~16 blocks (~45 ms) instead.
+const CONSTRAIN_PER_BLOCK = Math.max(1, Math.ceil(PARTITIONS / 16))
+
+// Divergence guard. A linear echo canceller must NEVER make the signal louder:
+// if the running output power exceeds the input power the filter is actively
+// injecting echo instead of removing it (this is exactly the negative-ERLE
+// state seen in the logs). When that happens we (a) bypass to the raw capture
+// so there is zero regression, and (b) shrink the weights toward zero so the
+// NLMS loop re-converges from a clean state instead of staying stuck.
+const DIV_EMA = 0.9 // smoothing for the input/output power detector
+const DIV_RATIO = 1.06 // output louder than input by >6% ⇒ diverging
+const DEADAPT = 0.5 // per-block weight shrink while diverging (fast recovery)
+
 class FFT {
   constructor(n) {
     this.n = n
@@ -166,6 +187,10 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.ci = new Float32Array(N)
 
     this.constrainIdx = 0 // round-robin gradient-constraint cursor
+
+    this.cand = new Float32Array(BLOCK) // candidate cleaned block (pre-guard)
+    this.pAvg = 0 // smoothed input power  (divergence detector)
+    this.eAvg = 0 // smoothed output power (divergence detector)
 
     // Metrics accumulation (~0.5 s windows).
     this.mPrimary = 0
@@ -277,7 +302,8 @@ class ScreenAEC extends AudioWorkletProcessor {
     // --- 5. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
     fft.transform(yr, yi, true)
 
-    // --- 6. Error (cleaned) block e = d - echoEstimate → this IS the output ---
+    // --- 6. Candidate cleaned block e = d - echoEstimate (decided below) ---
+    const cand = this.cand
     let unstable = false
     let primaryPow = 0
     let errPow = 0
@@ -290,51 +316,91 @@ class ScreenAEC extends AudioWorkletProcessor {
       }
       if (e > 1) e = 1
       else if (e < -1) e = -1
-      output[n] = e
+      cand[n] = e
       primaryPow += d * d
       errPow += e * e
-      // Error analysis frame for the gradient: [zeros | e]
-      er[n] = 0
-      er[n + BLOCK] = e
-      ei[n] = 0
-      ei[n + BLOCK] = 0
     }
 
+    // Numerical blow-up: reset the filter, pass the raw capture through.
     if (unstable) {
       this.resetWeights()
+      this.pAvg = 0
+      this.eAvg = 0
+      for (let n = 0; n < BLOCK; n++) output[n] = primary[n]
       refPrev.set(hasRef ? reference : new Float32Array(BLOCK))
       return true
     }
 
-    // --- 7. FFT of error ---
-    fft.transform(er, ei, false)
+    // --- 6b. Divergence guard (input/output power) ---
+    // Track smoothed input vs output power. If the "cleaned" output is louder
+    // than the raw capture the filter has diverged and is injecting echo, so we
+    // bypass to the raw signal (no regression) and shrink the weights toward
+    // zero so NLMS re-converges instead of sticking at a negative ERLE.
+    this.pAvg = DIV_EMA * this.pAvg + (1 - DIV_EMA) * primaryPow
+    this.eAvg = DIV_EMA * this.eAvg + (1 - DIV_EMA) * errPow
+    const diverging = this.eAvg > this.pAvg * DIV_RATIO
 
-    // --- 8. NLMS weight update (adapt continuously while far-end is active) ---
-    // The content is uncorrelated with the reference, so continuous adaptation
-    // converges onto the echo path only; leakage bleeds off the uncorrelated
-    // gradient noise. No double-talk freeze here — that is intentional and is
-    // the key to this working on continuously-playing content.
-    if (refActive) {
+    let emittedPow = errPow
+    if (diverging) {
+      // Bypass: publish the untouched capture this block.
+      for (let n = 0; n < BLOCK; n++) output[n] = primary[n]
+      emittedPow = primaryPow
+      // De-adapt fast: pull every weight halfway to zero.
       for (let p = 0; p < PARTITIONS; p++) {
-        const xr = Xr[p]
-        const xi = Xi[p]
         const wr = Wr[p]
         const wi = Wi[p]
         for (let k = 0; k < N; k++) {
-          const f = MU / denom[k]
-          const xrk = xr[k]
-          const xik = xi[k]
-          // conj(X) * E
-          const gr = xrk * er[k] + xik * ei[k]
-          const gi = xrk * ei[k] - xik * er[k]
-          wr[k] = LEAK * wr[k] + f * gr
-          wi[k] = LEAK * wi[k] + f * gi
+          wr[k] *= DEADAPT
+          wi[k] *= DEADAPT
         }
       }
+      // Relax the detector so a single good block can end bypass mode.
+      this.eAvg = this.pAvg
+    } else {
+      // Emit the cleaned block and build the gradient error frame [zeros | e].
+      for (let n = 0; n < BLOCK; n++) {
+        const e = cand[n]
+        output[n] = e
+        er[n] = 0
+        er[n + BLOCK] = e
+        ei[n] = 0
+        ei[n + BLOCK] = 0
+      }
 
-      // --- 8b. Round-robin gradient constraint (one partition per block) ---
-      this.constrainPartition(this.constrainIdx)
-      this.constrainIdx = (this.constrainIdx + 1) % PARTITIONS
+      // --- 7. FFT of error ---
+      fft.transform(er, ei, false)
+
+      // --- 8. NLMS weight update (adapt continuously while far-end is active) ---
+      // The content is uncorrelated with the reference, so continuous adaptation
+      // converges onto the echo path only; leakage bleeds off the uncorrelated
+      // gradient noise. No double-talk freeze here — that is intentional and is
+      // the key to this working on continuously-playing content.
+      if (refActive) {
+        for (let p = 0; p < PARTITIONS; p++) {
+          const xr = Xr[p]
+          const xi = Xi[p]
+          const wr = Wr[p]
+          const wi = Wi[p]
+          for (let k = 0; k < N; k++) {
+            const f = MU / denom[k]
+            const xrk = xr[k]
+            const xik = xi[k]
+            // conj(X) * E
+            const gr = xrk * er[k] + xik * ei[k]
+            const gi = xrk * ei[k] - xik * er[k]
+            wr[k] = LEAK * wr[k] + f * gr
+            wi[k] = LEAK * wi[k] + f * gi
+          }
+        }
+
+        // --- 8b. Gradient constraint: sweep several partitions per block so
+        // the whole filter is re-constrained fast enough to prevent aliasing
+        // build-up (the main driver of the divergence above). ---
+        for (let c = 0; c < CONSTRAIN_PER_BLOCK; c++) {
+          this.constrainPartition(this.constrainIdx)
+          this.constrainIdx = (this.constrainIdx + 1) % PARTITIONS
+        }
+      }
     }
 
     // --- 9. Remember this reference block for the next overlap frame ---
@@ -343,7 +409,7 @@ class ScreenAEC extends AudioWorkletProcessor {
 
     // --- 10. Metrics (~0.5 s): report echo return loss enhancement ---
     this.mPrimary += primaryPow
-    this.mErr += errPow
+    this.mErr += emittedPow
     this.mSamples += BLOCK
     if (this.mSamples >= this.metricInterval) {
       const erle = this.mErr > 0 ? 10 * Math.log10(this.mPrimary / this.mErr) : 0
@@ -353,6 +419,7 @@ class ScreenAEC extends AudioWorkletProcessor {
         partitions: PARTITIONS,
         tailMs: Math.round((PARTITIONS * BLOCK * 1000) / sampleRate),
         adapting: refActive,
+        diverging,
       })
       this.mPrimary = 0
       this.mErr = 0
