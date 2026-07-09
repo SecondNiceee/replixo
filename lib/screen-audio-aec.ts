@@ -115,7 +115,7 @@ export async function createScreenShareAEC(
         const d = e.data
         if (d && d.type === "metrics") {
           console.log(
-            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}`,
+            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}${d.diverging ? " | BYPASS (diverging)" : ""}`,
           )
         }
       }
