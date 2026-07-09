@@ -167,8 +167,25 @@ const DOM_RELEASE = 0.88 // weight on OLD value when dom FALLING (slow: 12% to n
 // (corr ~0.9) means the captured audio is a delayed copy of the remote voices
 // with no content — so pulling the block to silence removes intelligibility
 // without harming any media (media keeps dom low and leaves the gate open).
+//
+// WHY dom ALONE IS NOT ENOUGH (iteration 9, the "media dies when I talk" fix):
+// dom is an ENVELOPE-CORRELATION metric. When the demonstrator shares a DIFFERENT
+// tab that plays media (e.g. a YouTube video) and a remote person talks, the echo
+// of that voice leaks into the captured tab and produces a strongly correlated
+// envelope spike — so dom shoots up EVEN THOUGH real media is playing underneath.
+// A dom-only broadband gate then mutes the whole block and the media audio drops
+// out during every talk burst. dom cannot distinguish "pure echo" from "echo on
+// top of media", so it must not be the sole trigger.
+//
+// The reliable discriminator is ENERGY THAT SURVIVES THE SPECTRAL RES: the per-bin
+// Wiener filter already removes the echo bins, so whatever survives is desired
+// content. If almost nothing survives (survive ≈ 0) the block was pure echo and we
+// can gate the residual to silence; if a meaningful fraction survives (media) we
+// keep the gate open in proportion to that surviving energy. SURVIVE_REF is the
+// post-RES/primary power ratio above which we treat the block as "content present".
 const GATE_DOM_ON = 0.45 // dom below this ⇒ no broadband gating (protect content)
 const GATE_MIN = 0.0025 // broadband floor (~ -52 dB) at full echo dominance
+const SURVIVE_REF = 0.04 // post-RES energy ≥ 4% of capture ⇒ media present, hold gate open
 
 // --- Robust residual-echo estimate (the fix for "I still hear myself") -------
 // Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
@@ -616,22 +633,34 @@ class ScreenAEC extends AudioWorkletProcessor {
           gi[k] = ei[k] * g
         }
         fft.transform(gr, gi, true) // → time domain suppressed block
-        // Broadband echo gate: above GATE_DOM_ON, ramp the whole block toward
-        // GATE_MIN as dominance approaches 1. Nothing to protect here, so this
-        // finishes off the intelligibility the per-bin gain leaves behind.
-        //
-        // The ramp is a STEEP quadratic in (1 - t): it stays close to 1 just
-        // above the threshold (so a borderline dom barely touches the audio) but
-        // collapses fast toward the very deep GATE_MIN floor as dominance nears
-        // 1 (the confident pure-echo case in the logs, dom ~0.98). A linear ramp
-        // only reached ~-28 dB at full dominance, which left the voice audible;
-        // this reaches ~-52 dB, which pushes the residual below the intelligibility
-        // threshold while media (low dom) is still passed through untouched.
+
+        // Measure how much energy SURVIVED the per-bin spectral RES relative to
+        // the raw capture. This is the trustworthy "is there desired content
+        // here" signal (see SURVIVE_REF note above):
+        //   survive ≈ 0 → block was (almost) pure echo, RES cleaned it, only
+        //                 residual echo remains → safe to gate to near-silence.
+        //   survive high → most captured energy is NOT echo (media the
+        //                  demonstrator is intentionally sharing) → keep it.
+        let postResPow = 0
+        for (let n = 0; n < BLOCK; n++) {
+          const v = gr[n + BLOCK]
+          postResPow += v * v
+        }
+        const survive = primaryPow > 1e-9 ? postResPow / primaryPow : 1
+        // contentFrac ∈ [0,1]: fraction of the block that is desired content.
+        const contentFrac = survive >= SURVIVE_REF ? 1 : survive / SURVIVE_REF
+
+        // Broadband echo gate. The dom-driven deep target (steep quadratic ramp
+        // toward the very deep GATE_MIN floor as dominance → 1) is applied ONLY
+        // to the echo-only portion of the block. Surviving media energy holds the
+        // gate open in proportion to contentFrac, so a YouTube tab keeps playing
+        // through a talk burst instead of being muted with the echo.
         let echoGate = 1
-        if (dom > GATE_DOM_ON) {
+        if (dom > GATE_DOM_ON && contentFrac < 1) {
           const t = (dom - GATE_DOM_ON) / (1 - GATE_DOM_ON) // 0..1
           const inv = 1 - t
-          echoGate = GATE_MIN + (1 - GATE_MIN) * inv * inv
+          const gated = GATE_MIN + (1 - GATE_MIN) * inv * inv
+          echoGate = contentFrac + (1 - contentFrac) * gated
         }
         let outPow = 0
         for (let n = 0; n < BLOCK; n++) {
