@@ -35,14 +35,22 @@ export interface ScreenAudioAEC {
 // Handy for verifying the echo canceller actually locks on across browsers.
 const AEC_DEBUG = true
 
+// Bump this whenever public/aec-worklet.js changes. It is appended as a query
+// string to the module URL so browsers never serve a stale cached worklet —
+// AudioWorklet modules are cached aggressively, so without this a fresh deploy
+// can keep running the OLD echo-cancellation code (e.g. missing the residual
+// suppressor) even after `pnpm build` + restart.
+const AEC_WORKLET_VERSION = "3-res-aggressive"
+
 let workletModuleLoaded = false
 
 async function ensureWorklet(ctx: AudioContext): Promise<boolean> {
   if (workletModuleLoaded) return true
   if (!ctx.audioWorklet) return false
   try {
-    await ctx.audioWorklet.addModule("/aec-worklet.js")
+    await ctx.audioWorklet.addModule(`/aec-worklet.js?v=${AEC_WORKLET_VERSION}`)
     workletModuleLoaded = true
+    if (AEC_DEBUG) console.log(`[v0] AEC worklet loaded (v=${AEC_WORKLET_VERSION})`)
     return true
   } catch {
     return false
