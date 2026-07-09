@@ -134,11 +134,28 @@ const RES_RELEASE = 0.82 // gain-smoothing weight when RELEASING suppression (sl
 // We map it to [0..1] and use it to slide the RES between "gentle, content-
 // safe" (corr low ⇒ media present) and "deep kill" (corr high ⇒ pure echo).
 // This is the balance the user asked for: media stays clean, voice echo dies.
-const RES_OVERSUB_MAX = 6.0 // over-subtraction when captured audio is pure echo
-const RES_FLOOR_ECHO = 0.002 // ~ -54 dB floor when fully echo-dominated
-const DOM_CORR_LO = 0.3 // corr ≤ this ⇒ treat as content present (dominance 0)
-const DOM_CORR_HI = 0.85 // corr ≥ this ⇒ treat as pure echo (dominance 1)
-const DOM_EMA = 0.7 // smoothing of the dominance estimate between windows
+const RES_OVERSUB_MAX = 12.0 // over-subtraction when captured audio is pure echo
+const RES_FLOOR_ECHO = 0.0005 // ~ -66 dB floor when fully echo-dominated
+const DOM_CORR_LO = 0.35 // corr ≤ this ⇒ treat as content present (dominance 0)
+const DOM_CORR_HI = 0.75 // corr ≥ this ⇒ treat as pure echo (dominance 1)
+// Asymmetric dominance smoothing: SNAP UP the instant echo is confirmed (a
+// single high-corr window is enough) but RELEASE slowly so the deep suppression
+// holds through a talk burst instead of flickering with the noisy per-window
+// corr estimate. This is what stops the "quieter but still distinct" leak: the
+// logs showed corr bouncing 0.9→0.4→0.9, and the old symmetric EMA averaged
+// that down to dom~0.6 so the aggressive RES never fully engaged.
+const DOM_ATTACK = 0.25 // weight on OLD value when dom RISING (fast: 75% to new)
+const DOM_RELEASE = 0.88 // weight on OLD value when dom FALLING (slow: 12% to new)
+
+// Broadband echo gate. When echo dominance is confirmed there is (in this
+// screen-share scenario) NO desired near-end signal to protect — the loopback
+// is 100% unwanted remote voices — so on top of the per-bin Wiener gain we pull
+// the WHOLE block toward silence. This is the decisive lever that kills the
+// residual intelligibility of the voice echo. It engages only above GATE_DOM_ON
+// (well clear of the content-present regime, where corr and thus dom are low),
+// so media the demonstrator intentionally plays is left untouched.
+const GATE_DOM_ON = 0.6 // dom below this ⇒ no broadband gating (protect content)
+const GATE_MIN = 0.04 // broadband floor (~ -28 dB) at full echo dominance
 
 // --- Robust residual-echo estimate (the fix for "I still hear myself") -------
 // Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
@@ -586,9 +603,17 @@ class ScreenAEC extends AudioWorkletProcessor {
           gi[k] = ei[k] * g
         }
         fft.transform(gr, gi, true) // → time domain suppressed block
+        // Broadband echo gate: above GATE_DOM_ON, ramp the whole block toward
+        // GATE_MIN as dominance approaches 1. Nothing to protect here, so this
+        // finishes off the intelligibility the per-bin gain leaves behind.
+        let echoGate = 1
+        if (dom > GATE_DOM_ON) {
+          const t = (dom - GATE_DOM_ON) / (1 - GATE_DOM_ON) // 0..1
+          echoGate = 1 - t * (1 - GATE_MIN)
+        }
         let outPow = 0
         for (let n = 0; n < BLOCK; n++) {
-          let o = gr[n + BLOCK]
+          let o = gr[n + BLOCK] * echoGate
           if (o > 1) o = 1
           else if (o < -1) o = -1
           output[n] = o
@@ -664,7 +689,10 @@ class ScreenAEC extends AudioWorkletProcessor {
       // it is safe to suppress hard; low corr means media is present, so back
       // off to protect it.
       const domRaw = Math.max(0, Math.min(1, (delayCorr - DOM_CORR_LO) / (DOM_CORR_HI - DOM_CORR_LO)))
-      this.echoDom = DOM_EMA * this.echoDom + (1 - DOM_EMA) * domRaw
+      // Fast attack when echo appears, slow release so the deep suppression
+      // holds through a talk burst despite the noisy per-window corr estimate.
+      const domW = domRaw > this.echoDom ? DOM_ATTACK : DOM_RELEASE
+      this.echoDom = domW * this.echoDom + (1 - domW) * domRaw
 
       // If a confident delay estimate sits near/beyond the tail, the echo is
       // (partly) outside the filter — flag it so the logs explain leftover echo.
