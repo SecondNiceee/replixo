@@ -154,8 +154,21 @@ const DOM_RELEASE = 0.88 // weight on OLD value when dom FALLING (slow: 12% to n
 // residual intelligibility of the voice echo. It engages only above GATE_DOM_ON
 // (well clear of the content-present regime, where corr and thus dom are low),
 // so media the demonstrator intentionally plays is left untouched.
-const GATE_DOM_ON = 0.6 // dom below this ⇒ no broadband gating (protect content)
-const GATE_MIN = 0.04 // broadband floor (~ -28 dB) at full echo dominance
+//
+// WHY THIS GOT MORE AGGRESSIVE (iteration 8, the "quiet but still distinct" fix):
+// the linear stage is effectively dead here (loopback goes through the WebRTC
+// playout jitter buffer, which time-warps/resamples the echo so the delay drifts
+// and the linear NLMS never locks — the logs show lin ERLE ≈ 0 dB, often deeply
+// negative). That leaves only the *spectral* RES, and spectral attenuation of
+// only ~25-28 dB preserves the voice's formant structure, so you still recognise
+// your own voice ("quiet but distinct"). The cure is a much DEEPER broadband gate
+// that engages sooner and, crucially, ramps toward near-silence with a steep
+// quadratic curve as dominance climbs. This is safe precisely because a high dom
+// (corr ~0.9) means the captured audio is a delayed copy of the remote voices
+// with no content — so pulling the block to silence removes intelligibility
+// without harming any media (media keeps dom low and leaves the gate open).
+const GATE_DOM_ON = 0.45 // dom below this ⇒ no broadband gating (protect content)
+const GATE_MIN = 0.0025 // broadband floor (~ -52 dB) at full echo dominance
 
 // --- Robust residual-echo estimate (the fix for "I still hear myself") -------
 // Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
@@ -606,10 +619,19 @@ class ScreenAEC extends AudioWorkletProcessor {
         // Broadband echo gate: above GATE_DOM_ON, ramp the whole block toward
         // GATE_MIN as dominance approaches 1. Nothing to protect here, so this
         // finishes off the intelligibility the per-bin gain leaves behind.
+        //
+        // The ramp is a STEEP quadratic in (1 - t): it stays close to 1 just
+        // above the threshold (so a borderline dom barely touches the audio) but
+        // collapses fast toward the very deep GATE_MIN floor as dominance nears
+        // 1 (the confident pure-echo case in the logs, dom ~0.98). A linear ramp
+        // only reached ~-28 dB at full dominance, which left the voice audible;
+        // this reaches ~-52 dB, which pushes the residual below the intelligibility
+        // threshold while media (low dom) is still passed through untouched.
         let echoGate = 1
         if (dom > GATE_DOM_ON) {
           const t = (dom - GATE_DOM_ON) / (1 - GATE_DOM_ON) // 0..1
-          echoGate = 1 - t * (1 - GATE_MIN)
+          const inv = 1 - t
+          echoGate = GATE_MIN + (1 - GATE_MIN) * inv * inv
         }
         let outPow = 0
         for (let n = 0; n < BLOCK; n++) {
