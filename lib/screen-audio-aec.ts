@@ -40,7 +40,7 @@ const AEC_DEBUG = true
 // AudioWorklet modules are cached aggressively, so without this a fresh deploy
 // can keep running the OLD echo-cancellation code (e.g. missing the residual
 // suppressor) even after `pnpm build` + restart.
-const AEC_WORKLET_VERSION = "8-deep-echo-gate"
+const AEC_WORKLET_VERSION = "9-survive-aware-gate"
 
 let workletModuleLoaded = false
 
