@@ -24,8 +24,20 @@ import { CAMERA_PRODUCE_OPTIONS } from "./types"
 // constraint is harmless per the Media Capture spec: browsers that don't
 // support `restrictOwnAudio` simply ignore the unrecognised member and still
 // capture system audio, so there is no regression on older browsers.
+//
+// We ALSO pass `suppressLocalAudioPlayback: true`. When sharing "entire screen
+// with system audio", Chrome by default re-plays the captured audio out of the
+// local speakers; that replayed audio is then re-captured by the OS loopback,
+// forming a feedback loop that AMPLIFIES everything in the mix — including the
+// remote voices we're trying to remove. Suppressing local playback of the
+// captured stream breaks that loop deterministically (the sharer still hears
+// the original content directly; only the duplicate capture-playback is muted).
+// Unknown to older browsers ⇒ ignored, no regression.
 function getScreenAudioConstraint(): boolean | MediaTrackConstraints {
-  return { restrictOwnAudio: true } as MediaTrackConstraints
+  return {
+    restrictOwnAudio: true,
+    suppressLocalAudioPlayback: true,
+  } as MediaTrackConstraints
 }
 
 interface UseMediaControlsParams {

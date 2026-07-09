@@ -40,7 +40,7 @@ const AEC_DEBUG = true
 // AudioWorklet modules are cached aggressively, so without this a fresh deploy
 // can keep running the OLD echo-cancellation code (e.g. missing the residual
 // suppressor) even after `pnpm build` + restart.
-const AEC_WORKLET_VERSION = "3-res-aggressive"
+const AEC_WORKLET_VERSION = "5-delay-diag-tail400"
 
 let workletModuleLoaded = false
 
@@ -122,8 +122,12 @@ export async function createScreenShareAEC(
       aecNode.port.onmessage = (e) => {
         const d = e.data
         if (d && d.type === "metrics") {
+          const delay =
+            typeof d.delayMs === "number"
+              ? ` | echo delay ~${d.delayMs}ms (corr ${d.delayCorr})${d.delayOutOfRange ? " ⚠ OUT OF RANGE" : ""}`
+              : ""
           console.log(
-            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}${d.diverging ? " | BYPASS (diverging)" : ""}`,
+            `[v0] AEC ERLE ${d.erle} dB | tail ${d.tailMs}ms (${d.partitions} part) | adapting=${d.adapting}${d.diverging ? " | BYPASS (diverging)" : ""}${delay}`,
           )
         }
       }
