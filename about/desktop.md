@@ -74,6 +74,7 @@
 | Канал | Тип | Назначение |
 |---|---|---|
 | `get-desktop-sources` | `handle` | `desktopCapturer.getSources({screen, window})` → список источников (id, name, thumbnail DataURL, appIcon) для своего picker'а. |
+| `set-display-source` | `handle` | Renderer сообщает, какой источник выбрал пользователь в кастомном пикере, ПЕРЕД вызовом штатного `getDisplayMedia()`. Сохраняется в `pendingDisplaySourceId`. |
 | `window-minimize` / `window-maximize-toggle` / `window-close` | `on` | Управление окном из кастомного титлбара. |
 | `window-is-maximized` | `handle` | Текущее состояние развёрнутости. |
 | `window-maximize-changed` | `send`→renderer | Уведомление об изменении развёрнутости (для иконки кнопки). |
@@ -99,24 +100,62 @@
   - `getCursorPoint()`
   - `writeClipboardText(text)`
 
-Renderer везде проверяет `window.electronAPI?.isElectron`, чтобы один и тот же
+Renderer везде проверяет `window.electronAPI?.isElectron`, чтобы один и ��от же
 код работал и в браузере (где API отсутствует), и в Electron.
 
 ---
 
-## Демонстрация экрана в Electron — `electron-patches.tsx`
+## Демонстрация экрана в Electron — `electron-patches.tsx` + `main.js`
 
 В Electron `navigator.mediaDevices.getDisplayMedia()` сам не показывает
-системный picker. Поэтому `ElectronPatches` **подменяет `getDisplayMedia`**:
+системный picker. Поэтому `ElectronPatches` **подменяет `getDisplayMedia`**, но
+важно: подмена **сохраняет штатный путь захвата**, а не уводит на legacy-API.
 
-1. запрашивает источники через `electronAPI.getDesktopSources()`;
+Актуальный поток (renderer → main):
+
+1. renderer запрашивает источники через `electronAPI.getDesktopSources()`;
 2. показывает **собственный picker** (`showScreenPicker`) — сетка карточек с
    превью окон/экранов, построенная вручную на DOM;
-3. передаёт выбранный `sourceId` в `getUserMedia` с `chromeMediaSource: "desktop"`
-   и ограничениями видео (1280–1920×720–1080, 15–30 fps).
+3. передаёт выбранный `sourceId` в main через `electronAPI.setDisplaySource()`
+   (IPC `set-display-source` → `pendingDisplaySourceId`);
+4. вызывает **настоящий** `getDisplayMedia(constraints)` (сохранённый оригинал),
+   передавая те же constraints, что и веб-версия — в т.ч. `restrictOwnAudio: true`
+   и `suppressLocalAudioPlayback: true` (см. `hooks/mediasoup/use-media-controls.ts`);
+5. в main `setDisplayMediaRequestHandler` подставляет выбранный источник и
+   отдаёт `audio: "loopback"` **только если** звук реально запрошен
+   (`request.audioRequested`).
+
+### Почему НЕ legacy `chromeMediaSource: "desktop"`
+
+Раньше renderer подменял захват на legacy-`getUserMedia({ chromeMediaSource: "desktop" })`.
+Этот путь захватывает системный звук целиком и **полностью игнорирует
+constraints** — включая `restrictOwnAudio`. Из-за этого при «демонстрации со
+звуком» в аудиодорожку попадал звук самого звонка (голоса других участников,
+которые проигрываются на машине демонстрирующего), возвращался обратно, и
+зритель слышал самого себя с задержкой (эхо). Сейчас этот путь **удалён**.
+
+Electron 42 = **Chromium 148**, где `restrictOwnAudio` уже поддержан. Через
+штатный `getDisplayMedia` Chromium честно вычитает **аудио собственной вкладки**
+(голоса участников, которые проигрывает наше приложение) из loopback-микса.
+
+### Граница возможного (важно для диагностики эха)
+
+`restrictOwnAudio` вычитает **только звук, который издаёт само окно Electron**
+(наш renderer с воспроизведением звонка). Он **не может** убрать эхо, если
+голоса участников звучат **вне** этого окна, например:
+
+- звонок открыт **параллельно в обычном браузере**, а демонстрация идёт из
+  Electron (или наоборот) — для Electron это «чужой» звук в системном миксе;
+- захватывается **окно/экран другого приложения** со своим звуком, который ОС
+  всё равно отдаёт как часть системного loopback-микса.
+
+В этих случаях штатного вычитания недостаточно и остаётся только DSP-путь
+(адаптивный AEC-воркл��т, см. `about/AEC/`). Практический вывод: тестировать
+эхо в Electron нужно, когда **весь звонок сидит в одном и том же окне Electron**,
+а не «звонок в браузере + демонстрация в приложении».
 
 Патч ставится один раз (флаг `navigator.mediaDevices.__electronPatched`). В
-браузере функци�� ничего не делает. Также `ElectronPatches` добавляет
+браузере функция ничего не делает. Также `ElectronPatches` добавляет
 `<html class="is-electron">` для CSS-резерва под титлбар.
 
 ---
@@ -212,7 +251,7 @@ overlay-режиме Electron.
 1. **нативный clipboard Electron** (`electronAPI.writeClipboardText`) — основной
    путь в десктопе, т.к. `navigator.clipboard` в безрамочном/прозрачном окне
    ненадёжен;
-2. `navigator.clipboard.writeText` — обычный веб;
+2. `navigator.clipboard.writeText` — ��бычный веб;
 3. `document.execCommand("copy")` через скрытый `textarea` — запасной путь.
 
 ---
