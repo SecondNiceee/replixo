@@ -134,8 +134,21 @@ const RES_RELEASE = 0.82 // gain-smoothing weight when RELEASING suppression (sl
 // We map it to [0..1] and use it to slide the RES between "gentle, content-
 // safe" (corr low ⇒ media present) and "deep kill" (corr high ⇒ pure echo).
 // This is the balance the user asked for: media stays clean, voice echo dies.
-const RES_OVERSUB_MAX = 12.0 // over-subtraction when captured audio is pure echo
-const RES_FLOOR_ECHO = 0.0005 // ~ -66 dB floor when fully echo-dominated
+// NOTE (iteration 10, the "distorted, faint self" fix): a 12x over-subtraction
+// with a -66 dB floor shreds the spectrum — isolated bins flip between pass and
+// kill every frame, producing severe musical noise/distortion on whatever leaks
+// through (the user's own voice came back mangled and buzzy). We pull the max
+// over-subtraction down and lift the floor a little, then rely on FREQUENCY-DOMAIN
+// gain SMOOTHING (see RES_GAIN_SMOOTH) to reach a clean deep suppression instead
+// of a harsh, artifact-ridden one.
+const RES_OVERSUB_MAX = 6.0 // over-subtraction when captured audio is pure echo
+const RES_FLOOR_ECHO = 0.003 // ~ -50 dB floor when fully echo-dominated
+// Smooth the per-bin suppression gain across adjacent frequency bins before
+// applying it. This is the single most effective anti-musical-noise measure for
+// spectral subtraction: it prevents lone bins from snapping open/closed, which
+// is exactly what turns residual echo into a buzzy, distorted artifact. true =>
+// apply a 3-tap [0.25, 0.5, 0.25] moving average over the gain spectrum.
+const RES_GAIN_SMOOTH = true
 const DOM_CORR_LO = 0.35 // corr ≤ this ⇒ treat as content present (dominance 0)
 const DOM_CORR_HI = 0.75 // corr ≥ this ⇒ treat as pure echo (dominance 1)
 // Asymmetric dominance smoothing: SNAP UP the instant echo is confirmed (a
@@ -186,6 +199,9 @@ const DOM_RELEASE = 0.88 // weight on OLD value when dom FALLING (slow: 12% to n
 const GATE_DOM_ON = 0.45 // dom below this ⇒ no broadband gating (protect content)
 const GATE_MIN = 0.0025 // broadband floor (~ -52 dB) at full echo dominance
 const SURVIVE_REF = 0.04 // post-RES energy ≥ 4% of capture ⇒ media present, hold gate open
+// Temporal smoothing of the broadband gate scalar (anti-pumping, iteration 10).
+const GATE_ATTACK = 0.4 // weight on OLD gate when CLOSING (fairly fast)
+const GATE_RELEASE = 0.85 // weight on OLD gate when OPENING (slow, no flutter)
 
 // --- Robust residual-echo estimate (the fix for "I still hear myself") -------
 // Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
@@ -334,6 +350,8 @@ class ScreenAEC extends AudioWorkletProcessor {
     // 0 = content present (be gentle), 1 = pure echo (suppress hard). Starts at
     // 0 so we never over-suppress before we have a confident delay/corr estimate.
     this.echoDom = 0
+    // Smoothed broadband gate scalar (1 = fully open). Anti-pumping state.
+    this.echoGatePrev = 1
 
     // Delay-diagnostic ring buffers of per-block power (oldest→newest via idx).
     this.dEnv = new Float32Array(ENV_LEN) // captured (primary) power envelope
@@ -616,6 +634,8 @@ class ScreenAEC extends AudioWorkletProcessor {
         const dom = this.echoDom
         const oversubDyn = RES_OVERSUB + dom * (RES_OVERSUB_MAX - RES_OVERSUB)
         const floorDyn = RES_FLOOR + dom * (RES_FLOOR_ECHO - RES_FLOOR)
+        // Pass 1: compute the temporally-smoothed Wiener gain per bin (do NOT
+        // apply yet — we frequency-smooth it in pass 2 to kill musical noise).
         for (let k = 0; k < N; k++) {
           const s = er[k] * er[k] + ei[k] * ei[k] // post-linear output power
           // Robust echo proxy (survives linear-filter dips) instead of the raw,
@@ -629,6 +649,20 @@ class ScreenAEC extends AudioWorkletProcessor {
           const w = g < prev ? RES_ATTACK : RES_RELEASE
           g = w * prev + (1 - w) * g
           gain[k] = g
+        }
+        // Pass 2: apply the gain, optionally frequency-smoothed with a 3-tap
+        // [0.25, 0.5, 0.25] moving average. Smoothing across neighbouring bins
+        // stops isolated bins from snapping between pass and kill, which is the
+        // root cause of the buzzy "musical noise" distortion the user heard on
+        // the residual. Reads gain[] (fully populated in pass 1) and writes only
+        // gr/gi, so there is no feedback into the gain estimate.
+        for (let k = 0; k < N; k++) {
+          let g = gain[k]
+          if (RES_GAIN_SMOOTH) {
+            const gl = k > 0 ? gain[k - 1] : gain[k]
+            const gh = k < N - 1 ? gain[k + 1] : gain[k]
+            g = 0.25 * gl + 0.5 * g + 0.25 * gh
+          }
           gr[k] = er[k] * g
           gi[k] = ei[k] * g
         }
@@ -662,6 +696,13 @@ class ScreenAEC extends AudioWorkletProcessor {
           const gated = GATE_MIN + (1 - GATE_MIN) * inv * inv
           echoGate = contentFrac + (1 - contentFrac) * gated
         }
+        // Temporally smooth the broadband gate. A raw per-frame scalar swings
+        // with the noisy dom estimate and amplitude-modulates the block, which
+        // is heard as pumping/tremolo distortion. Fast to close (kill echo
+        // promptly) but slow to reopen (no fluttering) keeps it clean.
+        const gw = echoGate < this.echoGatePrev ? GATE_ATTACK : GATE_RELEASE
+        echoGate = gw * this.echoGatePrev + (1 - gw) * echoGate
+        this.echoGatePrev = echoGate
         let outPow = 0
         for (let n = 0; n < BLOCK; n++) {
           let o = gr[n + BLOCK] * echoGate
