@@ -116,10 +116,28 @@ const RES_ENABLED = true
 // clearly audible (echo needs ~30-45 dB total to vanish). The RES has to close
 // that gap, so we over-subtract hard and allow a very deep floor. Content bins
 // are protected by the self-gating gain, so this stays clean on media audio.
-const RES_OVERSUB = 3.0 // over-subtraction factor on the echo-power estimate
-const RES_FLOOR = 0.015 // min gain (~ -36 dB) — deep cut on echo-only bins
-const RES_ATTACK = 0.2 // gain-smoothing weight when INCREASING suppression (fast)
-const RES_RELEASE = 0.8 // gain-smoothing weight when RELEASING suppression (slow)
+const RES_OVERSUB = 2.2 // over-subtraction factor on the ROBUST echo estimate
+const RES_FLOOR = 0.012 // min gain (~ -38 dB) — deep cut on echo-only bins
+const RES_ATTACK = 0.15 // gain-smoothing weight when INCREASING suppression (fast)
+const RES_RELEASE = 0.82 // gain-smoothing weight when RELEASING suppression (slow)
+
+// --- Robust residual-echo estimate (the fix for "I still hear myself") -------
+// Relying on the instantaneous linear echo estimate |Y[k]|² alone is fragile:
+// whenever the linear filter momentarily loses lock (the 3-5 dB ERLE dips seen
+// in the logs) |Y|² collapses, the RES stops suppressing, and a burst of the
+// remote voice leaks through — audible echo, exactly the symptom.
+//
+// But we ALWAYS have a perfect digital copy of the far-end, so we always KNOW
+// when remote voices are playing, even when the linear filter stumbles. We
+// exploit that: track a slowly-adapting per-bin echo-path coupling
+//   coupling[k] = smoothed( |Y[k]|² / referencePower[k] )
+// i.e. how much reference energy turns into echo at the output. Multiplying the
+// (always-available) reference power back by this coupling gives a robust echo
+// estimate that stays elevated through linear-filter dips. We drive the RES off
+// max(instantaneous |Y|², robust estimate), so suppression never falls away
+// while the far-end is active.
+const COUPLING_EMA = 0.985 // slow: learns the stable echo-path gain per bin
+const ECHO_EMA = 0.6 // faster: tracks the robust echo-power envelope
 
 class FFT {
   constructor(n) {
@@ -224,6 +242,8 @@ class ScreenAEC extends AudioWorkletProcessor {
     this.resGain = new Float32Array(N).fill(1) // smoothed per-bin suppression gain
     this.gr = new Float32Array(N) // RES output FFT scratch (real)
     this.gi = new Float32Array(N) // RES output FFT scratch (imag)
+    this.coupling = new Float32Array(N) // smoothed echo-path power gain per bin
+    this.echoPowSm = new Float32Array(N) // smoothed robust echo-power estimate
 
     // Metrics accumulation (~0.5 s windows).
     this.mPrimary = 0
@@ -247,6 +267,9 @@ class ScreenAEC extends AudioWorkletProcessor {
       this.Xi[p].fill(0)
     }
     this.refPrev.fill(0)
+    if (this.coupling) this.coupling.fill(0)
+    if (this.echoPowSm) this.echoPowSm.fill(0)
+    if (this.resGain) this.resGain.fill(1)
   }
 
   // Project one partition's weights back onto the space of length-BLOCK time-
@@ -333,9 +356,28 @@ class ScreenAEC extends AudioWorkletProcessor {
     }
 
     // --- 4b. Save |Y[k]|² for the residual suppressor BEFORE the IFFT below
-    // overwrites yr/yi with the time-domain echo estimate. ---
+    // overwrites yr/yi with the time-domain echo estimate, and update the
+    // ROBUST echo-power estimate (see COUPLING_EMA notes above). ---
     const yPow = this.yPow
-    for (let k = 0; k < N; k++) yPow[k] = yr[k] * yr[k] + yi[k] * yi[k]
+    const coupling = this.coupling
+    const echoPowSm = this.echoPowSm
+    for (let k = 0; k < N; k++) {
+      const yp = yr[k] * yr[k] + yi[k] * yi[k]
+      yPow[k] = yp
+      // `denom[k]` (= REG + Σ_p |X_p[k]|²) is the total reference energy across
+      // the whole echo tail — an always-available measure of how much far-end
+      // could be echoing right now, independent of the linear filter's health.
+      if (refActive) {
+        const c = yp / denom[k] // instantaneous echo-path power gain
+        coupling[k] = COUPLING_EMA * coupling[k] + (1 - COUPLING_EMA) * c
+      }
+      // Robust echo power: reference energy × learned coupling, floored by the
+      // instantaneous estimate so fast transients aren't missed. This stays
+      // elevated through linear-filter dips, keeping the RES suppressing.
+      const robust = coupling[k] * denom[k]
+      const est = robust > yp ? robust : yp
+      echoPowSm[k] = ECHO_EMA * echoPowSm[k] + (1 - ECHO_EMA) * est
+    }
 
     // --- 5. IFFT(Y) → time-domain echo estimate (overlap-save: keep 2nd half) ---
     fft.transform(yr, yi, true)
@@ -417,9 +459,13 @@ class ScreenAEC extends AudioWorkletProcessor {
         const gain = this.resGain
         const gr = this.gr
         const gi = this.gi
+        const echoPowSm = this.echoPowSm
         for (let k = 0; k < N; k++) {
           const s = er[k] * er[k] + ei[k] * ei[k] // post-linear output power
-          const echo = RES_OVERSUB * yPow[k] // residual echo power proxy
+          // Robust echo proxy (survives linear-filter dips) instead of the raw,
+          // fragile instantaneous |Y|². This is the key change that stops the
+          // remote voice leaking through when ERLE momentarily drops.
+          const echo = RES_OVERSUB * echoPowSm[k]
           let g = s / (s + echo + 1e-12)
           if (g < RES_FLOOR) g = RES_FLOOR
           // Fast attack (suppress quickly), slow release (avoid echo bursts).
