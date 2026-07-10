@@ -1,5 +1,8 @@
 const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, clipboard } = require("electron")
 const path = require("path")
+const fs = require("fs")
+const os = require("os")
+const { spawn } = require("child_process")
 
 // URL задеплоенного приложения. Можно переопределить переменной окружения APP_URL.
 const APP_URL = process.env.APP_URL || "https://replixo.ru"
@@ -267,12 +270,118 @@ function setupClipboard() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Variant A (about/echo-fix/plan.md): native WASAPI process-loopback capture.
+//
+// A standalone helper (electron/native/process-loopback) captures the whole
+// system audio mix MINUS Electron's process tree — the OS-level equivalent of
+// restrictOwnAudio. It streams raw float32/48k/stereo PCM on stdout; we forward
+// it to the renderer, which turns it into a MediaStreamTrack for screen share.
+//
+// If the OS is older than Windows 10 build 19041, or the helper binary is not
+// bundled, we report `supported: false` and the renderer falls back to the
+// previous loopback + AEC path (no regression).
+// ---------------------------------------------------------------------------
+let audioCaptureProc = null
+
+// Locate the bundled helper .exe (dev vs packaged).
+function resolveLoopbackHelperPath() {
+  const candidates = [
+    // Packaged: shipped via electron-builder extraResources.
+    path.join(process.resourcesPath || "", "native", "process-loopback-capture.exe"),
+    // Dev: built into the source tree.
+    path.join(__dirname, "native", "process-loopback", "bin", "process-loopback-capture.exe"),
+  ]
+  return candidates.find((p) => p && fs.existsSync(p)) || null
+}
+
+// Windows build number from os.release() (e.g. "10.0.19045" -> 19045).
+function windowsBuildNumber() {
+  const m = /^\d+\.\d+\.(\d+)/.exec(os.release() || "")
+  return m ? Number.parseInt(m[1], 10) : 0
+}
+
+function getAudioCaptureSupport() {
+  if (process.platform !== "win32") {
+    return { supported: false, reason: "not-windows" }
+  }
+  if (windowsBuildNumber() < 19041) {
+    return { supported: false, reason: "old-windows" }
+  }
+  if (!resolveLoopbackHelperPath()) {
+    return { supported: false, reason: "helper-missing" }
+  }
+  return { supported: true, sampleRate: 48000, channels: 2 }
+}
+
+function stopAudioCapture() {
+  if (audioCaptureProc) {
+    try {
+      audioCaptureProc.kill()
+    } catch {
+      /* already gone */
+    }
+    audioCaptureProc = null
+  }
+}
+
+function setupAudioCapture() {
+  ipcMain.handle("get-audio-capture-support", () => getAudioCaptureSupport())
+
+  ipcMain.handle("start-audio-capture", () => {
+    const support = getAudioCaptureSupport()
+    if (!support.supported) return support
+
+    // Exclude the whole Electron process tree (main PID). The renderer runs as
+    // a child of main, so EXCLUDE_TARGET_PROCESS_TREE strips our call audio.
+    const helper = resolveLoopbackHelperPath()
+    stopAudioCapture()
+
+    try {
+      audioCaptureProc = spawn(helper, [String(process.pid)], {
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    } catch (err) {
+      return { supported: false, reason: "spawn-failed", error: String(err) }
+    }
+
+    audioCaptureProc.stdout.on("data", (chunk) => {
+      // Forward raw PCM bytes to the renderer. Buffer serializes over IPC as a
+      // Uint8Array; the renderer reinterprets it as float32.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("audio-capture-data", chunk)
+      }
+    })
+
+    audioCaptureProc.stderr.on("data", (buf) => {
+      const text = String(buf).trim()
+      if (text) console.log("[loopback]", text)
+    })
+
+    audioCaptureProc.on("exit", (code) => {
+      audioCaptureProc = null
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("audio-capture-ended", code)
+      }
+    })
+
+    return { supported: true, sampleRate: support.sampleRate, channels: support.channels }
+  })
+
+  ipcMain.handle("stop-audio-capture", () => {
+    stopAudioCapture()
+    return true
+  })
+}
+
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
   setupWindowControls()
   setupOverlayMode()
   setupClipboard()
+  setupAudioCapture()
   createWindow()
 
   app.on("activate", () => {
@@ -282,7 +391,12 @@ app.whenReady().then(() => {
   })
 })
 
+app.on("before-quit", () => {
+  stopAudioCapture()
+})
+
 app.on("window-all-closed", () => {
+  stopAudioCapture()
   if (process.platform !== "darwin") {
     app.quit()
   }

@@ -44,4 +44,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Нативная запись в буфер обмена ОС (надёжнее, чем navigator.clipboard в
   // безрамочном/прозрачном окне Electron).
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),
+
+  // -------------------------------------------------------------------------
+  // Variant A: нативный захват системного звука через WASAPI process-loopback
+  // c исключением дерева процессов Electron (см. about/echo-fix/plan.md).
+  // Renderer превращает поток PCM в MediaStreamTrack для демонстрации экрана.
+  // -------------------------------------------------------------------------
+  // Поддерживается ли нативный захват (Windows >= 19041 и есть бинарь helper'а).
+  getAudioCaptureSupport: () => ipcRenderer.invoke("get-audio-capture-support"),
+  // Запустить helper. Возвращает { supported, sampleRate, channels } или причину.
+  startAudioCapture: () => ipcRenderer.invoke("start-audio-capture"),
+  // Остановить helper.
+  stopAudioCapture: () => ipcRenderer.invoke("stop-audio-capture"),
+  // Подписка на кадры PCM (Uint8Array с float32 LE). Возвращает функцию отписки.
+  onAudioCaptureData: (callback) => {
+    const handler = (_e, chunk) => callback(chunk)
+    ipcRenderer.on("audio-capture-data", handler)
+    return () => ipcRenderer.removeListener("audio-capture-data", handler)
+  },
+  // Уведомление о завершении процесса захвата. Возвращает функцию отписки.
+  onAudioCaptureEnded: (callback) => {
+    const handler = (_e, code) => callback(code)
+    ipcRenderer.on("audio-capture-ended", handler)
+    return () => ipcRenderer.removeListener("audio-capture-ended", handler)
+  },
 })

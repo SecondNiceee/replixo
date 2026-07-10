@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
 import { createScreenShareAEC, type ScreenAudioAEC } from "@/lib/screen-audio-aec"
+import { isNativeScreenAudioTrack } from "@/lib/native-screen-audio"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -296,14 +297,23 @@ export function useMediaControls({
         // Route the captured system audio through echo cancellation so viewers
         // don't hear themselves (the sharer's machine re-captures the remote
         // voices it plays). Falls back to the raw track if AEC can't be set up.
+        //
+        // Variant A (about/echo-fix/plan.md): in Electron the track may already
+        // come from native WASAPI process-loopback that excludes our own process
+        // tree — the participants' voices are physically gone, so running DSP AEC
+        // on top would only risk distortion. Publish it as-is.
         let audioTrackToPublish = audioTrack
-        const aec = await createScreenShareAEC(audioTrack)
-        if (aec) {
-          screenAecRef.current = aec
-          audioTrackToPublish = aec.track
-          console.log("[v0] Screen audio: publishing AEC-cleaned track")
+        if (isNativeScreenAudioTrack(audioTrack)) {
+          console.log("[v0] Screen audio: native process-loopback track, skipping AEC")
         } else {
-          console.log("[v0] Screen audio: AEC unavailable, publishing RAW track (echo possible)")
+          const aec = await createScreenShareAEC(audioTrack)
+          if (aec) {
+            screenAecRef.current = aec
+            audioTrackToPublish = aec.track
+            console.log("[v0] Screen audio: publishing AEC-cleaned track")
+          } else {
+            console.log("[v0] Screen audio: AEC unavailable, publishing RAW track (echo possible)")
+          }
         }
 
         const producer = await sendTransport.produce({
@@ -323,10 +333,12 @@ export function useMediaControls({
             screenAecRef.current?.stop()
             screenAecRef.current = null
             let freshToPublish = freshAudio
-            const freshAec = await createScreenShareAEC(freshAudio)
-            if (freshAec) {
-              screenAecRef.current = freshAec
-              freshToPublish = freshAec.track
+            if (!isNativeScreenAudioTrack(freshAudio)) {
+              const freshAec = await createScreenShareAEC(freshAudio)
+              if (freshAec) {
+                screenAecRef.current = freshAec
+                freshToPublish = freshAec.track
+              }
             }
             await currentProducer.replaceTrack({ track: freshToPublish })
             const prevTrack = screenStreamRef.current?.getAudioTracks()[0]

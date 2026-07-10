@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { startNativeScreenAudio } from "@/lib/native-screen-audio"
 
 // Глобальные типы Electron-моста объявлены в electron/electron.d.ts
 // (interface ElectronAPI / DesktopSource / MediaDevices.__electronPatched).
@@ -94,28 +95,79 @@ function patchElectronDisplayMedia() {
   // тот путь игнорирует constraints (включая restrictOwnAudio), из-за чего в
   // аудиодорожку экрана попадал звук самого звонка и зритель слышал себя (эхо).
   //
-  // Вместо этого показываем свой кастомный пикер, передаём выбранный источник в
-  // main (setDisplayMediaRequestHandler), а затем вызываем НАСТОЯЩИЙ
-  // getDisplayMedia(constraints). Так Chromium честно применяет restrictOwnAudio
-  // и исключает наш собственный звук из системного loopback.
+  // Приоритетный путь (Variant A, about/echo-fix/plan.md): нативный WASAPI
+  // process-loopback с исключением дерева процессов Electron. Он физически
+  // вырезает голоса участников (их проигрывает наш renderer) из системного
+  // микса ещё ДО захвата — это детерминированный ОС-уровневый аналог
+  // restrictOwnAudio. Видео берём штатным getDisplayMedia (video-only), а
+  // аудиодорожку подменяем нативной.
+  //
+  // Fallback (старый Windows / нет helper'а / любая ошибка): показываем пикер и
+  // вызываем НАСТОЯЩИЙ getDisplayMedia(constraints) c restrictOwnAudio, как
+  // раньше — без регрессии.
   navigator.mediaDevices.getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
-    const sources = await window.electronAPI!.getDesktopSources()
+    const audioRequested = !!constraints?.audio
+    const videoRequested = constraints?.video !== false
 
-    if (!sources || sources.length === 0) {
-      throw new DOMException("No screen sources available", "NotFoundError")
+    // Нативный захват поддержан? (Windows >= 19041 и есть бинарь helper'а.)
+    let nativeSupported = false
+    if (audioRequested) {
+      try {
+        const support = await window.electronAPI!.getAudioCaptureSupport()
+        nativeSupported = !!support?.supported
+      } catch {
+        nativeSupported = false
+      }
     }
 
-    const sourceId = await showScreenPicker(sources)
-
-    if (!sourceId) {
-      throw new DOMException("Screen share cancelled", "AbortError")
+    // Выбор источника нужен только когда запрашивается видео. При video:false
+    // (обновление аудиодорожки) пикер не показываем.
+    let sourceId: string | null = null
+    if (videoRequested) {
+      const sources = await window.electronAPI!.getDesktopSources()
+      if (!sources || sources.length === 0) {
+        throw new DOMException("No screen sources available", "NotFoundError")
+      }
+      sourceId = await showScreenPicker(sources)
+      if (!sourceId) {
+        throw new DOMException("Screen share cancelled", "AbortError")
+      }
     }
 
-    // Сообщаем main, какой источник вернуть в setDisplayMediaRequestHandler
-    await window.electronAPI!.setDisplaySource(sourceId)
+    // Каждый вызов настоящего getDisplayMedia потребляет pendingDisplaySourceId
+    // в main, поэтому переустанавливаем источник перед каждым вызовом.
+    const callOriginal = async (c?: DisplayMediaStreamOptions) => {
+      if (sourceId) await window.electronAPI!.setDisplaySource(sourceId)
+      return _original(c)
+    }
 
-    // Штатный путь: constraints (в т.ч. restrictOwnAudio) доходят до захвата
-    return _original(constraints)
+    // --- Variant A: видео штатно (без loopback-аудио) + нативная аудиодорожка.
+    if (audioRequested && nativeSupported) {
+      let stream: MediaStream
+      if (videoRequested) {
+        stream = await callOriginal({ ...constraints, audio: false })
+      } else {
+        stream = new MediaStream()
+      }
+
+      const native = await startNativeScreenAudio()
+      if (native) {
+        stream.addTrack(native.track)
+        // Останавливаем нативный захват, когда останавливают видеодорожку.
+        const videoTrack = stream.getVideoTracks()[0]
+        if (videoTrack) {
+          videoTrack.addEventListener("ended", () => native.stop())
+        }
+        return stream
+      }
+
+      // Нативный путь не поднялся — освобождаем уже открытое видео и уходим в
+      // штатный loopback-путь (с restrictOwnAudio + downstream AEC).
+      stream.getTracks().forEach((t) => t.stop())
+    }
+
+    // --- Fallback: штатный путь, constraints (restrictOwnAudio) доходят до захвата.
+    return callOriginal(constraints)
   }
 
   navigator.mediaDevices.__electronPatched = true

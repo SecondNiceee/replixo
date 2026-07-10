@@ -11,6 +11,15 @@ directories:
 files:
   - electron/**/*
   - package.json
+  # Исходники нативного helper'а не нужны в сборке — только бинарь (extraResources).
+  - "!electron/native/**/*"
+
+# Нативный helper процесс-лупбэка (Variant A, about/echo-fix/plan.md).
+# Собранный бинарь кладётся в resources/native/ и доступен как
+# process.resourcesPath/native/process-loopback-capture.exe.
+extraResources:
+  - from: electron/native/process-loopback/bin/process-loopback-capture.exe
+    to: native/process-loopback-capture.exe
 
 win:
   target:
