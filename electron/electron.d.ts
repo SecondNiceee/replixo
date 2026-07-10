@@ -28,6 +28,22 @@ interface ElectronAPI {
   getCursorPoint: () => Promise<{ x: number; y: number } | null>
   // Нативная запись в буфер обмена ОС
   writeClipboardText: (text: string) => Promise<boolean>
+
+  // Variant A — нативный захват системного звука (WASAPI process-loopback),
+  // исключающий дерево процессов Electron. См. about/echo-fix/plan.md.
+  getAudioCaptureSupport: () => Promise<AudioCaptureSupport>
+  startAudioCapture: () => Promise<AudioCaptureSupport>
+  stopAudioCapture: () => Promise<boolean>
+  onAudioCaptureData: (callback: (chunk: Uint8Array) => void) => () => void
+  onAudioCaptureEnded: (callback: (code: number | null) => void) => () => void
+}
+
+interface AudioCaptureSupport {
+  supported: boolean
+  reason?: string
+  error?: string
+  sampleRate?: number
+  channels?: number
 }
 
 interface ReplixoDesktop {
