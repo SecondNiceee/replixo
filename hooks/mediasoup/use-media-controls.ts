@@ -6,6 +6,19 @@ import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
 import { createScreenShareAEC, type ScreenAudioAEC } from "@/lib/screen-audio-aec"
 import { isNativeScreenAudioTrack } from "@/lib/native-screen-audio"
 import { SCREEN_QUALITY_PRESETS } from "./types"
+
+// -----------------------------------------------------------------------------
+// TEMPORARY: software echo cancellation (AEC) is DISABLED.
+//
+// We keep the full AEC implementation (`lib/screen-audio-aec.ts` + the code
+// paths below) in place, but gate it behind this flag so it is never used at
+// runtime. Flip back to `true` to re-enable the DSP-based echo canceller.
+//
+// See about/AEC/*.md and about/echo-fix/plan.md for the rationale. The forward
+// plan is Variant A (native WASAPI process-loopback), which removes the remote
+// voices at the OS level and makes software AEC unnecessary.
+// -----------------------------------------------------------------------------
+const AEC_ENABLED = false
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
 import { CAMERA_PRODUCE_OPTIONS } from "./types"
@@ -303,7 +316,10 @@ export function useMediaControls({
         // tree — the participants' voices are physically gone, so running DSP AEC
         // on top would only risk distortion. Publish it as-is.
         let audioTrackToPublish = audioTrack
-        if (isNativeScreenAudioTrack(audioTrack)) {
+        if (!AEC_ENABLED) {
+          // AEC temporarily disabled — publish the captured track untouched.
+          console.log("[v0] Screen audio: AEC disabled, publishing RAW track")
+        } else if (isNativeScreenAudioTrack(audioTrack)) {
           console.log("[v0] Screen audio: native process-loopback track, skipping AEC")
         } else {
           const aec = await createScreenShareAEC(audioTrack)
@@ -333,7 +349,7 @@ export function useMediaControls({
             screenAecRef.current?.stop()
             screenAecRef.current = null
             let freshToPublish = freshAudio
-            if (!isNativeScreenAudioTrack(freshAudio)) {
+            if (AEC_ENABLED && !isNativeScreenAudioTrack(freshAudio)) {
               const freshAec = await createScreenShareAEC(freshAudio)
               if (freshAec) {
                 screenAecRef.current = freshAec
