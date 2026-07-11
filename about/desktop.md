@@ -132,6 +132,15 @@ Renderer везде проверяет `window.electronAPI?.isElectron`, что�
    отдаёт `audio: "loopback"` **только если** звук реально запрошен
    (`request.audioRequested`).
 
+> ⚠️ **Регрессия и фикс (плавающий 50/50: участника «то слышно, то нет»):**
+> удалённые треки приходят от mediasoup-консьюмера **на паузе** и размьючиваются
+> только после `resumeConsumer`. Если `AudioContext`-узел
+> (`createMediaStreamSource`) создавался, пока трек ещё `muted`, Chromium
+> оставлял его **навсегда немым** — участник, зашедший «вглухую», так и оставался
+> неслышным. Фикс в `lib/audio-unlock.ts`: узел строится **отложенно** — по
+> событию `unmute` трека, а до этого звук идёт напрямую через `<audio>`, так что
+> тишины не бывает. См. `buildStreamNodes` / `connectStreamToContext`.
+
 ### Почему НЕ legacy `chromeMediaSource: "desktop"`
 
 Раньше renderer подменял захват на legacy-`getUserMedia({ chromeMediaSource: "desktop" })`.
