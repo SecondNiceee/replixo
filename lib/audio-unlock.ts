@@ -56,6 +56,14 @@ interface AudioNodes {
 }
 const streamNodes = new Map<MediaStream, AudioNodes>()
 
+// stream → cleanup for a pending "unmute" listener. Remote WebRTC tracks from a
+// mediasoup consumer start life MUTED (the consumer is created paused, then
+// resumed), and Chromium will leave a MediaStreamAudioSourceNode PERMANENTLY
+// silent if it's created while the track is still muted. So when a stream is
+// registered before its track is flowing, we defer building the context node
+// until the track fires `unmute`. This map lets us tear that listener down.
+const pendingUnmute = new Map<MediaStream, () => void>()
+
 // Desired volume (0..1) per stream, applied to the gain node when it exists.
 // Stored separately so a volume set before the node is created still applies.
 const streamVolumes = new Map<MediaStream, number>()
@@ -123,9 +131,9 @@ function bindGestureListeners() {
 // ---------------------------------------------------------------------------
 // iOS AudioContext routing for a MediaStream
 // ---------------------------------------------------------------------------
-function connectStreamToContext(stream: MediaStream): boolean {
-  const ctx = getAudioContext()
-  if (!ctx) return false
+// Build the AudioContext gain graph for a stream. Returns true if the node
+// graph is now live. Safe to call multiple times (no-op if already built).
+function buildStreamNodes(ctx: AudioContext, stream: MediaStream, el?: HTMLAudioElement): boolean {
   if (streamNodes.has(stream)) return true
   try {
     const source = ctx.createMediaStreamSource(stream)
@@ -139,14 +147,57 @@ function connectStreamToContext(stream: MediaStream): boolean {
     // exactly which remote voices this machine is playing (see screen-audio-aec).
     gain.connect(getReferenceBus(ctx))
     streamNodes.set(stream, { source, gain })
+    // The context path is now the real output — mute the element to avoid
+    // playing the same audio twice.
+    if (el) el.muted = true
+    ctx.resume().then(() => setBlocked(ctx.state !== "running")).catch(() => setBlocked(true))
     return true
   } catch {
-    // MediaStream may not have audio tracks yet — ignore
     return false
   }
 }
 
+// Route a stream through the shared AudioContext. Returns true when a live node
+// graph exists RIGHT NOW (element should be muted); false when we're either
+// falling back to plain element playback or deferring node creation until the
+// remote track unmutes (in which case the element must keep playing so there's
+// never a silent gap).
+function connectStreamToContext(stream: MediaStream, el?: HTMLAudioElement): boolean {
+  const ctx = getAudioContext()
+  if (!ctx) return false
+  if (streamNodes.has(stream)) return true
+
+  const track = stream.getAudioTracks()[0]
+  // No audio track yet — nothing to route.
+  if (!track) return false
+
+  // If the track is already flowing, build immediately (the common "worked"
+  // path). Otherwise defer: creating the source node now would strand it in
+  // permanent silence (Chromium). We wire an `unmute` listener that builds the
+  // node the moment media actually starts, and we let the element play in the
+  // meantime so the participant is audible right away.
+  let built = false
+  if (!track.muted) {
+    built = buildStreamNodes(ctx, stream, el)
+  }
+
+  if (!streamNodes.has(stream)) {
+    const onUnmute = () => buildStreamNodes(ctx, stream, el)
+    track.addEventListener("unmute", onUnmute)
+    pendingUnmute.set(stream, () => track.removeEventListener("unmute", onUnmute))
+  }
+
+  return built
+}
+
 function disconnectStreamFromContext(stream: MediaStream) {
+  // Tear down any pending "unmute" listener first (the node may never have been
+  // built if the track never started flowing).
+  const cancelPending = pendingUnmute.get(stream)
+  if (cancelPending) {
+    cancelPending()
+    pendingUnmute.delete(stream)
+  }
   const nodes = streamNodes.get(stream)
   if (!nodes) return
   try {
@@ -191,7 +242,7 @@ export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream)
   audioElements.add(el)
   bindGestureListeners()
 
-  const routed = stream ? connectStreamToContext(stream) : false
+  const routed = stream ? connectStreamToContext(stream, el) : false
 
   if (routed) {
     // AudioContext gain graph is the real audio path — mute the element.
@@ -207,7 +258,11 @@ export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream)
     const p = el.play()
     if (p && typeof p.then === "function") p.catch(() => {})
   } else {
-    // Fallback: no AudioContext — play through the element directly.
+    // Not routed yet: either there's no AudioContext at all, or node creation
+    // is DEFERRED until the remote track unmutes (see connectStreamToContext).
+    // In both cases play the element directly so the participant is audible.
+    // When the deferred node is later built, buildStreamNodes() mutes this
+    // element to prevent double playback.
     el.muted = false
     const p = el.play()
     if (p && typeof p.then === "function") {

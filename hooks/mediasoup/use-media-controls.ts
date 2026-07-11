@@ -39,18 +39,18 @@ import { CAMERA_PRODUCE_OPTIONS } from "./types"
 // support `restrictOwnAudio` simply ignore the unrecognised member and still
 // capture system audio, so there is no regression on older browsers.
 //
-// We ALSO pass `suppressLocalAudioPlayback: true`. When sharing "entire screen
-// with system audio", Chrome by default re-plays the captured audio out of the
-// local speakers; that replayed audio is then re-captured by the OS loopback,
-// forming a feedback loop that AMPLIFIES everything in the mix — including the
-// remote voices we're trying to remove. Suppressing local playback of the
-// captured stream breaks that loop deterministically (the sharer still hears
-// the original content directly; only the duplicate capture-playback is muted).
-// Unknown to older browsers ⇒ ignored, no regression.
+// NOTE: we deliberately do NOT pass `suppressLocalAudioPlayback: true`.
+// In Electron, screen audio is captured via `audio: "loopback"` (see
+// electron/main.js). Combined with `suppressLocalAudioPlayback`, Chromium
+// switches to a "loopback WITH mute" mode that silences local playback of the
+// captured audio — and since the captured stream is the ENTIRE system mix, this
+// mutes ALL sound on the sharer's machine, including the other participants'
+// voices. The result: while sharing from desktop you can't hear anyone.
+// Removing it restores incoming audio. Echo is addressed by `restrictOwnAudio`
+// (below) and, ultimately, Variant A (native process-loopback).
 function getScreenAudioConstraint(): boolean | MediaTrackConstraints {
   return {
     restrictOwnAudio: true,
-    suppressLocalAudioPlayback: true,
   } as MediaTrackConstraints
 }
 
