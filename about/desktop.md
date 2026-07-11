@@ -119,8 +119,15 @@ Renderer везде проверяет `window.electronAPI?.isElectron`, что�
 3. передаёт выбранный `sourceId` в main через `electronAPI.setDisplaySource()`
    (IPC `set-display-source` → `pendingDisplaySourceId`);
 4. вызывает **настоящий** `getDisplayMedia(constraints)` (сохранённый оригинал),
-   передавая те же constraints, что и веб-версия — в т.ч. `restrictOwnAudio: true`
-   и `suppressLocalAudioPlayback: true` (см. `hooks/mediasoup/use-media-controls.ts`);
+   передавая те же constraints, что и веб-версия — `restrictOwnAudio: true`
+   (см. `hooks/mediasoup/use-media-controls.ts`);
+
+> ⚠️ **Регрессия и фикс (нет входящего звука при демонстрации):**
+> `suppressLocalAudioPlayback` здесь **не передаётся**. В связке с
+> `audio: "loopback"` он переводит Chromium в режим «loopback с заглушением» и
+> глушит локальное воспроизведение всего системного микса — то есть
+> демонстрирующий переставал слышать **всех** участников. Constraint убран,
+> входящий звук восстановлен.
 5. в main `setDisplayMediaRequestHandler` подставляет выбранный источник и
    отдаёт `audio: "loopback"` **только если** звук реально запрошен
    (`request.audioRequested`).
