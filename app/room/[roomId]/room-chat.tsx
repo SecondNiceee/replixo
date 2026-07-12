@@ -275,7 +275,7 @@ export function RoomChat({
           maxLength={2000}
           placeholder="Напишите сообщение…"
           aria-label="Текст сообщения"
-          className="h-10 flex-1 rounded-full border border-input bg-background px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
+          className="h-10 flex-1 select-text rounded-full border border-input bg-background px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
         />
         <Button
           type="submit"

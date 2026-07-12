@@ -85,7 +85,9 @@ export function ChatMessageList({
                     self={m.self}
                   />
                 )}
-                {m.text && <span className="whitespace-pre-wrap break-words">{m.text}</span>}
+                {m.text && (
+                  <span className="select-text whitespace-pre-wrap break-words">{m.text}</span>
+                )}
               </div>
             </div>
           </li>
