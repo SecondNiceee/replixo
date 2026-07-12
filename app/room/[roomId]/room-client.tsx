@@ -134,7 +134,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
   return (
     <div className={cn(
-      "relative flex flex-col overflow-hidden",
+      "relative flex select-none flex-col overflow-hidden",
       // В Electron (без overlay) резервируем 32px под кастомный титлбар.
       isElectron && !overlayMode ? "h-[calc(100vh-32px)]" : "h-screen",
       overlayMode ? "bg-transparent" : "bg-background",
