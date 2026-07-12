@@ -1,24 +1,10 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
-import { createScreenShareAEC, type ScreenAudioAEC } from "@/lib/screen-audio-aec"
-import { isNativeScreenAudioTrack } from "@/lib/native-screen-audio"
+import { getUnprocessedAudioConstraints } from "@/lib/media-constraints"
 import { SCREEN_QUALITY_PRESETS } from "./types"
-
-// -----------------------------------------------------------------------------
-// TEMPORARY: software echo cancellation (AEC) is DISABLED.
-//
-// We keep the full AEC implementation (`lib/screen-audio-aec.ts` + the code
-// paths below) in place, but gate it behind this flag so it is never used at
-// runtime. Flip back to `true` to re-enable the DSP-based echo canceller.
-//
-// See about/AEC/*.md and about/echo-fix/plan.md for the rationale. The forward
-// plan is Variant A (native WASAPI process-loopback), which removes the remote
-// voices at the OS level and makes software AEC unnecessary.
-// -----------------------------------------------------------------------------
-const AEC_ENABLED = false
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
 import { CAMERA_PRODUCE_OPTIONS } from "./types"
@@ -87,8 +73,6 @@ export function useMediaControls({
 }: UseMediaControlsParams) {
   const [permissionError, setPermissionError] = useState<string | null>(null)
   const [screenQuality, setScreenQualityState] = useState<ScreenQuality>("auto")
-  // Active echo-canceller wrapping the current screen-audio track (if any).
-  const screenAecRef = useRef<ScreenAudioAEC | null>(null)
   // True while the camera is being turned on (getUserMedia + publish can take a
   // few seconds). The UI shows a loader on the camera button during this window.
   const [isCamStarting, setIsCamStarting] = useState(false)
@@ -118,7 +102,7 @@ export function useMediaControls({
     if (!existing) {
       try {
         const constraints: MediaStreamConstraints = {
-          audio: selectedMicIdRef.current ? { deviceId: { exact: selectedMicIdRef.current } } : true,
+          audio: getUnprocessedAudioConstraints(selectedMicIdRef.current),
         }
         const micStream = await navigator.mediaDevices.getUserMedia(constraints)
         setPermissionError(null)
@@ -167,7 +151,7 @@ export function useMediaControls({
     try {
       const oldTrack = stream.getAudioTracks()[0]
       const micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: deviceId } },
+        audio: getUnprocessedAudioConstraints(deviceId),
       })
       const newTrack = micStream.getAudioTracks()[0]
       if (oldTrack) { oldTrack.stop(); stream.removeTrack(oldTrack) }
@@ -251,8 +235,6 @@ export function useMediaControls({
     }
     screenVideoProducerRef.current = null
     screenAudioProducerRef.current = null
-    screenAecRef.current?.stop()
-    screenAecRef.current = null
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
     dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
@@ -307,33 +289,10 @@ export function useMediaControls({
       }
 
       if (audioTrack) {
-        // Route the captured system audio through echo cancellation so viewers
-        // don't hear themselves (the sharer's machine re-captures the remote
-        // voices it plays). Falls back to the raw track if AEC can't be set up.
-        //
-        // Variant A (about/echo-fix/plan.md): in Electron the track may already
-        // come from native WASAPI process-loopback that excludes our own process
-        // tree — the participants' voices are physically gone, so running DSP AEC
-        // on top would only risk distortion. Publish it as-is.
-        let audioTrackToPublish = audioTrack
-        if (!AEC_ENABLED) {
-          // AEC temporarily disabled — publish the captured track untouched.
-          console.log("[v0] Screen audio: AEC disabled, publishing RAW track")
-        } else if (isNativeScreenAudioTrack(audioTrack)) {
-          console.log("[v0] Screen audio: native process-loopback track, skipping AEC")
-        } else {
-          const aec = await createScreenShareAEC(audioTrack)
-          if (aec) {
-            screenAecRef.current = aec
-            audioTrackToPublish = aec.track
-            console.log("[v0] Screen audio: publishing AEC-cleaned track")
-          } else {
-            console.log("[v0] Screen audio: AEC unavailable, publishing RAW track (echo possible)")
-          }
-        }
-
+        // Publish screen audio directly. Browser and software AEC are intentionally
+        // disabled because DSP corrupts virtual-cable and system-audio signals.
         const producer = await sendTransport.produce({
-          track: audioTrackToPublish,
+          track: audioTrack,
           appData: { source: "screen" },
         })
         screenAudioProducerRef.current = producer
@@ -345,18 +304,7 @@ export function useMediaControls({
             const freshStream = await navigator.mediaDevices.getDisplayMedia({ audio: getScreenAudioConstraint(), video: false })
             const freshAudio = freshStream.getAudioTracks()[0]
             if (!freshAudio) { freshStream.getTracks().forEach((t) => t.stop()); return }
-            // Tear down the previous echo canceller and wrap the fresh track.
-            screenAecRef.current?.stop()
-            screenAecRef.current = null
-            let freshToPublish = freshAudio
-            if (AEC_ENABLED && !isNativeScreenAudioTrack(freshAudio)) {
-              const freshAec = await createScreenShareAEC(freshAudio)
-              if (freshAec) {
-                screenAecRef.current = freshAec
-                freshToPublish = freshAec.track
-              }
-            }
-            await currentProducer.replaceTrack({ track: freshToPublish })
+            await currentProducer.replaceTrack({ track: freshAudio })
             const prevTrack = screenStreamRef.current?.getAudioTracks()[0]
             if (prevTrack && prevTrack !== freshAudio) {
               prevTrack.onended = null
