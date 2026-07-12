@@ -1,5 +1,7 @@
 "use client"
 
+import { getUnprocessedAudioConstraints } from "@/lib/media-constraints"
+
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
 import type { Socket } from "socket.io-client"
@@ -261,9 +263,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   localStreamRef.current?.removeTrack(audioTrack)
                 }
                 const constraints: MediaStreamConstraints = {
-                  audio: selectedMicIdRef.current
-                    ? { deviceId: { exact: selectedMicIdRef.current } }
-                    : true,
+                  audio: getUnprocessedAudioConstraints(selectedMicIdRef.current),
                 }
                 const micStream = await navigator.mediaDevices.getUserMedia(constraints)
                 audioTrack = micStream.getAudioTracks()[0]
