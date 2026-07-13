@@ -6,8 +6,15 @@ import { startNativeScreenAudio } from "@/lib/native-screen-audio"
 // Глобальные типы Electron-моста объявлены в electron/electron.d.ts
 // (interface ElectronAPI / DesktopSource / MediaDevices.__electronPatched).
 
+let displayMediaRequestInFlight = false
+let cancelActiveScreenPicker: (() => void) | null = null
+
 function showScreenPicker(sources: DesktopSource[]): Promise<string | null> {
+  // Defensive cleanup in case an older picker survived a renderer/UI race.
+  cancelActiveScreenPicker?.()
+
   return new Promise((resolve) => {
+    let settled = false
     const overlay = document.createElement("div")
     overlay.style.cssText = `
       position: fixed; inset: 0; z-index: 999999;
@@ -35,7 +42,20 @@ function showScreenPicker(sources: DesktopSource[]): Promise<string | null> {
       gap: 12px; margin-bottom: 20px;
     `
 
-    const close = () => document.body.removeChild(overlay)
+    const finish = (sourceId: string | null) => {
+      if (settled) return
+      settled = true
+      document.removeEventListener("keydown", onKeyDown)
+      overlay.remove()
+      if (cancelActiveScreenPicker === cancel) cancelActiveScreenPicker = null
+      resolve(sourceId)
+    }
+    const cancel = () => finish(null)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancel()
+    }
+    cancelActiveScreenPicker = cancel
+    document.addEventListener("keydown", onKeyDown)
 
     for (const source of sources) {
       const card = document.createElement("button")
@@ -62,7 +82,7 @@ function showScreenPicker(sources: DesktopSource[]): Promise<string | null> {
       `
       card.appendChild(label)
 
-      card.onclick = () => { close(); resolve(source.id) }
+      card.onclick = () => finish(source.id)
       grid.appendChild(card)
     }
     modal.appendChild(grid)
@@ -74,12 +94,14 @@ function showScreenPicker(sources: DesktopSource[]): Promise<string | null> {
       padding: 10px 20px; color: #ccc; cursor: pointer;
       font-size: 14px; width: 100%;
     `
-    cancelBtn.onclick = () => { close(); resolve(null) }
+    cancelBtn.onclick = cancel
     modal.appendChild(cancelBtn)
 
     overlay.appendChild(modal)
     // Клик на оверлей (вне модалки) — отмена
-    overlay.onclick = (e) => { if (e.target === overlay) { close(); resolve(null) } }
+    overlay.onclick = (event) => {
+      if (event.target === overlay) cancel()
+    }
     document.body.appendChild(overlay)
   })
 }
@@ -106,8 +128,14 @@ function patchElectronDisplayMedia() {
   // вызываем НАСТОЯЩИЙ getDisplayMedia(constraints) c restrictOwnAudio, как
   // раньше — без регрессии.
   navigator.mediaDevices.getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
-    const audioRequested = !!constraints?.audio
-    const videoRequested = constraints?.video !== false
+    if (displayMediaRequestInFlight) {
+      throw new DOMException("A screen share request is already in progress", "InvalidStateError")
+    }
+
+    displayMediaRequestInFlight = true
+    try {
+      const audioRequested = !!constraints?.audio
+      const videoRequested = constraints?.video !== false
 
     // Нативный захват поддержан? (Windows >= 19041 и есть бинарь helper'а.)
     let nativeSupported = false
@@ -166,8 +194,13 @@ function patchElectronDisplayMedia() {
       stream.getTracks().forEach((t) => t.stop())
     }
 
-    // --- Fallback: штатный путь, constraints (restrictOwnAudio) доходят до захвата.
-    return callOriginal(constraints)
+      // --- Fallback: штатный путь, constraints (restrictOwnAudio) доходят до захвата.
+      return await callOriginal(constraints)
+    } finally {
+      // Picker must never survive a completed, cancelled, or failed capture request.
+      cancelActiveScreenPicker?.()
+      displayMediaRequestInFlight = false
+    }
   }
 
   navigator.mediaDevices.__electronPatched = true
