@@ -1,10 +1,10 @@
-export function getUnprocessedAudioConstraints(
+export function getVoiceAudioConstraints(
   deviceId?: string,
 ): MediaTrackConstraints {
   return {
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    echoCancellation: false,
-    noiseSuppression: false,
-    autoGainControl: false,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
   }
 }

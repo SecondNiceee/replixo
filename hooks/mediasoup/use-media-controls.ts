@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
-import { getUnprocessedAudioConstraints } from "@/lib/media-constraints"
+import { getVoiceAudioConstraints } from "@/lib/media-constraints"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -102,7 +102,7 @@ export function useMediaControls({
     if (!existing) {
       try {
         const constraints: MediaStreamConstraints = {
-          audio: getUnprocessedAudioConstraints(selectedMicIdRef.current),
+          audio: getVoiceAudioConstraints(selectedMicIdRef.current),
         }
         const micStream = await navigator.mediaDevices.getUserMedia(constraints)
         setPermissionError(null)
@@ -151,7 +151,7 @@ export function useMediaControls({
     try {
       const oldTrack = stream.getAudioTracks()[0]
       const micStream = await navigator.mediaDevices.getUserMedia({
-        audio: getUnprocessedAudioConstraints(deviceId),
+        audio: getVoiceAudioConstraints(deviceId),
       })
       const newTrack = micStream.getAudioTracks()[0]
       if (oldTrack) { oldTrack.stop(); stream.removeTrack(oldTrack) }
