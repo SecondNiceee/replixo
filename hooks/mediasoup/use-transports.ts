@@ -255,58 +255,101 @@ export function useTransports({
   )
 
   // ---------------------------------------------------------------------------
-  // Black-frame watchdog for a freshly-resumed video consumer.
+  // Lifecycle watchdog for video consumers.
   //
-  // A newcomer consuming an already-running camera gets its consumer created
-  // paused, then resumed. mediasoup requests a keyframe on resume (and the
-  // server retries on a fixed schedule), but on slow / TURN-relayed paths —
-  // very common in the Electron desktop build — those early keyframe requests
-  // can all fire before RTP is actually flowing and get dropped, leaving the
-  // viewer on a permanent black frame while audio plays fine.
-  //
-  // The reliable fix is a feedback loop: watch this consumer's own decoded-
-  // frame stats and, while no frame has decoded yet, keep asking the server to
-  // push a fresh keyframe. As soon as `framesDecoded > 0` the picture is live
-  // and we stop. If stats are unavailable we simply retry a bounded number of
-  // times (still cheap and harmless).
+  // A video decoder can remain on its last frame after a short network outage
+  // even though the shared recv transport (and therefore audio) has recovered.
+  // Keep watching RTP progress for the whole consumer lifetime. During startup
+  // request keyframes quickly until the first frame arrives. Afterwards only
+  // request one when RTP bytes continue arriving but decoded frames repeatedly
+  // do not advance; this avoids false positives for a genuinely static screen.
   // ---------------------------------------------------------------------------
+  const videoWatchdogTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
   const startVideoFrameWatchdog = useCallback(
     (consumer: Consumer, consumerId: string) => {
-      let attempts = 0
-      const MAX_ATTEMPTS = 15
+      const existingTimer = videoWatchdogTimersRef.current.get(consumerId)
+      if (existingTimer) clearTimeout(existingTimer)
 
-      const tick = async () => {
-        if (consumer.closed) return
+      let hasDecodedFrame = false
+      let startupAttempts = 0
+      let stalledChecks = 0
+      let lastFramesDecoded = 0
+      let lastBytesReceived = 0
+      let lastKeyFrameRequestAt = 0
+
+      const schedule = (delay: number) => {
+        const timer = setTimeout(tick, delay)
+        videoWatchdogTimersRef.current.set(consumerId, timer)
+      }
+
+      const requestKeyFrame = () => {
         const socket = socketRef.current
         if (!socket) return
-
-        let framesDecoded = 0
-        try {
-          const stats: RTCStatsReport = await consumer.getStats()
-          stats.forEach((report: Record<string, unknown>) => {
-            if (report.type === "inbound-rtp" && typeof report.framesDecoded === "number") {
-              framesDecoded = Math.max(framesDecoded, report.framesDecoded)
-            }
-          })
-        } catch {
-          // getStats may briefly be unavailable — treat as "no frames yet".
-        }
-
-        // Picture is live — nothing more to do.
-        if (framesDecoded > 0) return
-        if (++attempts > MAX_ATTEMPTS) return
-
-        // Still black: ask the server to push a fresh keyframe on a live path.
+        lastKeyFrameRequestAt = Date.now()
         socket.emit("requestConsumerKeyFrame", {
           roomId,
           peerId: peerIdRef.current,
           consumerId,
         })
-        setTimeout(tick, 800)
       }
 
-      // Give the transport connect + resume a brief head start first.
-      setTimeout(tick, 600)
+      const tick = async () => {
+        if (consumer.closed) {
+          videoWatchdogTimersRef.current.delete(consumerId)
+          return
+        }
+
+        let framesDecoded = lastFramesDecoded
+        let bytesReceived = lastBytesReceived
+        let hasInboundStats = false
+
+        try {
+          const stats: RTCStatsReport = await consumer.getStats()
+          stats.forEach((report: Record<string, unknown>) => {
+            if (report.type !== "inbound-rtp") return
+            hasInboundStats = true
+            if (typeof report.framesDecoded === "number") {
+              framesDecoded = Math.max(framesDecoded, report.framesDecoded)
+            }
+            if (typeof report.bytesReceived === "number") {
+              bytesReceived = Math.max(bytesReceived, report.bytesReceived)
+            }
+          })
+        } catch {
+          // Stats can be temporarily unavailable while ICE is recovering.
+        }
+
+        const framesAdvanced = framesDecoded > lastFramesDecoded
+        const bytesAdvanced = bytesReceived > lastBytesReceived
+
+        if (framesDecoded > 0) hasDecodedFrame = true
+
+        if (!hasDecodedFrame) {
+          startupAttempts += 1
+          if (startupAttempts <= 15) requestKeyFrame()
+        } else if (hasInboundStats && framesAdvanced) {
+          stalledChecks = 0
+        } else if (hasInboundStats && bytesAdvanced) {
+          stalledChecks += 1
+          if (stalledChecks >= 2 && Date.now() - lastKeyFrameRequestAt >= 4000) {
+            requestKeyFrame()
+            stalledChecks = 0
+          }
+        } else {
+          // No RTP arrived. Wait for the path to recover; once inter-frames start
+          // arriving again, bytes will advance and the branch above requests an
+          // immediately useful keyframe.
+          stalledChecks = 0
+        }
+
+        lastFramesDecoded = framesDecoded
+        lastBytesReceived = bytesReceived
+        schedule(hasDecodedFrame ? 2000 : 800)
+      }
+
+      // Give transport connect + resume a brief head start.
+      schedule(600)
     },
     [roomId, peerIdRef, socketRef],
   )
