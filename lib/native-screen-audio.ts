@@ -98,7 +98,7 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
     }
 
     // Feed IPC PCM chunks into the worklet. Bytes may arrive unaligned/partial,
-    // so buffer a leftover tail and only forward whole float32 samples.
+    // so buffer a leftover tail and only forward whole stereo float32 frames.
     let leftover = new Uint8Array(0)
     const unsubData = api.onAudioCaptureData((chunk) => {
       // Concatenate any previous partial-sample tail with the new bytes.
@@ -111,8 +111,9 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
         bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
       }
 
-      const usableBytes = bytes.length - (bytes.length % 4)
-      if (usableBytes < 4) {
+      const bytesPerStereoFrame = 2 * Float32Array.BYTES_PER_ELEMENT
+      const usableBytes = bytes.length - (bytes.length % bytesPerStereoFrame)
+      if (usableBytes < bytesPerStereoFrame) {
         leftover = bytes.slice(0)
         return
       }

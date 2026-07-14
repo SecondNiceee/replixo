@@ -10,8 +10,12 @@
 // ---------------------------------------------------------------------------
 
 const CHANNELS = 2
+const SAMPLE_RATE = 48000
 // ~1 second ring per channel at 48 kHz — plenty to absorb IPC jitter.
-const RING_FRAMES = 48000
+const RING_FRAMES = SAMPLE_RATE
+// IPC delivery is bursty. Buffer 100 ms before starting or resuming playback so
+// isolated late chunks do not alternate real PCM with zero-filled render quanta.
+const PREBUFFER_FRAMES = Math.round(SAMPLE_RATE * 0.1)
 
 class PcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -20,6 +24,7 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     this.writeIdx = 0
     this.readIdx = 0
     this.available = 0 // frames available to read
+    this.buffering = true
 
     this.port.onmessage = (e) => {
       const data = e.data
@@ -56,8 +61,13 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
     if (this.stopped) return false
     const out = outputs[0]
     const frames = out[0].length
+
+    if (this.buffering && this.available >= PREBUFFER_FRAMES) {
+      this.buffering = false
+    }
+
     for (let i = 0; i < frames; i++) {
-      if (this.available > 0) {
+      if (!this.buffering && this.available > 0) {
         out[0][i] = this.ring[0][this.readIdx]
         out[1][i] = this.ring[1][this.readIdx]
         this.readIdx = (this.readIdx + 1) % RING_FRAMES
@@ -65,6 +75,13 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
       } else {
         out[0][i] = 0
         out[1][i] = 0
+      }
+
+      // Once starved, stay silent until enough contiguous PCM has accumulated.
+      // This trades a short clean pause for the crackle caused by rapid
+      // PCM/silence alternation at every late IPC chunk boundary.
+      if (!this.buffering && this.available === 0) {
+        this.buffering = true
       }
     }
     return true

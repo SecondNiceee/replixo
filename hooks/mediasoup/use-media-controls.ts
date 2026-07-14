@@ -293,6 +293,13 @@ export function useMediaControls({
         // disabled because DSP corrupts virtual-cable and system-audio signals.
         const producer = await sendTransport.produce({
           track: audioTrack,
+          codecOptions: {
+            opusStereo: true,
+            opusDtx: false,
+            opusFec: true,
+            opusMaxPlaybackRate: 48_000,
+            opusMaxAverageBitrate: 192_000,
+          },
           appData: { source: "screen" },
         })
         screenAudioProducerRef.current = producer
