@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { getUnprocessedAudioConstraints } from "@/lib/media-constraints"
+import { getVoiceAudioConstraints } from "@/lib/media-constraints"
 
 export interface AudioDevice {
   deviceId: string
@@ -20,7 +20,7 @@ export function useAudioDevices() {
       // If labels are empty we need to request permission once to get real names
       if (mics.length > 0 && !mics[0].label) {
         const tempStream = await navigator.mediaDevices.getUserMedia({
-          audio: getUnprocessedAudioConstraints(),
+          audio: getVoiceAudioConstraints(),
         })
         tempStream.getTracks().forEach((t) => t.stop())
         list = await navigator.mediaDevices.enumerateDevices()
