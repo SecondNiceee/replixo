@@ -30,6 +30,22 @@ let sharedAudioContext: AudioContext | null = null
 // handles playback) — it exists purely so the screen-share echo canceller can
 // use "what we're playing" as its far-end reference. See lib/screen-audio-aec.
 let referenceBus: GainNode | null = null
+let outputLimiter: DynamicsCompressorNode | null = null
+
+function getOutputLimiter(ctx: AudioContext): DynamicsCompressorNode {
+  if (!outputLimiter) {
+    outputLimiter = ctx.createDynamicsCompressor()
+    // A fast, transparent safety limiter. It only acts when user boost would
+    // otherwise push loud screen audio beyond the Web Audio output range.
+    outputLimiter.threshold.value = -3
+    outputLimiter.knee.value = 0
+    outputLimiter.ratio.value = 20
+    outputLimiter.attack.value = 0.003
+    outputLimiter.release.value = 0.12
+    outputLimiter.connect(ctx.destination)
+  }
+  return outputLimiter
+}
 
 function getReferenceBus(ctx: AudioContext): GainNode {
   if (!referenceBus) {
@@ -142,9 +158,10 @@ function buildStreamNodes(ctx: AudioContext, stream: MediaStream, el?: HTMLAudio
     const desired = streamVolumes.get(stream)
     gain.gain.value = desired ?? 1
     source.connect(gain)
-    gain.connect(ctx.destination)
-    // Also feed the AEC reference tap so the screen-share echo canceller knows
-    // exactly which remote voices this machine is playing (see screen-audio-aec).
+    gain.connect(getOutputLimiter(ctx))
+    // Feed the AEC reference before the output limiter: this remains an exact
+    // representation of the per-stream gain and avoids limiter pumping in the
+    // reference signal used by the legacy browser fallback.
     gain.connect(getReferenceBus(ctx))
     streamNodes.set(stream, { source, gain })
     // The context path is now the real output — mute the element to avoid

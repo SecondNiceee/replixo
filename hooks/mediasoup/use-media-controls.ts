@@ -113,7 +113,7 @@ export function useMediaControls({
         if (transport && !audioProducerRef.current && track.readyState === "live") {
           const producer = await transport.produce({
             track,
-            codecOptions: { opusFec: true, opusDtx: true },
+            codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
           })
           audioProducerRef.current = producer
         }
@@ -161,7 +161,10 @@ export function useMediaControls({
       if (producer && sendTransport) {
         await producer.replaceTrack({ track: newTrack })
       } else if (!producer && sendTransport) {
-        const newProducer = await sendTransport.produce({ track: newTrack })
+        const newProducer = await sendTransport.produce({
+          track: newTrack,
+          codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
+        })
         audioProducerRef.current = newProducer
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
       }
