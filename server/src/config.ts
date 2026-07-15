@@ -32,14 +32,14 @@ export const MAX_FILE_SIZE = parseInt(
 
 // Абсолютный путь к .exe-установщику для Windows. Файл кладётся на диск сервера
 // вручную (через scp/rsync) и НЕ коммитится в репозиторий. Маршрут /download/windows
-// отдаёт именно этот файл. По умолчанию ищем в <cwd>/downloads/Replixo-Setup-version-1.exe.
+// отдаёт именно этот файл. По умолчанию ищем в <cwd>/downloads/Replixo-Setup-version-2.exe.
 export const WINDOWS_INSTALLER_PATH =
   process.env.WINDOWS_INSTALLER_PATH ??
-  path.join(process.cwd(), 'downloads', 'Replixo-Setup-version-1.exe')
+  path.join(process.cwd(), 'downloads', 'Replixo-Setup-version-2.exe')
 
 // Имя файла, под которым установщик будет сохранён у пользователя.
 export const WINDOWS_INSTALLER_NAME =
-  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-1.exe'
+  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-2.exe'
 
 // Подстраховка от "осиротевших" файлов после жёсткого падения сервера (когда
 // штатная очистка при уничтожении комнаты не успела отработать). Папки комнат,
