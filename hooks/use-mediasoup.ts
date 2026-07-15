@@ -276,7 +276,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               audioTrack.enabled = true
               const producer = await newSendTransport.produce({
                 track: audioTrack,
-                codecOptions: { opusFec: true, opusDtx: true },
+                codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
               })
               audioProducerRef.current = producer
               if (isMicMutedRef.current) {

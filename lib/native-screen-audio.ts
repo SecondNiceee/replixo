@@ -19,7 +19,9 @@
 // ---------------------------------------------------------------------------
 
 const SAMPLE_RATE = 48000
-const WORKLET_URL = "/pcm-capture-worklet.js"
+// Version the module URL because Chromium caches AudioWorklet scripts for the
+// lifetime of the renderer, including across some Electron reload flows.
+const WORKLET_URL = "/pcm-capture-worklet.js?v=2"
 
 export interface NativeScreenAudio {
   /** The captured system-audio track (participants excluded) to publish. */
@@ -87,6 +89,23 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
     })
     const dest = ctx.createMediaStreamDestination()
     node.connect(dest)
+
+    node.port.onmessage = (event: MessageEvent<{
+      type?: string
+      fillFrames?: number
+      readRate?: number
+      underruns?: number
+      overflows?: number
+    }>) => {
+      const metrics = event.data
+      if (metrics?.type !== "metrics") return
+      console.log("[v0] Native screen audio buffer recovery:", {
+        fillMs: Math.round(((metrics.fillFrames ?? 0) / SAMPLE_RATE) * 1000),
+        readRate: metrics.readRate?.toFixed(6),
+        underruns: metrics.underruns,
+        overflows: metrics.overflows,
+      })
+    }
 
     // Start the helper process in main. Bail out cleanly on failure.
     const started = await api.startAudioCapture()
