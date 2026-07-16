@@ -31,6 +31,8 @@
 #include <atomic>
 #include <io.h>
 #include <fcntl.h>
+#include <cmath>
+#include <vector>
 
 using namespace Microsoft::WRL;
 
@@ -171,6 +173,10 @@ int wmain(int argc, wchar_t** argv) {
   fflush(stderr);
 
   const DWORD frameBytes = format.nBlockAlign;
+  std::vector<float> sanitized;
+  unsigned long discontinuities = 0;
+  unsigned long timestampErrors = 0;
+  unsigned long invalidSamples = 0;
 
   while (g_running) {
     DWORD wait = WaitForSingleObject(sampleReady, 200);
@@ -189,21 +195,45 @@ int wmain(int argc, wchar_t** argv) {
 
       const size_t bytes = (size_t)available * frameBytes;
 
+      if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
+        discontinuities++;
+        fprintf(stderr, "{\"type\":\"discontinuity\",\"count\":%lu}\n", discontinuities);
+        fflush(stderr);
+      }
+      if (flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) {
+        timestampErrors++;
+        fprintf(stderr, "{\"type\":\"timestamp-error\",\"count\":%lu}\n", timestampErrors);
+        fflush(stderr);
+      }
+
       if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-        // Emit real silence so the renderer keeps a continuous clock.
-        static thread_local BYTE* silence = nullptr;
-        static thread_local size_t silenceCap = 0;
-        if (bytes > silenceCap) {
-          free(silence);
-          silence = (BYTE*)malloc(bytes);
-          silenceCap = silence ? bytes : 0;
-        }
-        if (silence) {
-          memset(silence, 0, bytes);
-          fwrite(silence, 1, bytes, stdout);
-        }
+        // Emit real silence so the renderer keeps a continuous capture clock.
+        sanitized.assign((size_t)available * kChannels, 0.0f);
+        fwrite(sanitized.data(), 1, bytes, stdout);
       } else if (data && bytes) {
-        fwrite(data, 1, bytes, stdout);
+        const float* input = reinterpret_cast<const float*>(data);
+        const size_t sampleCount = (size_t)available * kChannels;
+        sanitized.resize(sampleCount);
+        for (size_t i = 0; i < sampleCount; i++) {
+          const float sample = input[i];
+          if (!std::isfinite(sample)) {
+            sanitized[i] = 0.0f;
+            invalidSamples++;
+          } else if (sample > 1.25f) {
+            sanitized[i] = 1.25f;
+            invalidSamples++;
+          } else if (sample < -1.25f) {
+            sanitized[i] = -1.25f;
+            invalidSamples++;
+          } else {
+            sanitized[i] = sample;
+          }
+        }
+        fwrite(sanitized.data(), 1, bytes, stdout);
+        if (invalidSamples && invalidSamples % 1024 == 1) {
+          fprintf(stderr, "{\"type\":\"invalid-samples\",\"count\":%lu}\n", invalidSamples);
+          fflush(stderr);
+        }
       }
       fflush(stdout);
 

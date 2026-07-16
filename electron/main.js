@@ -283,6 +283,36 @@ function setupClipboard() {
 // previous loopback + AEC path (no regression).
 // ---------------------------------------------------------------------------
 let audioCaptureProc = null
+let audioCaptureTimer = null
+let audioCaptureQueue = Buffer.alloc(0)
+
+const AUDIO_FRAME_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT
+const AUDIO_IPC_FRAMES = 960 // 20 ms at 48 kHz
+const AUDIO_IPC_BYTES = AUDIO_IPC_FRAMES * AUDIO_FRAME_BYTES
+const AUDIO_IPC_INTERVAL_MS = 20
+const AUDIO_MAX_QUEUE_BYTES = 48000 * AUDIO_FRAME_BYTES / 2 // 500 ms
+
+function clearAudioCaptureBuffer() {
+  if (audioCaptureTimer) {
+    clearInterval(audioCaptureTimer)
+    audioCaptureTimer = null
+  }
+  audioCaptureQueue = Buffer.alloc(0)
+}
+
+function startAudioCapturePump() {
+  clearAudioCaptureBuffer()
+  audioCaptureTimer = setInterval(() => {
+    if (audioCaptureQueue.length < AUDIO_IPC_BYTES) return
+
+    const packet = audioCaptureQueue.subarray(0, AUDIO_IPC_BYTES)
+    audioCaptureQueue = audioCaptureQueue.subarray(AUDIO_IPC_BYTES)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Copy because packet references the queue's previous backing allocation.
+      mainWindow.webContents.send("audio-capture-data", Buffer.from(packet))
+    }
+  }, AUDIO_IPC_INTERVAL_MS)
+}
 
 // Locate the bundled helper .exe (dev vs packaged).
 function resolveLoopbackHelperPath() {
@@ -315,13 +345,15 @@ function getAudioCaptureSupport() {
 }
 
 function stopAudioCapture() {
+  clearAudioCaptureBuffer()
   if (audioCaptureProc) {
+    const proc = audioCaptureProc
+    audioCaptureProc = null
     try {
-      audioCaptureProc.kill()
+      proc.kill()
     } catch {
       /* already gone */
     }
-    audioCaptureProc = null
   }
 }
 
@@ -346,11 +378,18 @@ function setupAudioCapture() {
       return { supported: false, reason: "spawn-failed", error: String(err) }
     }
 
+    startAudioCapturePump()
+
     audioCaptureProc.stdout.on("data", (chunk) => {
-      // Forward raw PCM bytes to the renderer. Buffer serializes over IPC as a
-      // Uint8Array; the renderer reinterprets it as float32.
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("audio-capture-data", chunk)
+      audioCaptureQueue = Buffer.concat([audioCaptureQueue, chunk])
+
+      // Keep latency bounded under renderer stalls. Always drop complete stereo
+      // frames from the oldest audio rather than replaying stale YouTube audio.
+      if (audioCaptureQueue.length > AUDIO_MAX_QUEUE_BYTES) {
+        const excess = audioCaptureQueue.length - AUDIO_MAX_QUEUE_BYTES
+        const alignedDrop = Math.ceil(excess / AUDIO_FRAME_BYTES) * AUDIO_FRAME_BYTES
+        audioCaptureQueue = audioCaptureQueue.subarray(alignedDrop)
+        console.warn("[loopback] PCM queue overflow; dropped oldest audio")
       }
     })
 
@@ -359,8 +398,12 @@ function setupAudioCapture() {
       if (text) console.log("[loopback]", text)
     })
 
-    audioCaptureProc.on("exit", (code) => {
+    const captureProc = audioCaptureProc
+    captureProc.on("exit", (code) => {
+      // Ignore the stale exit event if another helper has already replaced it.
+      if (audioCaptureProc !== captureProc) return
       audioCaptureProc = null
+      clearAudioCaptureBuffer()
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("audio-capture-ended", code)
       }
