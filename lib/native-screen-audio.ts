@@ -1,37 +1,14 @@
 "use client"
 
-// ---------------------------------------------------------------------------
-// Variant A (about/echo-fix/plan.md): turn the native WASAPI process-loopback
-// PCM stream into a MediaStreamTrack the app can publish as screen-share audio.
-//
-//   native helper (system mix − Electron process tree)
-//        │  raw float32/48k/stereo PCM over Electron IPC
-//        ▼
-//   pcm-capture AudioWorklet (ring buffer)  ──▶ MediaStreamDestination ──▶ track
-//
-// Because the capture already excludes our own process tree at the OS level,
-// the participants' voices are physically gone before capture — no echo and no
-// need for the DSP AEC worklet. This is the deterministic desktop echo fix.
-//
-// Everything is best-effort: if Electron / the helper / the OS build is not
-// available, `startNativeScreenAudio` returns null and the caller falls back to
-// the previous loopback + AEC path (no regression).
-// ---------------------------------------------------------------------------
-
 const SAMPLE_RATE = 48000
-// Version the module URL because Chromium caches AudioWorklet scripts for the
-// lifetime of the renderer, including across some Electron reload flows.
-const WORKLET_URL = "/pcm-capture-worklet.js?v=2"
+const WORKLET_URL = "/pcm-capture-worklet.js?v=3"
+const PREBUFFER_TIMEOUT_MS = 3000
 
 export interface NativeScreenAudio {
-  /** The captured system-audio track (participants excluded) to publish. */
   track: MediaStreamTrack
-  /** Tear down the native capture graph. Safe to call multiple times. */
   stop: () => void
 }
 
-// Tracks produced by this module, so the screen-share code can tell a native
-// (already echo-free) track apart from a raw loopback track and skip the AEC.
 const nativeTracks = new WeakSet<MediaStreamTrack>()
 
 export function isNativeScreenAudioTrack(track: MediaStreamTrack | null | undefined): boolean {
@@ -52,43 +29,63 @@ async function ensureWorklet(ctx: AudioContext): Promise<boolean> {
   }
 }
 
-/**
- * Start native process-loopback capture and return an echo-free audio track.
- * Returns null when unavailable (non-Electron, old Windows, missing helper,
- * or any setup failure) so the caller can fall back gracefully.
- */
 export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null> {
-  try {
-    const api = typeof window !== "undefined" ? window.electronAPI : undefined
-    if (!api?.isElectron) return null
+  const api = typeof window !== "undefined" ? window.electronAPI : undefined
+  if (!api?.isElectron) return null
 
+  let ctx: AudioContext | null = null
+  let node: AudioWorkletNode | null = null
+  let dest: MediaStreamAudioDestinationNode | null = null
+  let unsubData: (() => void) | null = null
+  let unsubEnded: (() => void) | null = null
+  let helperStarted = false
+  let stopped = false
+
+  const teardown = (stopHelper: boolean) => {
+    if (stopped) return
+    stopped = true
+    try { node?.port.postMessage({ type: stopHelper ? "stop" : "end" }) } catch { /* ignore */ }
+    unsubData?.()
+    unsubEnded?.()
+    if (stopHelper && helperStarted) {
+      try { void api.stopAudioCapture() } catch { /* ignore */ }
+    }
+    try { node?.disconnect() } catch { /* ignore */ }
+    try { dest?.stream.getTracks().forEach((track) => track.stop()) } catch { /* ignore */ }
+    try { if (ctx) void ctx.close() } catch { /* ignore */ }
+    if (workletLoadedFor === ctx) workletLoadedFor = null
+  }
+
+  try {
     const support = await api.getAudioCaptureSupport()
     if (!support?.supported) {
       console.log("[v0] Native screen audio unavailable:", support?.reason)
       return null
     }
 
-    // Dedicated context at the helper's native rate so PCM needs no resampling.
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const ctx = new AudioCtx({ sampleRate: SAMPLE_RATE })
+    const AudioCtx = window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    ctx = new AudioCtx({ sampleRate: SAMPLE_RATE })
     if (ctx.state === "suspended") {
-      try { await ctx.resume() } catch { /* likely inside a user gesture */ }
+      try { await ctx.resume() } catch { /* user gesture may resume it shortly */ }
     }
 
-    const ok = await ensureWorklet(ctx)
-    if (!ok) {
-      try { await ctx.close() } catch { /* ignore */ }
+    if (!(await ensureWorklet(ctx))) {
+      teardown(false)
       console.log("[v0] Native screen audio: worklet failed to load")
       return null
     }
 
-    const node = new AudioWorkletNode(ctx, "pcm-capture", {
+    node = new AudioWorkletNode(ctx, "pcm-capture", {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],
     })
-    const dest = ctx.createMediaStreamDestination()
+    dest = ctx.createMediaStreamDestination()
     node.connect(dest)
+
+    let markReady: (() => void) | null = null
+    const ready = new Promise<void>((resolve) => { markReady = resolve })
 
     node.port.onmessage = (event: MessageEvent<{
       type?: string
@@ -96,91 +93,86 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
       readRate?: number
       underruns?: number
       overflows?: number
+      invalidSamples?: number
+      resets?: number
     }>) => {
-      const metrics = event.data
-      if (metrics?.type !== "metrics") return
+      const message = event.data
+      if (message?.type === "ready") {
+        markReady?.()
+        markReady = null
+        return
+      }
+      if (message?.type !== "metrics") return
       console.log("[v0] Native screen audio buffer recovery:", {
-        fillMs: Math.round(((metrics.fillFrames ?? 0) / SAMPLE_RATE) * 1000),
-        readRate: metrics.readRate?.toFixed(6),
-        underruns: metrics.underruns,
-        overflows: metrics.overflows,
+        fillMs: Math.round(((message.fillFrames ?? 0) / SAMPLE_RATE) * 1000),
+        readRate: message.readRate?.toFixed(6),
+        underruns: message.underruns,
+        overflows: message.overflows,
+        invalidSamples: message.invalidSamples,
+        resets: message.resets,
       })
     }
 
-    // Start the helper process in main. Bail out cleanly on failure.
-    const started = await api.startAudioCapture()
-    if (!started?.supported) {
-      try { node.disconnect() } catch { /* ignore */ }
-      try { await ctx.close() } catch { /* ignore */ }
-      console.log("[v0] Native screen audio: helper failed to start:", started?.reason)
-      return null
-    }
-
-    // Feed IPC PCM chunks into the worklet. Bytes may arrive unaligned/partial,
-    // so buffer a leftover tail and only forward whole stereo float32 frames.
+    // Subscribe before spawning the helper so its first PCM packet cannot be lost.
     let leftover = new Uint8Array(0)
-    const unsubData = api.onAudioCaptureData((chunk) => {
-      // Concatenate any previous partial-sample tail with the new bytes.
-      let bytes: Uint8Array
-      if (leftover.length) {
-        bytes = new Uint8Array(leftover.length + chunk.length)
-        bytes.set(leftover, 0)
-        bytes.set(chunk, leftover.length)
-      } else {
-        bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
-      }
+    unsubData = api.onAudioCaptureData((chunk) => {
+      if (stopped || !node) return
+      const incoming = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
+      const bytes = new Uint8Array(leftover.length + incoming.length)
+      bytes.set(leftover)
+      bytes.set(incoming, leftover.length)
 
-      const bytesPerStereoFrame = 2 * Float32Array.BYTES_PER_ELEMENT
-      const usableBytes = bytes.length - (bytes.length % bytesPerStereoFrame)
-      if (usableBytes < bytesPerStereoFrame) {
-        leftover = bytes.slice(0)
+      const frameBytes = 2 * Float32Array.BYTES_PER_ELEMENT
+      const usableBytes = bytes.length - (bytes.length % frameBytes)
+      if (usableBytes < frameBytes) {
+        leftover = bytes
         return
       }
       leftover = bytes.slice(usableBytes)
-
-      // Copy into a fresh 4-byte-aligned buffer before viewing as Float32.
-      const aligned = new Uint8Array(usableBytes)
-      aligned.set(bytes.subarray(0, usableBytes))
-      const samples = new Float32Array(aligned.buffer)
+      const aligned = bytes.slice(0, usableBytes)
+      const samples = new Float32Array(aligned.buffer, aligned.byteOffset, usableBytes / 4)
       node.port.postMessage({ samples }, [aligned.buffer])
     })
 
-    const unsubEnded = api.onAudioCaptureEnded(() => {
-      console.log("[v0] Native screen audio: helper process ended")
+    unsubEnded = api.onAudioCaptureEnded((code) => {
+      console.log("[v0] Native screen audio: helper process ended", code)
+      teardown(false)
     })
+
+    const started = await api.startAudioCapture()
+    if (!started?.supported) {
+      teardown(false)
+      console.log("[v0] Native screen audio: helper failed to start:", started?.reason)
+      return null
+    }
+    helperStarted = true
+
+    // Do not publish a track while the worklet is still empty. This avoids the
+    // initial starvation burst that was especially audible for window capture.
+    const prebuffered = await Promise.race([
+      ready.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), PREBUFFER_TIMEOUT_MS)),
+    ])
+    if (!prebuffered || stopped) {
+      teardown(true)
+      console.log("[v0] Native screen audio: PCM prebuffer timed out")
+      return null
+    }
 
     const track = dest.stream.getAudioTracks()[0]
     if (!track) {
-      unsubData()
-      unsubEnded()
-      try { await api.stopAudioCapture() } catch { /* ignore */ }
-      try { node.disconnect() } catch { /* ignore */ }
-      try { await ctx.close() } catch { /* ignore */ }
+      teardown(true)
       return null
     }
     nativeTracks.add(track)
 
-    let stopped = false
-    const stop = () => {
-      if (stopped) return
-      stopped = true
-      try { node.port.postMessage({ type: "stop" }) } catch { /* ignore */ }
-      unsubData()
-      unsubEnded()
-      try { void api.stopAudioCapture() } catch { /* ignore */ }
-      try { node.disconnect() } catch { /* ignore */ }
-      try { dest.stream.getTracks().forEach((t) => t.stop()) } catch { /* ignore */ }
-      try { void ctx.close() } catch { /* ignore */ }
-      if (workletLoadedFor === ctx) workletLoadedFor = null
-    }
-
-    // If the track is stopped elsewhere (e.g. stopScreenShare), tear down too.
-    track.addEventListener("ended", stop)
-
+    const stop = () => teardown(true)
+    track.addEventListener("ended", stop, { once: true })
     console.log("[v0] Native screen audio active: process-loopback track ready")
     return { track, stop }
-  } catch (err) {
-    console.log("[v0] Native screen audio setup failed:", err)
+  } catch (error) {
+    teardown(true)
+    console.log("[v0] Native screen audio setup failed:", error)
     return null
   }
 }
