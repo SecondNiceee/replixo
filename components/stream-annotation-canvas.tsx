@@ -36,7 +36,8 @@ interface StreamAnnotationCanvasProps {
   // Whether the LOCAL user can currently draw. When false the canvas still
   // renders remote/own strokes but ignores pointer input (pointer-events:none).
   active: boolean
-  // Electron desktop overlay uses a pen-shaped cursor instead of crosshairs.
+  // Use a pen-shaped cursor over the annotation canvas. Enabled by default in
+  // both browser conferences and the Electron desktop overlay.
   featherCursor?: boolean
   tool: AnnotationTool
   color: string
@@ -63,11 +64,11 @@ export const PEN_WIDTH_OPTIONS = [0.001, 0.004, 0.008, 0.014] as const
 export const DEFAULT_PEN_WIDTH = PEN_WIDTH_OPTIONS[1] // ~4px at 1000px
 const ERASER_WIDTH = 0.03 // ~30px at 1000px
 const FEATHER_CURSOR =
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z' fill='%23171717'/%3E%3Cpath d='M16 8 2 22M17.5 15H9'/%3E%3C/svg%3E") 2 30, crosshair`
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z' fill='%23171717'/%3E%3Cpath d='M16 8 2 22M17.5 15H9'/%3E%3C/svg%3E") 2 30, pointer`
 
 export function StreamAnnotationCanvas({
   active,
-  featherCursor = false,
+  featherCursor = true,
   tool,
   color,
   penWidth = DEFAULT_PEN_WIDTH,
