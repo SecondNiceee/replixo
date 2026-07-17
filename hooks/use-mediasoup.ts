@@ -322,6 +322,13 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               }
             }
           }
+
+          // A full rejoin replaces the send transport and invalidates all old
+          // producers. Re-publish the still-live capture tracks without opening
+          // the browser/Electron source picker again.
+          if (screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live") {
+            await mediaControls.recoverScreenShare()
+          }
           joinInFlightRef.current = false
         },
       )
@@ -352,12 +359,16 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
             const prevAudioProducer = audioProducerRef.current
             const prevVideoProducer = videoProducerRef.current
+            const prevScreenVideoProducer = screenVideoProducerRef.current
+            const prevScreenAudioProducer = screenAudioProducerRef.current
             audioProducerRef.current = null
             videoProducerRef.current = null
             screenVideoProducerRef.current = null
             screenAudioProducerRef.current = null
             prevAudioProducer?.close()
             prevVideoProducer?.close()
+            prevScreenVideoProducer?.close()
+            prevScreenAudioProducer?.close()
 
             sendTransportRef.current?.close()
             recvTransportRef.current?.close()

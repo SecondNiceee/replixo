@@ -52,6 +52,29 @@ export function useTransports({
     }
   }, [iceRetryTimersRef])
 
+  const consumerRecoveryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>[]>>(new Map())
+
+  const recoverVideoConsumers = useCallback((transport: Transport) => {
+    if (transport !== recvTransportRef.current || transport.closed) return
+    const socket = socketRef.current
+    if (!socket) return
+
+    for (const [consumerId, consumer] of consumersRef.current) {
+      if (consumer.closed || consumer.kind !== "video") continue
+      const previous = consumerRecoveryTimersRef.current.get(consumerId) ?? []
+      previous.forEach(clearTimeout)
+
+      const retry = () => {
+        if (consumer.closed || transport.closed || transport.connectionState !== "connected") return
+        socket.emit("resumeConsumer", { roomId, peerId: peerIdRef.current, consumerId })
+        socket.emit("requestConsumerKeyFrame", { roomId, peerId: peerIdRef.current, consumerId })
+      }
+      retry()
+      const timers = [setTimeout(retry, 750), setTimeout(retry, 2000)]
+      consumerRecoveryTimersRef.current.set(consumerId, timers)
+    }
+  }, [roomId, peerIdRef, socketRef, recvTransportRef, consumersRef])
+
   // Resolves once the transport's ICE/DTLS is actually connected (or it closes,
   // or we hit the timeout as a safety fallback). Used to avoid resuming a video
   // consumer before its recv transport is ready — see consumeProducer below.
@@ -182,6 +205,7 @@ export function useTransports({
                 restartIceForTransport(transport)
               } else if (connectionState === "connected") {
                 clearIceRetry(transport.id)
+                recoverVideoConsumers(transport)
               }
             })
 
@@ -210,7 +234,7 @@ export function useTransports({
         )
       })
     },
-    [roomId, peerIdRef, restartIceForTransport, clearIceRetry],
+    [roomId, peerIdRef, restartIceForTransport, clearIceRetry, recoverVideoConsumers],
   )
 
   // ---------------------------------------------------------------------------
@@ -274,6 +298,7 @@ export function useTransports({
       let hasDecodedFrame = false
       let startupAttempts = 0
       let stalledChecks = 0
+      let noRtpChecks = 0
       let lastFramesDecoded = 0
       let lastBytesReceived = 0
       let lastKeyFrameRequestAt = 0
@@ -297,6 +322,9 @@ export function useTransports({
       const tick = async () => {
         if (consumer.closed) {
           videoWatchdogTimersRef.current.delete(consumerId)
+          const recoveryTimers = consumerRecoveryTimersRef.current.get(consumerId) ?? []
+          recoveryTimers.forEach(clearTimeout)
+          consumerRecoveryTimersRef.current.delete(consumerId)
           return
         }
 
@@ -330,17 +358,27 @@ export function useTransports({
           if (startupAttempts <= 15) requestKeyFrame()
         } else if (hasInboundStats && framesAdvanced) {
           stalledChecks = 0
+          noRtpChecks = 0
         } else if (hasInboundStats && bytesAdvanced) {
+          noRtpChecks = 0
           stalledChecks += 1
           if (stalledChecks >= 2 && Date.now() - lastKeyFrameRequestAt >= 4000) {
             requestKeyFrame()
             stalledChecks = 0
           }
         } else {
-          // No RTP arrived. Wait for the path to recover; once inter-frames start
-          // arriving again, bytes will advance and the branch above requests an
-          // immediately useful keyframe.
           stalledChecks = 0
+          noRtpChecks += 1
+          // A recovered ICE path can stay completely silent when the decoder is
+          // waiting for a keyframe. Do not require RTP byte progress to nudge it.
+          if (
+            noRtpChecks >= 2 &&
+            recvTransportRef.current?.connectionState === "connected" &&
+            Date.now() - lastKeyFrameRequestAt >= 4000
+          ) {
+            requestKeyFrame()
+            noRtpChecks = 0
+          }
         }
 
         lastFramesDecoded = framesDecoded
@@ -351,7 +389,7 @@ export function useTransports({
       // Give transport connect + resume a brief head start.
       schedule(600)
     },
-    [roomId, peerIdRef, socketRef],
+    [roomId, peerIdRef, socketRef, recvTransportRef],
   )
 
   // ---------------------------------------------------------------------------

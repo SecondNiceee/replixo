@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
 import { getVoiceAudioConstraints } from "@/lib/media-constraints"
@@ -76,6 +76,7 @@ export function useMediaControls({
   // True while the camera is being turned on (getUserMedia + publish can take a
   // few seconds). The UI shows a loader on the camera button during this window.
   const [isCamStarting, setIsCamStarting] = useState(false)
+  const screenRecoveryInFlightRef = useRef(false)
 
   // ---------------------------------------------------------------------------
   // Wait for the send transport to be ready (user can click mic/cam before join)
@@ -227,6 +228,78 @@ export function useMediaControls({
   // ---------------------------------------------------------------------------
   // Screen share
   // ---------------------------------------------------------------------------
+  const publishCapturedScreen = useCallback(async (
+    transport: Transport,
+    displayStream: MediaStream,
+  ) => {
+    const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current]
+    const videoTrack = displayStream.getVideoTracks()[0]
+    const audioTrack = displayStream.getAudioTracks()[0]
+
+    if (videoTrack?.readyState === "live" && !screenVideoProducerRef.current) {
+      if ("contentHint" in videoTrack) videoTrack.contentHint = "detail"
+      const encoding: RTCRtpEncodingParameters = preset.maxBitrate
+        ? { maxBitrate: preset.maxBitrate, scaleResolutionDownBy: 1, networkPriority: "high", priority: "high" }
+        : { maxBitrate: 4_000_000, scaleResolutionDownBy: 1, networkPriority: "high", priority: "high" }
+      const producer = await transport.produce({
+        track: videoTrack,
+        encodings: [encoding],
+        codecOptions: {
+          videoGoogleStartBitrate: preset.maxBitrate ? 2500 : 2000,
+          videoGoogleMaxBitrate: preset.maxBitrate ? Math.round(preset.maxBitrate / 1000) : 4000,
+          videoGoogleMinBitrate: 600,
+        },
+        appData: { source: "screen" },
+      })
+      screenVideoProducerRef.current = producer
+      try {
+        const sender = producer.rtpSender
+        if (sender) {
+          const params = sender.getParameters()
+          params.degradationPreference = "maintain-resolution"
+          await sender.setParameters(params)
+        }
+      } catch { /* not all browsers support degradationPreference */ }
+    }
+
+    if (audioTrack?.readyState === "live" && !screenAudioProducerRef.current) {
+      screenAudioProducerRef.current = await transport.produce({
+        track: audioTrack,
+        codecOptions: {
+          opusStereo: true,
+          opusDtx: false,
+          opusFec: true,
+          opusMaxPlaybackRate: 48_000,
+          opusMaxAverageBitrate: 192_000,
+        },
+        appData: { source: "screen" },
+      })
+    }
+  }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef])
+
+  const recoverScreenShare = useCallback(async () => {
+    if (screenRecoveryInFlightRef.current) return false
+    const transport = sendTransportRef.current
+    const stream = screenStreamRef.current
+    const videoTrack = stream?.getVideoTracks()[0]
+    if (!transport || transport.closed || !stream || !videoTrack || videoTrack.readyState !== "live") {
+      return false
+    }
+
+    screenRecoveryInFlightRef.current = true
+    try {
+      if (screenVideoProducerRef.current?.closed) screenVideoProducerRef.current = null
+      if (screenAudioProducerRef.current?.closed) screenAudioProducerRef.current = null
+      await publishCapturedScreen(transport, stream)
+      dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
+      return !!screenVideoProducerRef.current
+    } catch {
+      return false
+    } finally {
+      screenRecoveryInFlightRef.current = false
+    }
+  }, [sendTransportRef, screenStreamRef, screenVideoProducerRef, publishCapturedScreen, dispatch])
+
   const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
     const wasSharing = !!screenVideoProducerRef.current
     for (const producer of [screenVideoProducerRef.current, screenAudioProducerRef.current]) {
@@ -260,53 +333,13 @@ export function useMediaControls({
       const videoTrack = displayStream.getVideoTracks()[0]
       const audioTrack = displayStream.getAudioTracks()[0]
 
+      await publishCapturedScreen(sendTransport, displayStream)
+
       if (videoTrack) {
-        if ("contentHint" in videoTrack) videoTrack.contentHint = "detail"
-        const encoding: RTCRtpEncodingParameters = preset.maxBitrate
-          ? { maxBitrate: preset.maxBitrate, scaleResolutionDownBy: 1, networkPriority: "high", priority: "high" }
-          : { maxBitrate: 4_000_000, scaleResolutionDownBy: 1, networkPriority: "high", priority: "high" }
-
-        const producer = await sendTransport.produce({
-          track: videoTrack,
-          encodings: [encoding],
-          codecOptions: {
-            videoGoogleStartBitrate: preset.maxBitrate ? 2500 : 2000,
-            videoGoogleMaxBitrate: preset.maxBitrate ? Math.round(preset.maxBitrate / 1000) : 4000,
-            videoGoogleMinBitrate: 600,
-          },
-          appData: { source: "screen" },
-        })
-        screenVideoProducerRef.current = producer
-
-        // Prefer resolution over framerate for screen content
-        try {
-          const sender = producer.rtpSender
-          if (sender) {
-            const params = sender.getParameters()
-            params.degradationPreference = "maintain-resolution"
-            await sender.setParameters(params)
-          }
-        } catch { /* not all browsers support degradationPreference */ }
-
         videoTrack.onended = () => stopScreenShare()
       }
 
       if (audioTrack) {
-        // Publish screen audio directly. Browser and software AEC are intentionally
-        // disabled because DSP corrupts virtual-cable and system-audio signals.
-        const producer = await sendTransport.produce({
-          track: audioTrack,
-          codecOptions: {
-            opusStereo: true,
-            opusDtx: false,
-            opusFec: true,
-            opusMaxPlaybackRate: 48_000,
-            opusMaxAverageBitrate: 192_000,
-          },
-          appData: { source: "screen" },
-        })
-        screenAudioProducerRef.current = producer
-
         const replaceScreenAudio = async () => {
           const currentProducer = screenAudioProducerRef.current
           if (!currentProducer || currentProducer.closed || !screenVideoProducerRef.current) return
@@ -355,7 +388,7 @@ export function useMediaControls({
       if (!options?.silent) playScreenShareSound()
     } catch { /* user cancelled or permission denied */ }
   }, [sendTransportRef, screenQualityRef, screenStreamRef, screenVideoProducerRef,
-      screenAudioProducerRef, dispatch, stopScreenShare])
+      screenAudioProducerRef, dispatch, stopScreenShare, publishCapturedScreen])
 
   const toggleScreenShare = useCallback(async () => {
     if (screenVideoProducerRef.current) stopScreenShare()
@@ -385,6 +418,7 @@ export function useMediaControls({
     toggleScreenShare,
     startScreenShare,
     stopScreenShare,
+    recoverScreenShare,
     setScreenQuality,
   }
 }
