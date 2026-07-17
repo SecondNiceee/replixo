@@ -116,9 +116,13 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     if (whiteboardOpen) {
       closeWhiteboard()
     } else {
+      // В Electron annotation-canvas находится поверх всего окна и иначе
+      // перехватывает указатель у tldraw. Доска и аннотации — взаимоисключающие
+      // полноэкранные режимы ввода.
+      setAnnotationActive(false)
       openWhiteboard()
     }
-  }, [whiteboardOpen, closeWhiteboard, openWhiteboard])
+  }, [whiteboardOpen, closeWhiteboard, openWhiteboard, setAnnotationActive])
 
   const handleLeave = useCallback(() => {
     leave()
@@ -213,7 +217,14 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           />
         </div>
         {whiteboardOpen && (
-          <div className="absolute inset-0">
+          <div
+            {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
+            className={cn(
+              "absolute inset-0 pointer-events-auto",
+              // Поверх видеослоя, но ниже Electron overlay-контролов (z-9990+).
+              overlayMode && "z-[9980]",
+            )}
+          >
             <Whiteboard
               initialSnapshot={whiteboardSnapshot}
               onChange={sendWhiteboardChange}
