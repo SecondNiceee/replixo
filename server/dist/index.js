@@ -192,19 +192,18 @@ async function main() {
             res.status(204).end();
             return;
         }
-        (0, room_registry_1.markClosing)(peerId);
+        (0, room_registry_1.markClosing)(roomId, peerId);
+        const expectedSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
         const timer = setTimeout(() => {
-            // Спурьёзные pagehide/beforeunload (сворачивание вкладки на мобильном,
-            // переключение приложений и т.п.) не должны выкидывать активного
-            // участника. Удаляем ТОЛЬКО если сокет действительно пропал — при
-            // настоящем закрытии вкладки он отвалится в пределах CLOSE_GRACE_MS.
-            const activeSocketId = room_registry_1.peerSockets.get(peerId);
-            const activeSocket = activeSocketId ? io.sockets.sockets.get(activeSocketId) : undefined;
-            if (activeSocket && activeSocket.connected)
+            // A newer socket generation always wins over this stale beacon.
+            if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== expectedSocketId)
                 return;
-            (0, room_registry_1.evictPeer)(io, roomId, peerId);
+            const activeSocket = expectedSocketId ? io.sockets.sockets.get(expectedSocketId) : undefined;
+            if (activeSocket?.connected)
+                return;
+            (0, room_registry_1.evictPeer)(io, roomId, peerId, expectedSocketId);
         }, room_registry_1.CLOSE_GRACE_MS);
-        (0, room_registry_1.scheduleEviction)(peerId, timer);
+        (0, room_registry_1.scheduleEviction)(roomId, peerId, timer);
         // Ответ телу sendBeacon не важен — отвечаем сразу.
         res.status(204).end();
     });

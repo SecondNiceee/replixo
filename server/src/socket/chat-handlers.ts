@@ -1,7 +1,7 @@
 import { saveMessage, saveReadMarker } from '../db'
 import type { ChatMessagePayload, ChatReadPayload } from '../types'
 import { createRateLimiter, type HandlerContext } from './helpers'
-import { rooms, peerSockets } from './room-registry'
+import { rooms, getPeerSocket } from './room-registry'
 
 // ---------------------------------------------------------------------------
 // Room text chat: chatMessage, chatRead
@@ -69,7 +69,7 @@ export function registerChatHandlers(ctx: HandlerContext): void {
     if (!room) return
     const peer = room.getPeer(pid)
     if (!peer) return
-    if (peerSockets.get(pid) !== socket.id) return
+    if (getPeerSocket(rid, pid) !== socket.id) return
 
     // --- Rate limit ---
     if (!allowChatEvent()) return
@@ -125,7 +125,7 @@ export function registerChatHandlers(ctx: HandlerContext): void {
     const room = rooms.get(rid)
     if (!room) return
     if (!room.hasPeer(pid)) return
-    if (peerSockets.get(pid) !== socket.id) return
+    if (getPeerSocket(rid, pid) !== socket.id) return
 
     // Persist (fire-and-forget) and tell the others.
     void saveReadMarker(rid, pid, ts)

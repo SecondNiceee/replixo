@@ -69,7 +69,7 @@ function registerChatHandlers(ctx) {
         const peer = room.getPeer(pid);
         if (!peer)
             return;
-        if (room_registry_1.peerSockets.get(pid) !== socket.id)
+        if ((0, room_registry_1.getPeerSocket)(rid, pid) !== socket.id)
             return;
         // --- Rate limit ---
         if (!allowChatEvent())
@@ -124,7 +124,7 @@ function registerChatHandlers(ctx) {
             return;
         if (!room.hasPeer(pid))
             return;
-        if (room_registry_1.peerSockets.get(pid) !== socket.id)
+        if ((0, room_registry_1.getPeerSocket)(rid, pid) !== socket.id)
             return;
         // Persist (fire-and-forget) and tell the others.
         void (0, db_1.saveReadMarker)(rid, pid, ts);
