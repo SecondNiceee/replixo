@@ -343,6 +343,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           subscribeAnnotationClear={subscribeAnnotationClear}
           isMicMuted={isMicMuted}
           isCamOff={isCamOff}
+          whiteboardOpen={whiteboardOpen}
+          onToggleWhiteboard={toggleWhiteboard}
           onToggleMic={toggleMic}
           onToggleCam={toggleCam}
           onStopScreenShare={toggleScreenShare}
