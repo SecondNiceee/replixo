@@ -1,11 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CLEAN_CLOSE_GRACE_MS = exports.CLOSE_GRACE_MS = exports.DISCONNECT_GRACE_MS = exports.peerSockets = exports.rooms = void 0;
+exports.roomPeerKey = roomPeerKey;
+exports.getPeerSocket = getPeerSocket;
+exports.setPeerSocket = setPeerSocket;
 exports.markClosing = markClosing;
 exports.isClosing = isClosing;
 exports.clearPendingDisconnect = clearPendingDisconnect;
 exports.scheduleEviction = scheduleEviction;
-exports.setPendingDisconnect = setPendingDisconnect;
 exports.deletePendingDisconnect = deletePendingDisconnect;
 exports.evictPeer = evictPeer;
 exports.getOrCreateRoom = getOrCreateRoom;
@@ -18,10 +20,20 @@ const uploads_1 = require("../uploads");
 // In-memory room store shared by all handler modules
 // ---------------------------------------------------------------------------
 exports.rooms = new Map();
-// peerId → socketId — tracks where each peer is currently connected so we can
-// kick an old tab when the same peer reconnects from a new one.
+// roomId + peerId → socketId. A peer identifier is scoped to one room so a
+// delayed disconnect (or the same browser session in another room) cannot
+// evict an unrelated active participant.
 exports.peerSockets = new Map();
-// peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
+function roomPeerKey(roomId, peerId) {
+    return `${roomId}\u0000${peerId}`;
+}
+function getPeerSocket(roomId, peerId) {
+    return exports.peerSockets.get(roomPeerKey(roomId, peerId));
+}
+function setPeerSocket(roomId, peerId, socketId) {
+    exports.peerSockets.set(roomPeerKey(roomId, peerId), socketId);
+}
+// roomId + peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
 // Wi-Fi hand-off, tunnel switch) we DON'T evict the peer immediately. Instead we
 // keep its producers/consumers/transports alive for a grace window so that when
 // the device comes back it resumes via rejoinProbe + ICE restart and never
@@ -52,43 +64,44 @@ exports.CLEAN_CLOSE_GRACE_MS = 10000;
 // peerIds that announced an intentional close. When such a peer's socket also
 // drops we use CLOSE_GRACE_MS instead of DISCONNECT_GRACE_MS.
 const closingPeers = new Set();
-function markClosing(peerId) {
-    closingPeers.add(peerId);
+function markClosing(roomId, peerId) {
+    closingPeers.add(roomPeerKey(roomId, peerId));
 }
-function isClosing(peerId) {
-    return closingPeers.has(peerId);
+function isClosing(roomId, peerId) {
+    return closingPeers.has(roomPeerKey(roomId, peerId));
 }
-function clearPendingDisconnect(peerId) {
-    const t = pendingDisconnects.get(peerId);
+function clearPendingDisconnect(roomId, peerId) {
+    const key = roomPeerKey(roomId, peerId);
+    const t = pendingDisconnects.get(key);
     if (t) {
         clearTimeout(t);
-        pendingDisconnects.delete(peerId);
+        pendingDisconnects.delete(key);
     }
     // A (re)join or explicit leave voids any pending "closing" intent too.
-    closingPeers.delete(peerId);
+    closingPeers.delete(key);
 }
 // Replace any pending eviction timer WITHOUT clearing the "closing" flag, so
 // the disconnect and beacon paths can race in any order without stomping each
 // other's intent.
-function scheduleEviction(peerId, timer) {
-    const existing = pendingDisconnects.get(peerId);
+function scheduleEviction(roomId, peerId, timer) {
+    const key = roomPeerKey(roomId, peerId);
+    const existing = pendingDisconnects.get(key);
     if (existing)
         clearTimeout(existing);
-    pendingDisconnects.set(peerId, timer);
+    pendingDisconnects.set(key, timer);
 }
-function setPendingDisconnect(peerId, timer) {
-    pendingDisconnects.set(peerId, timer);
-}
-function deletePendingDisconnect(peerId) {
-    pendingDisconnects.delete(peerId);
+function deletePendingDisconnect(roomId, peerId) {
+    pendingDisconnects.delete(roomPeerKey(roomId, peerId));
 }
 /**
  * Remove a peer from its room and notify everyone. Safe to call without a
  * socket context (e.g. from a grace-window timer or the sendBeacon HTTP
  * endpoint). Idempotent: a no-op if the peer is no longer in the room.
  */
-function evictPeer(io, roomId, peerId) {
-    clearPendingDisconnect(peerId);
+function evictPeer(io, roomId, peerId, expectedSocketId) {
+    if (expectedSocketId && getPeerSocket(roomId, peerId) !== expectedSocketId)
+        return;
+    clearPendingDisconnect(roomId, peerId);
     const room = exports.rooms.get(roomId);
     if (!room || !room.hasPeer(peerId))
         return;
@@ -99,7 +112,7 @@ function evictPeer(io, roomId, peerId) {
     }
     room.removePeer(peerId);
     io.to(roomId).emit('peerLeft', { peerId });
-    exports.peerSockets.delete(peerId);
+    exports.peerSockets.delete(roomPeerKey(roomId, peerId));
     console.log(`[room] Peer ${peerId} evicted from room ${roomId}`);
     cleanupRoomIfEmpty(roomId);
 }
@@ -155,7 +168,7 @@ function authedRoom(rid, pid, socketId) {
     const room = exports.rooms.get(rid);
     if (!room || !room.hasPeer(pid))
         return null;
-    if (exports.peerSockets.get(pid) !== socketId)
+    if (getPeerSocket(rid, pid) !== socketId)
         return null;
     return room;
 }

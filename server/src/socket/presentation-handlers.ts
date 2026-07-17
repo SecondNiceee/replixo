@@ -6,7 +6,7 @@ import type {
   PresentationDrawSnapshotPayload,
 } from '../types'
 import { createRateLimiter, type HandlerContext } from './helpers'
-import { rooms, peerSockets, authedRoom } from './room-registry'
+import { rooms, getPeerSocket, authedRoom } from './room-registry'
 
 // ---------------------------------------------------------------------------
 // Presentation: slide sync + drawing annotations over slides
@@ -72,7 +72,7 @@ export function registerPresentationHandlers(ctx: HandlerContext): void {
 
     // Auth: only the active presenter owning this socket may end the presentation.
     if (room.currentSlide == null || room.currentSlide.peerId !== pid) return
-    if (peerSockets.get(pid) !== socket.id) return
+    if (getPeerSocket(rid, pid) !== socket.id) return
 
     room.currentSlide = null
     // Use io.to() — consistent with handleLeave; works even if the socket

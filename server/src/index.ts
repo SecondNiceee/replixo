@@ -18,7 +18,7 @@ import {
   WINDOWS_INSTALLER_NAME,
 } from './config'
 import { setupSocketIO } from './socket'
-import { evictPeer, markClosing, scheduleEviction, peerSockets, CLOSE_GRACE_MS } from './socket/room-registry'
+import { evictPeer, markClosing, scheduleEviction, getPeerSocket, CLOSE_GRACE_MS } from './socket/room-registry'
 import {
   ensureUploadRoot,
   ensureRoomDir,
@@ -189,18 +189,16 @@ async function main(): Promise<void> {
       res.status(204).end()
       return
     }
-    markClosing(peerId)
+    markClosing(roomId, peerId)
+    const expectedSocketId = getPeerSocket(roomId, peerId)
     const timer = setTimeout(() => {
-      // Спурьёзные pagehide/beforeunload (сворачивание вкладки на мобильном,
-      // переключение приложений и т.п.) не должны выкидывать активного
-      // участника. Удаляем ТОЛЬКО если сокет действительно пропал — при
-      // настоящем закрытии вкладки он отвалится в пределах CLOSE_GRACE_MS.
-      const activeSocketId = peerSockets.get(peerId)
-      const activeSocket = activeSocketId ? io.sockets.sockets.get(activeSocketId) : undefined
-      if (activeSocket && activeSocket.connected) return
-      evictPeer(io, roomId, peerId)
+      // A newer socket generation always wins over this stale beacon.
+      if (getPeerSocket(roomId, peerId) !== expectedSocketId) return
+      const activeSocket = expectedSocketId ? io.sockets.sockets.get(expectedSocketId) : undefined
+      if (activeSocket?.connected) return
+      evictPeer(io, roomId, peerId, expectedSocketId)
     }, CLOSE_GRACE_MS)
-    scheduleEviction(peerId, timer)
+    scheduleEviction(roomId, peerId, timer)
     // Ответ телу sendBeacon не важен — отвечаем сразу.
     res.status(204).end()
   })

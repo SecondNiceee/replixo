@@ -66,7 +66,7 @@ function registerPresentationHandlers(ctx) {
         // Auth: only the active presenter owning this socket may end the presentation.
         if (room.currentSlide == null || room.currentSlide.peerId !== pid)
             return;
-        if (room_registry_1.peerSockets.get(pid) !== socket.id)
+        if ((0, room_registry_1.getPeerSocket)(rid, pid) !== socket.id)
             return;
         room.currentSlide = null;
         // Use io.to() — consistent with handleLeave; works even if the socket

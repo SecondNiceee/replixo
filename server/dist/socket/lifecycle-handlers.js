@@ -30,16 +30,20 @@ function registerLifecycleHandlers(ctx) {
         if (!room || !room.hasPeer(peerId)) {
             return (0, helpers_1.err)(callback, 'peer evicted');
         }
-        // The peer is back on a fresh socket within the grace window — cancel the
-        // pending eviction and re-bind it to this socket so media keeps flowing.
-        (0, room_registry_1.clearPendingDisconnect)(peerId);
-        // Re-join the socket.io room: after a reconnect this is a brand-new
-        // socket, so without this it would miss peerJoined/newProducer/etc.
+        const previousSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
+        const previousSocket = previousSocketId
+            ? io.sockets.sockets.get(previousSocketId)
+            : undefined;
+        if (previousSocketId !== socket.id && previousSocket?.connected) {
+            return (0, helpers_1.err)(callback, 'peer is active on another socket');
+        }
+        // Bind the new generation before cancelling eviction. Every delayed
+        // callback checks this mapping and therefore cannot remove this session.
+        (0, room_registry_1.setPeerSocket)(roomId, peerId, socket.id);
+        (0, room_registry_1.clearPendingDisconnect)(roomId, peerId);
         socket.join(roomId);
         session.roomId = roomId;
         session.peerId = peerId;
-        // Update the socket mapping in case the socket.id changed on reconnect.
-        room_registry_1.peerSockets.set(peerId, socket.id);
         (0, helpers_1.ack)(callback, undefined);
     });
     // -----------------------------------------------------------------------
@@ -67,7 +71,7 @@ function registerLifecycleHandlers(ctx) {
         const peerId = session.peerId;
         // If a newer socket already took over this peerId (duplicate-tab kick or a
         // fast reconnect), this stale socket must not touch the peer at all.
-        if (room_registry_1.peerSockets.get(peerId) !== socket.id)
+        if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id)
             return;
         // Choose how long to wait before evicting, most-decisive signal first:
         //
@@ -82,23 +86,17 @@ function registerLifecycleHandlers(ctx) {
         //  3. Anything else ("ping timeout", "transport error") -> looks like a
         //     real network drop / phone lock. Keep the generous grace so a brief
         //     outage doesn't kick the user (DISCONNECT_GRACE_MS).
-        const isCleanClose = reason === 'transport close' ||
-            reason === 'client namespace disconnect' ||
-            reason === 'server namespace disconnect' ||
-            reason === 'forced close';
-        const graceMs = (0, room_registry_1.isClosing)(peerId)
-            ? room_registry_1.CLOSE_GRACE_MS
-            : isCleanClose
-                ? room_registry_1.CLEAN_CLOSE_GRACE_MS
-                : room_registry_1.DISCONNECT_GRACE_MS;
+        // `transport close` is also emitted for Wi-Fi/VPN hand-offs, browser
+        // process suspension and Electron network changes. Treat it as a network
+        // interruption unless an explicit leave beacon marked the session closing.
+        const graceMs = (0, room_registry_1.isClosing)(roomId, peerId) ? room_registry_1.CLOSE_GRACE_MS : room_registry_1.DISCONNECT_GRACE_MS;
         const timer = setTimeout(() => {
-            (0, room_registry_1.deletePendingDisconnect)(peerId);
-            // Re-check: the peer may have reconnected on a new socket meanwhile.
-            if (room_registry_1.peerSockets.get(peerId) !== socket.id)
+            (0, room_registry_1.deletePendingDisconnect)(roomId, peerId);
+            if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id)
                 return;
             console.log(`[room] Peer ${peerId} did not return within grace window — evicting`);
-            (0, room_registry_1.evictPeer)(io, roomId, peerId);
+            (0, room_registry_1.evictPeer)(io, roomId, peerId, socket.id);
         }, graceMs);
-        (0, room_registry_1.scheduleEviction)(peerId, timer);
+        (0, room_registry_1.scheduleEviction)(roomId, peerId, timer);
     });
 }

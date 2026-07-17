@@ -146,14 +146,34 @@ function resolveServerUrl(): string {
 
 export const SERVER_URL = resolveServerUrl()
 
-export const PEER_ID_KEY = "replixo_peer_id"
+export const PEER_ID_KEY = "replixo_peer_session_id"
+
+let memoryPeerId: string | null = null
+
+function createPeerId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
 
 export function getOrCreatePeerId(): string {
-  if (typeof window === "undefined") return crypto.randomUUID()
-  let id = localStorage.getItem(PEER_ID_KEY)
-  if (!id) {
-    id = crypto.randomUUID()
-    localStorage.setItem(PEER_ID_KEY, id)
+  if (memoryPeerId) return memoryPeerId
+  if (typeof window === "undefined") return createPeerId()
+
+  try {
+    const stored = window.sessionStorage.getItem(PEER_ID_KEY)
+    if (stored) {
+      memoryPeerId = stored
+      return stored
+    }
+    memoryPeerId = createPeerId()
+    window.sessionStorage.setItem(PEER_ID_KEY, memoryPeerId)
+  } catch {
+    // Storage can be blocked in private/embedded contexts. The in-memory ID
+    // still remains stable for the lifetime of this page.
+    memoryPeerId = createPeerId()
   }
-  return id
+
+  return memoryPeerId
 }

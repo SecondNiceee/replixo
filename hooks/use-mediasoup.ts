@@ -70,6 +70,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const isCamOffRef = useRef(true)
   const hasCamRef = useRef(false)
   const lastRecoverAtRef = useRef(0)
+  const joinInFlightRef = useRef(false)
+  const connectionGenerationRef = useRef(0)
+  const recoveryInFlightRef = useRef(false)
 
   // Keep refs in sync with state (readable inside async callbacks without stale closures)
   statusRef.current = state.status
@@ -116,10 +119,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     if (!socket || !hasJoinedRef.current) return
     if (!socket.connected) { socket.connect(); return }
     const now = Date.now()
-    if (now - lastRecoverAtRef.current < 5000) return
+    if (now - lastRecoverAtRef.current < 5000 || recoveryInFlightRef.current) return
     lastRecoverAtRef.current = now
+    recoveryInFlightRef.current = true
+    const generation = connectionGenerationRef.current
     socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current },
       (error: string | null) => {
+        recoveryInFlightRef.current = false
+        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
         if (!error) {
           transports.restartIceForTransport(sendTransportRef.current)
           transports.restartIceForTransport(recvTransportRef.current)
@@ -132,6 +139,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Leave
   // ---------------------------------------------------------------------------
   const leave = useCallback(() => {
+    connectionGenerationRef.current += 1
+    joinInFlightRef.current = false
+    recoveryInFlightRef.current = false
     const socket = socketRef.current
     if (socket) {
       socket.emit("leaveRoom", { roomId, peerId: peerIdRef.current })
@@ -175,6 +185,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       timeout: 10000,
     })
     socketRef.current = socket
+    const generation = ++connectionGenerationRef.current
 
     socket.on("connect_error", (e) => {
       if (!hasJoinedRef.current) {
@@ -184,6 +195,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     // Core join sequence — called on first connect and on full rejoin
     const doJoinSequence = async () => {
+      if (joinInFlightRef.current || socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+      joinInFlightRef.current = true
       const { Device } = await import("mediasoup-client")
       const device = new Device()
       deviceRef.current = device
@@ -203,7 +216,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           whiteboardOpen?: boolean
           whiteboardSnapshot?: string | null
         } | undefined) => {
+          if (socketRef.current !== socket || connectionGenerationRef.current !== generation) {
+            joinInFlightRef.current = false
+            return
+          }
           if (error || !data) {
+            joinInFlightRef.current = false
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
             return
           }
@@ -248,7 +266,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
           // Catch-up publish: re-publish any tracks the user had active before a rejoin
           const newSendTransport = sendTransportRef.current
-          if (!newSendTransport) return
+          if (!newSendTransport) {
+            joinInFlightRef.current = false
+            return
+          }
 
           if (hasMicRef.current && !audioProducerRef.current) {
             let audioTrack = localStreamRef.current?.getAudioTracks()[0]
@@ -301,6 +322,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               }
             }
           }
+          joinInFlightRef.current = false
         },
       )
     }
@@ -314,14 +336,18 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         return
       }
 
-      // Reconnect path: probe server, ICE restart or full rejoin
+      // Reconnect path: only one probe/rebuild may run for this socket generation.
+      if (recoveryInFlightRef.current) return
+      recoveryInFlightRef.current = true
       socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current },
         async (error: string | null) => {
+          recoveryInFlightRef.current = false
+          if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
           if (!error) {
             transports.restartIceForTransport(sendTransportRef.current)
             transports.restartIceForTransport(recvTransportRef.current)
           } else {
-            // Full rejoin: server evicted the peer
+            // Full rejoin only after the server confirms this peer was evicted.
             hasJoinedRef.current = false
 
             const prevAudioProducer = audioProducerRef.current
@@ -337,7 +363,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             recvTransportRef.current?.close()
             sendTransportRef.current = null
             recvTransportRef.current = null
+            consumersRef.current.forEach((consumer) => consumer.close())
             consumersRef.current.clear()
+            pendingClosedProducersRef.current.clear()
+            iceRestartingRef.current.clear()
+            iceRetryTimersRef.current.forEach((timer) => clearTimeout(timer))
+            iceRetryTimersRef.current.clear()
 
             await doJoinSequence()
           }

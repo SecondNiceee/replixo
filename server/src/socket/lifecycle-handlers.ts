@@ -1,15 +1,15 @@
 import { ack, err, type Callback, type HandlerContext } from './helpers'
 import {
   rooms,
-  peerSockets,
   clearPendingDisconnect,
   scheduleEviction,
   deletePendingDisconnect,
   evictPeer,
+  getPeerSocket,
+  setPeerSocket,
   isClosing,
   DISCONNECT_GRACE_MS,
   CLOSE_GRACE_MS,
-  CLEAN_CLOSE_GRACE_MS,
 } from './room-registry'
 
 // ---------------------------------------------------------------------------
@@ -44,16 +44,21 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
       if (!room || !room.hasPeer(peerId)) {
         return err(callback as Callback<never>, 'peer evicted')
       }
-      // The peer is back on a fresh socket within the grace window — cancel the
-      // pending eviction and re-bind it to this socket so media keeps flowing.
-      clearPendingDisconnect(peerId)
-      // Re-join the socket.io room: after a reconnect this is a brand-new
-      // socket, so without this it would miss peerJoined/newProducer/etc.
+      const previousSocketId = getPeerSocket(roomId, peerId)
+      const previousSocket = previousSocketId
+        ? io.sockets.sockets.get(previousSocketId)
+        : undefined
+      if (previousSocketId !== socket.id && previousSocket?.connected) {
+        return err(callback as Callback<never>, 'peer is active on another socket')
+      }
+
+      // Bind the new generation before cancelling eviction. Every delayed
+      // callback checks this mapping and therefore cannot remove this session.
+      setPeerSocket(roomId, peerId, socket.id)
+      clearPendingDisconnect(roomId, peerId)
       socket.join(roomId)
       session.roomId = roomId
       session.peerId = peerId
-      // Update the socket mapping in case the socket.id changed on reconnect.
-      peerSockets.set(peerId, socket.id)
       ack(callback, undefined)
     },
   )
@@ -85,7 +90,7 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
 
     // If a newer socket already took over this peerId (duplicate-tab kick or a
     // fast reconnect), this stale socket must not touch the peer at all.
-    if (peerSockets.get(peerId) !== socket.id) return
+    if (getPeerSocket(roomId, peerId) !== socket.id) return
 
     // Choose how long to wait before evicting, most-decisive signal first:
     //
@@ -100,23 +105,16 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
     //  3. Anything else ("ping timeout", "transport error") -> looks like a
     //     real network drop / phone lock. Keep the generous grace so a brief
     //     outage doesn't kick the user (DISCONNECT_GRACE_MS).
-    const isCleanClose =
-      reason === 'transport close' ||
-      reason === 'client namespace disconnect' ||
-      reason === 'server namespace disconnect' ||
-      reason === 'forced close'
-    const graceMs = isClosing(peerId)
-      ? CLOSE_GRACE_MS
-      : isCleanClose
-        ? CLEAN_CLOSE_GRACE_MS
-        : DISCONNECT_GRACE_MS
+    // `transport close` is also emitted for Wi-Fi/VPN hand-offs, browser
+    // process suspension and Electron network changes. Treat it as a network
+    // interruption unless an explicit leave beacon marked the session closing.
+    const graceMs = isClosing(roomId, peerId) ? CLOSE_GRACE_MS : DISCONNECT_GRACE_MS
     const timer = setTimeout(() => {
-      deletePendingDisconnect(peerId)
-      // Re-check: the peer may have reconnected on a new socket meanwhile.
-      if (peerSockets.get(peerId) !== socket.id) return
+      deletePendingDisconnect(roomId, peerId)
+      if (getPeerSocket(roomId, peerId) !== socket.id) return
       console.log(`[room] Peer ${peerId} did not return within grace window — evicting`)
-      evictPeer(io, roomId, peerId)
+      evictPeer(io, roomId, peerId, socket.id)
     }, graceMs)
-    scheduleEviction(peerId, timer)
+    scheduleEviction(roomId, peerId, timer)
   })
 }

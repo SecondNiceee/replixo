@@ -19,41 +19,27 @@ function registerMediaHandlers(ctx, worker) {
             if (!create && !room_registry_1.rooms.has(roomId)) {
                 return (0, helpers_1.err)(callback, 'Комната не найдена');
             }
-            // If this peerId is already connected from another socket (another tab /
-            // device), kick the old session so only the latest one stays.
-            const existingSocketId = room_registry_1.peerSockets.get(peerId);
+            const existingSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
             if (existingSocketId && existingSocketId !== socket.id) {
                 const oldSocket = io.sockets.sockets.get(existingSocketId);
-                if (oldSocket) {
+                if (oldSocket?.connected) {
+                    // A genuine duplicate session in this room. Independent tabs now
+                    // have different peer IDs, so this only handles an actual clone.
                     oldSocket.emit('kicked', { reason: 'duplicate' });
                     oldSocket.disconnect(true);
                 }
-                // Remove the old peer from whatever room it was in
-                for (const [rid, r] of room_registry_1.rooms.entries()) {
-                    if (r.hasPeer(peerId)) {
-                        r.removePeer(peerId);
-                        io.to(rid).emit('peerLeft', { peerId });
-                        (0, room_registry_1.cleanupRoomIfEmpty)(rid);
-                        break;
-                    }
-                }
+                (0, room_registry_1.evictPeer)(io, roomId, peerId, existingSocketId);
             }
-            // This peer is (re)joining — cancel any pending grace-window eviction.
-            (0, room_registry_1.clearPendingDisconnect)(peerId);
+            (0, room_registry_1.clearPendingDisconnect)(roomId, peerId);
             const room = await (0, room_registry_1.getOrCreateRoom)(roomId, worker);
             if (room.isFull())
                 return (0, helpers_1.err)(callback, 'Room is full (max 5 participants)');
-            // After kicking the old socket above, the peer should no longer be in the
-            // room. But guard defensively just in case.
-            if (room.hasPeer(peerId)) {
-                room.removePeer(peerId);
-            }
             const peer = new Peer_1.Peer({ peerId, displayName, socketId: socket.id });
             peer.rtpCapabilities = rtpCapabilities;
             room.addPeer(peer);
             session.roomId = roomId;
             session.peerId = peerId;
-            room_registry_1.peerSockets.set(peerId, socket.id);
+            (0, room_registry_1.setPeerSocket)(roomId, peerId, socket.id);
             socket.join(roomId);
             const existingPeers = room.getExistingPeersFor(peerId);
             console.log(`[room] Peer ${peerId} (${displayName}) joined room ${roomId} — peers: ${room.getPeerIds().length}`);

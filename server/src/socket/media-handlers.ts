@@ -14,10 +14,11 @@ import type {
 import { ack, err, type Callback, type HandlerContext } from './helpers'
 import {
   rooms,
-  peerSockets,
   clearPendingDisconnect,
+  getPeerSocket,
+  setPeerSocket,
   getOrCreateRoom,
-  cleanupRoomIfEmpty,
+  evictPeer,
 } from './room-registry'
 
 // ---------------------------------------------------------------------------
@@ -40,37 +41,23 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
           return err(callback as Callback<never>, 'Комната не найдена')
         }
 
-        // If this peerId is already connected from another socket (another tab /
-        // device), kick the old session so only the latest one stays.
-        const existingSocketId = peerSockets.get(peerId)
+        const existingSocketId = getPeerSocket(roomId, peerId)
         if (existingSocketId && existingSocketId !== socket.id) {
           const oldSocket = io.sockets.sockets.get(existingSocketId)
-          if (oldSocket) {
+          if (oldSocket?.connected) {
+            // A genuine duplicate session in this room. Independent tabs now
+            // have different peer IDs, so this only handles an actual clone.
             oldSocket.emit('kicked', { reason: 'duplicate' })
             oldSocket.disconnect(true)
           }
-          // Remove the old peer from whatever room it was in
-          for (const [rid, r] of rooms.entries()) {
-            if (r.hasPeer(peerId)) {
-              r.removePeer(peerId)
-              io.to(rid).emit('peerLeft', { peerId })
-              cleanupRoomIfEmpty(rid)
-              break
-            }
-          }
+          evictPeer(io, roomId, peerId, existingSocketId)
         }
 
-        // This peer is (re)joining — cancel any pending grace-window eviction.
-        clearPendingDisconnect(peerId)
+        clearPendingDisconnect(roomId, peerId)
 
         const room = await getOrCreateRoom(roomId, worker)
 
         if (room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
-        // After kicking the old socket above, the peer should no longer be in the
-        // room. But guard defensively just in case.
-        if (room.hasPeer(peerId)) {
-          room.removePeer(peerId)
-        }
 
         const peer = new Peer({ peerId, displayName, socketId: socket.id })
         peer.rtpCapabilities = rtpCapabilities
@@ -78,7 +65,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
 
         session.roomId = roomId
         session.peerId = peerId
-        peerSockets.set(peerId, socket.id)
+        setPeerSocket(roomId, peerId, socket.id)
         socket.join(roomId)
 
         const existingPeers = room.getExistingPeersFor(peerId)
