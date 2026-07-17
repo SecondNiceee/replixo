@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, SquarePen, ChevronUp } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, Presentation, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
@@ -145,7 +145,7 @@ export function OverlayControls({
                 : "border-white/10 bg-white/5 text-white hover:bg-white/10",
             )}
           >
-            <SquarePen className="size-5" />
+            <Presentation className="size-5" />
           </button>
 
           {/* Divider */}
