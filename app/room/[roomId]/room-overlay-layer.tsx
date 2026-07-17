@@ -23,6 +23,8 @@ interface RoomOverlayLayerProps {
   subscribeAnnotationClear: (fn: () => void) => () => void
   isMicMuted: boolean
   isCamOff: boolean
+  whiteboardOpen: boolean
+  onToggleWhiteboard: () => void
   onToggleMic: () => void
   onToggleCam: () => void
   onStopScreenShare: () => void
@@ -56,6 +58,8 @@ export function RoomOverlayLayer({
   subscribeAnnotationClear,
   isMicMuted,
   isCamOff,
+  whiteboardOpen,
+  onToggleWhiteboard,
   onToggleMic,
   onToggleCam,
   onStopScreenShare,
@@ -103,6 +107,8 @@ export function RoomOverlayLayer({
         isCamOff={isCamOff}
         annotationActive={annotationActive}
         onToggleAnnotation={onToggleAnnotation}
+        whiteboardOpen={whiteboardOpen}
+        onToggleWhiteboard={onToggleWhiteboard}
         onToggleMic={onToggleMic}
         onToggleCam={onToggleCam}
         onStopScreenShare={onStopScreenShare}

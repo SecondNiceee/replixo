@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, ChevronUp } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, SquarePen, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
@@ -12,6 +12,8 @@ interface OverlayControlsProps {
   // показывается тулбар, а полноэкранный холст перехватывает клики мыши.
   annotationActive: boolean
   onToggleAnnotation: () => void
+  whiteboardOpen: boolean
+  onToggleWhiteboard: () => void
   onToggleMic: () => void
   onToggleCam: () => void
   onStopScreenShare: () => void
@@ -32,6 +34,8 @@ export function OverlayControls({
   isCamOff,
   annotationActive,
   onToggleAnnotation,
+  whiteboardOpen,
+  onToggleWhiteboard,
   onToggleMic,
   onToggleCam,
   onStopScreenShare,
@@ -128,6 +132,20 @@ export function OverlayControls({
             )}
           >
             <Pencil className="size-5" />
+          </button>
+
+          {/* Whiteboard remains controllable while Electron screen sharing is active. */}
+          <button
+            onClick={onToggleWhiteboard}
+            aria-label={whiteboardOpen ? "Закрыть доску" : "Открыть совместную доску"}
+            className={cn(
+              "flex size-11 items-center justify-center rounded-full border transition-colors",
+              whiteboardOpen
+                ? "border-white/60 bg-white/20 text-white hover:bg-white/30"
+                : "border-white/10 bg-white/5 text-white hover:bg-white/10",
+            )}
+          >
+            <SquarePen className="size-5" />
           </button>
 
           {/* Divider */}
