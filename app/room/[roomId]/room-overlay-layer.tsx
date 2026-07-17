@@ -72,6 +72,7 @@ export function RoomOverlayLayer({
       >
         <StreamAnnotationCanvas
           active={annotationActive}
+          featherCursor
           tool={annotationTool}
           color={annotationColor}
           penWidth={annotationPenWidth}
