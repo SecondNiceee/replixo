@@ -62,6 +62,10 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       return
     }
 
+    window.localStorage.setItem(
+      'replixo:annotation-auth-mode',
+      isSignUp ? 'sign-up' : 'sign-in',
+    )
     router.push('/')
     router.refresh()
   }
