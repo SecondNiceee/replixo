@@ -35,7 +35,7 @@ export function AnnotationToolbar({
   onClose,
 }: AnnotationToolbarProps) {
   return (
-    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/15 bg-black/80 px-2 py-1.5 shadow-2xl backdrop-blur-md">
+    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-2 py-1.5 shadow-2xl backdrop-blur-md">
       {/* Pen */}
       <button
         onClick={() => onToolChange("pen")}

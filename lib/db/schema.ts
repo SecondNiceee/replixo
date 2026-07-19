@@ -149,6 +149,19 @@ export const roomSettings = pgTable('room_settings', {
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 })
 
+// --- Annotation settings ---------------------------------------------------
+// Персональный способ включения пера и одноразовая подсказка.
+
+export const annotationSettings = pgTable('annotation_settings', {
+  userId: text('userId')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  activation: text('activation').notNull().default('double-click'),
+  hotkey: text('hotkey'),
+  hintSeen: boolean('hintSeen').notNull().default(false),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})
+
 // --- Shared whiteboard -----------------------------------------------------
 // Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
 // снапшот документа целиком (JSON-строка от tldraw getSnapshot). Снапшот

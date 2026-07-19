@@ -3,7 +3,6 @@
 import { Copy, Check, Pencil, Settings, Link2, Hash } from "lucide-react"
 import { useState, useCallback } from "react"
 import { EditNameDialog } from "@/components/edit-name-dialog"
-import { RoomSettingsDialog } from "./room-settings-dialog"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
 
@@ -15,12 +14,12 @@ interface RoomHeaderProps {
   isFixed?: boolean
   chatOpen?: boolean
   participantsOpen?: boolean
+  onOpenSettings: () => void
 }
 
-export function RoomHeader({ roomId, displayName, status, participantCount, isFixed = false, chatOpen = false, participantsOpen = false }: RoomHeaderProps) {
+export function RoomHeader({ roomId, displayName, status, participantCount, isFixed = false, chatOpen = false, participantsOpen = false, onOpenSettings }: RoomHeaderProps) {
   const [copied, setCopied] = useState<"code" | "link" | null>(null)
   const [editNameOpen, setEditNameOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const handleCopyCode = useCallback(async () => {
     const ok = await copyText(roomId)
@@ -122,7 +121,7 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
           <span className="h-4 w-px bg-border" />
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
+            onClick={onOpenSettings}
             aria-label="Настройки"
             className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
@@ -136,11 +135,6 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
         onOpenChange={setEditNameOpen}
         currentName={displayName}
         onSaved={handleNameSaved}
-      />
-
-      <RoomSettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
       />
     </>
   )

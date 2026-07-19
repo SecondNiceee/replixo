@@ -19,6 +19,10 @@ import { cn } from "@/lib/utils"
 import { OVERLAY_INTERACTIVE_ATTR } from "@/hooks/use-overlay-click-through"
 import { useChatPanel } from "./use-chat-panel"
 import { useAnnotationOverlay } from "./use-annotation-overlay"
+import { RoomSettingsDialog } from "./room-settings-dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
 
 import dynamic from "next/dynamic"
 
@@ -87,6 +91,11 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<"chat" | "annotation" | "sounds">("chat")
+  const [annotationHintOpen, setAnnotationHintOpen] = useState(false)
+  const hintSeen = useAnnotationSettingsStore((state) => state.hintSeen)
+  const markHintSeen = useAnnotationSettingsStore((state) => state.markHintSeen)
 
   // Annotation (drawing over the shared screen) + Electron overlay lifecycle.
   const {
@@ -111,6 +120,19 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     messages,
     markChatRead,
   })
+
+  const handleAnnotationButtonClick = useCallback(() => {
+    toggleAnnotation()
+    if (!hintSeen) {
+      markHintSeen()
+      setAnnotationHintOpen(true)
+    }
+  }, [hintSeen, markHintSeen, toggleAnnotation])
+
+  const openSettings = useCallback((tab: "chat" | "annotation" | "sounds" = "chat") => {
+    setSettingsTab(tab)
+    setSettingsOpen(true)
+  }, [])
 
   const toggleWhiteboard = useCallback(() => {
     if (whiteboardOpen) {
@@ -175,6 +197,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           isFixed={anyScreenShared}
           chatOpen={chatOpen}
           participantsOpen={!participantsHidden && anyScreenShared}
+          onOpenSettings={() => openSettings("chat")}
         />
       )}
 
@@ -252,7 +275,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             onToggleWhiteboard={toggleWhiteboard}
             annotationActive={annotationActive}
             canAnnotate={canAnnotate}
-            onToggleAnnotation={toggleAnnotation}
+            onToggleAnnotation={handleAnnotationButtonClick}
             onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
             onToggleMic={toggleMic}
             onToggleCam={toggleCam}
@@ -335,6 +358,24 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
       {/* Overlay-режим (Electron, мы демонстрируем экран): рисование поверх
           рабочего стола. Полноэкранный прозрачный холст и контролы вынесены в
           RoomOverlayLayer. */}
+      <RoomSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialTab={settingsTab} />
+
+      <Dialog open={annotationHintOpen} onOpenChange={setAnnotationHintOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Быстрое управление пером</DialogTitle>
+            <DialogDescription className="flex flex-col gap-2 text-left leading-relaxed">
+              <span>Чтобы включить или выключить перо, нажмите быстро дважды по экрану.</span>
+              <span>В настройках можно изменить кнопку включения/выключения пера.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAnnotationHintOpen(false); openSettings("annotation") }}>Настройки</Button>
+            <Button onClick={() => setAnnotationHintOpen(false)}>Хорошо</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {overlayMode && (
         <RoomOverlayLayer
           annotationActive={annotationActive}
@@ -346,7 +387,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
           onColorChange={setAnnotationColor}
           onPenWidthChange={setAnnotationPenWidth}
           onCloseAnnotation={() => setAnnotationActive(false)}
-          onToggleAnnotation={toggleAnnotation}
+          onToggleAnnotation={handleAnnotationButtonClick}
           onClearAnnotation={triggerAnnotationClear}
           sendAnnotationStroke={sendAnnotationStroke}
           sendAnnotationClear={sendAnnotationClear}

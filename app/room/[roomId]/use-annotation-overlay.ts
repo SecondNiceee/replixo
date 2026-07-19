@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect } from "react"
 import { useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
 import { DEFAULT_PEN_WIDTH, type AnnotationTool } from "@/components/stream-annotation-canvas"
 import type { RemotePeer } from "@/hooks/use-mediasoup"
+import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
+import { useAnnotationSettingsSync } from "@/hooks/use-annotation-settings-sync"
 
 interface UseAnnotationOverlayArgs {
   isScreenSharing: boolean
@@ -47,6 +49,9 @@ export function useAnnotationOverlay({
   const [annotationPenWidth, setAnnotationPenWidth] = useState<number>(DEFAULT_PEN_WIDTH)
   // Bump to broadcast a full clear of all annotations.
   const [annotationClearSignal, setAnnotationClearSignal] = useState(0)
+  const activation = useAnnotationSettingsStore((state) => state.activation)
+  const hotkey = useAnnotationSettingsStore((state) => state.hotkey)
+  useAnnotationSettingsSync()
 
   // If the screen share ends, leave annotation mode so a dead canvas/toolbar
   // doesn't linger.
@@ -56,6 +61,32 @@ export function useAnnotationOverlay({
 
   const toggleAnnotation = useCallback(() => setAnnotationActive((v) => !v), [])
   const triggerAnnotationClear = useCallback(() => setAnnotationClearSignal((n) => n + 1), [])
+
+  useEffect(() => {
+    if (!canAnnotate) return
+
+    const isBlockedTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false
+      return Boolean(target.closest("button, a, input, textarea, select, [role='dialog'], [contenteditable='true']"))
+    }
+    const handleDoubleClick = (event: MouseEvent) => {
+      if (activation !== "double-click" || isBlockedTarget(event.target)) return
+      toggleAnnotation()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (activation !== "hotkey" || !hotkey || event.code !== hotkey) return
+      if (event.repeat || event.isComposing || event.keyCode === 229 || isBlockedTarget(event.target)) return
+      event.preventDefault()
+      toggleAnnotation()
+    }
+
+    window.addEventListener("dblclick", handleDoubleClick)
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("dblclick", handleDoubleClick)
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [activation, canAnnotate, hotkey, toggleAnnotation])
 
   // Electron overlay-режим: активируется когда мы сами демонстрируем экран.
   // Окно становится прозрачным и всегда поверх — видим только сайдбар + контролы.
