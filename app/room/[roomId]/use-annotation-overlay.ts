@@ -80,10 +80,13 @@ export function useAnnotationOverlay({
       toggleAnnotation()
     }
 
-    window.addEventListener("dblclick", handleDoubleClick)
+    // Capture the gesture before video/canvas handlers can consume it. This is
+    // especially important in the desktop client, where the screen tile and the
+    // annotation canvas sit in separate overlay layers.
+    document.addEventListener("dblclick", handleDoubleClick, true)
     window.addEventListener("keydown", handleKeyDown)
     return () => {
-      window.removeEventListener("dblclick", handleDoubleClick)
+      document.removeEventListener("dblclick", handleDoubleClick, true)
       window.removeEventListener("keydown", handleKeyDown)
     }
   }, [activation, canAnnotate, hotkey, toggleAnnotation])
