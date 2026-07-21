@@ -41,6 +41,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // не зависящего от ненадёжных forwarded mousemove на прозрачном окне).
   getCursorPoint: () => ipcRenderer.invoke("get-cursor-point"),
 
+  // Глобальный двойной клик приходит из native mouse hook даже тогда, когда
+  // прозрачное overlay-окно пропускает события в приложение под ним.
+  onGlobalDoubleClick: (callback) => {
+    const handler = (_e, point) => callback(point)
+    ipcRenderer.on("global-double-click", handler)
+    return () => ipcRenderer.removeListener("global-double-click", handler)
+  },
+
   // Нативная запись в буфер обмена ОС (надёжнее, чем navigator.clipboard в
   // безрамочном/прозрачном окне Electron).
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),

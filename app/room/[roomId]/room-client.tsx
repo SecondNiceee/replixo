@@ -22,7 +22,6 @@ import { useAnnotationOverlay } from "./use-annotation-overlay"
 import { RoomSettingsDialog } from "./room-settings-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
 
 import dynamic from "next/dynamic"
 
@@ -94,8 +93,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"chat" | "annotation" | "sounds">("chat")
   const [annotationHintOpen, setAnnotationHintOpen] = useState(false)
-  const hintSeen = useAnnotationSettingsStore((state) => state.hintSeen)
-  const markHintSeen = useAnnotationSettingsStore((state) => state.markHintSeen)
 
   // Annotation (drawing over the shared screen) + Electron overlay lifecycle.
   const {
@@ -123,11 +120,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
 
   const handleAnnotationButtonClick = useCallback(() => {
     toggleAnnotation()
-    if (!hintSeen) {
-      markHintSeen()
-      setAnnotationHintOpen(true)
-    }
-  }, [hintSeen, markHintSeen, toggleAnnotation])
+    setAnnotationHintOpen(true)
+  }, [toggleAnnotation])
 
   const openSettings = useCallback((tab: "chat" | "annotation" | "sounds" = "chat") => {
     setSettingsTab(tab)

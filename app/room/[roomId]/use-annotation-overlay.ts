@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
-import { useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
+import { OVERLAY_INTERACTIVE_ATTR, useOverlayMouseManager } from "@/hooks/use-overlay-click-through"
 import { DEFAULT_PEN_WIDTH, type AnnotationTool } from "@/components/stream-annotation-canvas"
 import type { RemotePeer } from "@/hooks/use-mediasoup"
 import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
@@ -90,6 +90,24 @@ export function useAnnotationOverlay({
       window.removeEventListener("keydown", handleKeyDown)
     }
   }, [activation, canAnnotate, hotkey, toggleAnnotation])
+
+  useEffect(() => {
+    const api = typeof window !== "undefined" ? window.electronAPI : undefined
+    if (
+      !isScreenSharing
+      || activation !== "double-click"
+      || typeof api?.onGlobalDoubleClick !== "function"
+    ) return
+
+    return api.onGlobalDoubleClick((point) => {
+      // Если окно временно перехватывает мышь над контролами/canvas, обычный
+      // DOM dblclick уже обработает жест. Native-событие нужно только над
+      // click-through частью overlay, иначе перо переключилось бы дважды.
+      const target = document.elementFromPoint(point.x, point.y)
+      if (target?.closest(`[${OVERLAY_INTERACTIVE_ATTR}]`)) return
+      toggleAnnotation()
+    })
+  }, [activation, isScreenSharing, toggleAnnotation])
 
   // Electron overlay-режим: активируется когда мы сами демонстрируем экран.
   // Окно становится прозрачным и всегда поверх — видим только сайдбар + контролы.
