@@ -26,6 +26,8 @@ interface ElectronAPI {
   setIgnoreMouseEvents: (ignore: boolean, options?: { forward?: boolean }) => void
   // Позиция курсора относительно окна (надёжный hit-test для click-through)
   getCursorPoint: () => Promise<{ x: number; y: number } | null>
+  // Глобальный двойной клик в координатах содержимого overlay-окна
+  onGlobalDoubleClick: (callback: (point: { x: number; y: number }) => void) => () => void
   // Нативная запись в буфер обмена ОС
   writeClipboardText: (text: string) => Promise<boolean>
 

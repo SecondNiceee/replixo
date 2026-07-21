@@ -209,6 +209,71 @@ function setupWindowControls() {
 }
 
 // ---------------------------------------------------------------------------
+// Глобальный двойной клик для click-through overlay.
+// DOM не получает dblclick, когда окно пропускает мышь на рабочий стол, поэтому
+// во время демонстрации используем нативный hook и передаём жест в renderer.
+// ---------------------------------------------------------------------------
+let globalMouseHook = null
+let globalMouseDownHandler = null
+let lastPrimaryClick = null
+
+const DOUBLE_CLICK_MS = 500
+const DOUBLE_CLICK_DISTANCE = 6
+
+function stopGlobalMouseHook() {
+  if (!globalMouseHook) return
+  if (globalMouseDownHandler) {
+    globalMouseHook.removeListener("mousedown", globalMouseDownHandler)
+  }
+  try {
+    globalMouseHook.stop()
+  } catch {
+    // Hook уже мог остановиться при завершении ОС-сессии.
+  }
+  globalMouseHook = null
+  globalMouseDownHandler = null
+  lastPrimaryClick = null
+}
+
+function startGlobalMouseHook() {
+  stopGlobalMouseHook()
+
+  try {
+    const { uIOhook } = require("uiohook-napi")
+    globalMouseHook = uIOhook
+    globalMouseDownHandler = (event) => {
+      // uiohook: 1 — основная кнопка мыши.
+      if (event.button !== 1 || !mainWindow || mainWindow.isDestroyed() || !overlayRestoreState) return
+
+      const current = { x: event.x, y: event.y, time: Date.now() }
+      const isDoubleClick = lastPrimaryClick
+        && current.time - lastPrimaryClick.time <= DOUBLE_CLICK_MS
+        && Math.abs(current.x - lastPrimaryClick.x) <= DOUBLE_CLICK_DISTANCE
+        && Math.abs(current.y - lastPrimaryClick.y) <= DOUBLE_CLICK_DISTANCE
+
+      lastPrimaryClick = isDoubleClick ? null : current
+      if (!isDoubleClick) return
+
+      // Electron screen API и DOM используют DIP-координаты. Координаты native
+      // hook могут быть физическими пикселями при Windows scaling, поэтому для
+      // renderer берём актуальную позицию курсора через Electron.
+      const { screen } = require("electron")
+      const cursor = screen.getCursorScreenPoint()
+      const bounds = mainWindow.getContentBounds()
+      const point = { x: cursor.x - bounds.x, y: cursor.y - bounds.y }
+      if (point.x < 0 || point.y < 0 || point.x >= bounds.width || point.y >= bounds.height) return
+
+      mainWindow.webContents.send("global-double-click", point)
+    }
+    globalMouseHook.on("mousedown", globalMouseDownHandler)
+    globalMouseHook.start()
+  } catch (error) {
+    stopGlobalMouseHook()
+    console.error("[global-mouse-hook] Failed to start:", error)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Overlay-режим: окно растягивается на весь экран поверх всего и пропускает
 // клики на рабочий стол. Само приложение прячется (renderer делает фон
 // прозрачным), остаётся только сайдбар участников слева и плавающие контролы.
@@ -240,9 +305,11 @@ function setupOverlayMode() {
     // forward: true — события мыши всё равно доходят до renderer, чтобы
     // сработал hover на контролах и мы временно вернули перехват.
     mainWindow.setIgnoreMouseEvents(true, { forward: true })
+    startGlobalMouseHook()
   })
 
   ipcMain.on("exit-overlay-mode", () => {
+    stopGlobalMouseHook()
     if (!mainWindow || !overlayRestoreState) return
 
     mainWindow.setIgnoreMouseEvents(false)
@@ -435,10 +502,12 @@ app.whenReady().then(() => {
 })
 
 app.on("before-quit", () => {
+  stopGlobalMouseHook()
   stopAudioCapture()
 })
 
 app.on("window-all-closed", () => {
+  stopGlobalMouseHook()
   stopAudioCapture()
   if (process.platform !== "darwin") {
     app.quit()
