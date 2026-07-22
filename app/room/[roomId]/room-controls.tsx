@@ -119,35 +119,29 @@ export function RoomControls({
         <div className="overflow-hidden">
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device settings */}
-      <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onToggleMic}
+      <div className="group relative flex items-center">
+        <div
           className={cn(
-            "size-12 rounded-full",
-            isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+            "pointer-events-none absolute bottom-full left-1/2 z-10 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+            micSettingsOpen && "pointer-events-auto opacity-100",
           )}
-          aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
         >
-          {isMicMuted ? <MicOff /> : <Mic />}
-        </Button>
-        <DropdownMenu open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
-          <DropdownMenuTrigger
-            render={(
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-9 rounded-full"
-              />
-            )}
-            disabled={isMicSwitching}
-            aria-label="Настройки микрофона"
-            aria-busy={isMicSwitching}
-          >
-            {isMicSwitching ? <Loader2 className="animate-spin" /> : <Settings />}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" className="w-72">
+          <DropdownMenu open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
+            <DropdownMenuTrigger
+              render={(
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-9 rounded-full bg-background shadow-md"
+                />
+              )}
+              disabled={isMicSwitching}
+              aria-label="Настройки микрофона"
+              aria-busy={isMicSwitching}
+            >
+              {isMicSwitching ? <Loader2 className="animate-spin" /> : <Settings />}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" side="top" className="w-72">
             <div className="flex flex-col gap-2 px-2 py-2" aria-live="polite">
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-medium">Ваш сигнал</span>
@@ -190,8 +184,22 @@ export function RoomControls({
                 )
               })}
             </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={onToggleMic}
+          className={cn(
+            "size-12 rounded-full",
+            isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+          )}
+          aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
+        >
+          {isMicMuted ? <MicOff /> : <Mic />}
+        </Button>
       </div>
 
       {/* Camera */}
