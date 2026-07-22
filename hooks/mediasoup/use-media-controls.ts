@@ -76,6 +76,8 @@ export function useMediaControls({
   // True while the camera is being turned on (getUserMedia + publish can take a
   // few seconds). The UI shows a loader on the camera button during this window.
   const [isCamStarting, setIsCamStarting] = useState(false)
+  const [activeMicId, setActiveMicId] = useState<string | null>(null)
+  const [isMicSwitching, setIsMicSwitching] = useState(false)
   const screenRecoveryInFlightRef = useRef(false)
 
   // ---------------------------------------------------------------------------
@@ -109,6 +111,9 @@ export function useMediaControls({
         setPermissionError(null)
         const track = micStream.getAudioTracks()[0]
         stream.addTrack(track)
+        const actualDeviceId = track.getSettings().deviceId ?? selectedMicIdRef.current ?? null
+        selectedMicIdRef.current = actualDeviceId ?? undefined
+        setActiveMicId(actualDeviceId)
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
         const transport = sendTransportRef.current ?? (await waitForSendTransport())
         if (transport && !audioProducerRef.current && track.readyState === "live") {
@@ -144,35 +149,56 @@ export function useMediaControls({
   }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, audioProducerRef,
       selectedMicIdRef, dispatch, waitForSendTransport])
 
-  // Switch microphone device mid-call
-  const switchMic = useCallback(async (deviceId: string) => {
-    selectedMicIdRef.current = deviceId
+  // Switch microphone device mid-call. The old track stays live until mediasoup
+  // has accepted the replacement, so a failed device never breaks working audio.
+  const switchMic = useCallback(async (deviceId: string): Promise<boolean> => {
     const stream = localStreamRef.current
-    if (!stream) return
+    if (!stream || isMicSwitching) return false
+
+    setIsMicSwitching(true)
+    let micStream: MediaStream | null = null
     try {
       const oldTrack = stream.getAudioTracks()[0]
-      const micStream = await navigator.mediaDevices.getUserMedia({
+      const wasEnabled = oldTrack?.enabled ?? true
+      micStream = await navigator.mediaDevices.getUserMedia({
         audio: getVoiceAudioConstraints(deviceId),
       })
       const newTrack = micStream.getAudioTracks()[0]
-      if (oldTrack) { oldTrack.stop(); stream.removeTrack(oldTrack) }
-      stream.addTrack(newTrack)
+      if (!newTrack || newTrack.readyState !== "live") throw new Error("Microphone track is not live")
+
+      newTrack.enabled = wasEnabled
       const producer = audioProducerRef.current
       const sendTransport = sendTransportRef.current
-      if (producer && sendTransport) {
+      if (producer) {
         await producer.replaceTrack({ track: newTrack })
-      } else if (!producer && sendTransport) {
+      } else if (sendTransport) {
         const newProducer = await sendTransport.produce({
           track: newTrack,
           codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
         })
         audioProducerRef.current = newProducer
-        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
+        if (!wasEnabled) await newProducer.pause()
       }
+
+      if (oldTrack) {
+        stream.removeTrack(oldTrack)
+        oldTrack.stop()
+      }
+      stream.addTrack(newTrack)
+
+      const actualDeviceId = newTrack.getSettings().deviceId ?? deviceId
+      selectedMicIdRef.current = actualDeviceId
+      setActiveMicId(actualDeviceId)
+      dispatch({ type: "TOGGLE_MIC", isMuted: !wasEnabled, hasMic: true })
+      return true
     } catch {
+      micStream?.getTracks().forEach((track) => track.stop())
       dispatch({ type: "ERROR", error: "Не удалось переключить микрофон" })
+      return false
+    } finally {
+      setIsMicSwitching(false)
     }
-  }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch])
+  }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch, isMicSwitching])
 
   // ---------------------------------------------------------------------------
   // Camera toggle
@@ -412,6 +438,8 @@ export function useMediaControls({
     clearPermissionError: () => setPermissionError(null),
     screenQuality,
     isCamStarting,
+    activeMicId,
+    isMicSwitching,
     toggleMic,
     switchMic,
     toggleCam,
