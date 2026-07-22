@@ -47,6 +47,7 @@ const mediasoup = __importStar(require("mediasoup"));
 const fs_1 = __importDefault(require("fs"));
 const config_1 = require("./config");
 const socket_1 = require("./socket");
+const room_code_1 = require("./room-code");
 const room_registry_1 = require("./socket/room-registry");
 const uploads_1 = require("./uploads");
 async function main() {
@@ -85,11 +86,12 @@ async function main() {
     // хранится в сообщении.
     const storage = multer_1.default.diskStorage({
         destination: (req, _file, cb) => {
-            const roomId = req.params.roomId;
-            if (!(0, uploads_1.isValidRoomId)(roomId)) {
+            const roomId = (0, room_code_1.canonicalRoomCode)(req.params.roomId);
+            if (!roomId) {
                 cb(new Error('invalid roomId'), '');
                 return;
             }
+            req.params.roomId = roomId;
             try {
                 cb(null, (0, uploads_1.ensureRoomDir)(roomId));
             }
@@ -107,8 +109,8 @@ async function main() {
         limits: { fileSize: config_1.MAX_FILE_SIZE, files: 1 },
     });
     app.post('/rooms/:roomId/upload', (req, res) => {
-        const { roomId } = req.params;
-        if (!(0, uploads_1.isValidRoomId)(roomId)) {
+        const roomId = (0, room_code_1.canonicalRoomCode)(req.params.roomId);
+        if (!roomId) {
             res.status(400).json({ error: 'invalid roomId' });
             return;
         }
@@ -186,9 +188,9 @@ async function main() {
     // peerId из query, тела нет — парсер не нужен.
     // ---------------------------------------------------------------------------
     app.post('/rooms/:roomId/leave', (req, res) => {
-        const { roomId } = req.params;
+        const roomId = (0, room_code_1.canonicalRoomCode)(req.params.roomId);
         const peerId = typeof req.query.peerId === 'string' ? req.query.peerId : '';
-        if (!(0, uploads_1.isValidRoomId)(roomId) || !peerId) {
+        if (!roomId || !peerId) {
             res.status(204).end();
             return;
         }

@@ -4,6 +4,7 @@ exports.registerMediaHandlers = registerMediaHandlers;
 const Peer_1 = require("../Peer");
 const db_1 = require("../db");
 const helpers_1 = require("./helpers");
+const room_code_1 = require("../room-code");
 const room_registry_1 = require("./room-registry");
 // ---------------------------------------------------------------------------
 // WebRTC / mediasoup signalling: joinRoom, transports, produce/consume
@@ -14,10 +15,20 @@ function registerMediaHandlers(ctx, worker) {
     // joinRoom
     // -----------------------------------------------------------------------
     socket.on('joinRoom', async (payload, callback) => {
-        const { roomId, peerId, displayName, rtpCapabilities, create } = payload;
+        const { peerId, displayName, rtpCapabilities, create } = payload ?? {};
+        const roomId = (0, room_code_1.canonicalRoomCode)(payload?.roomId);
         try {
+            if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
+                return (0, helpers_1.err)(callback, 'Некорректные данные подключения');
+            }
             if (!create && !room_registry_1.rooms.has(roomId)) {
                 return (0, helpers_1.err)(callback, 'Комната не найдена');
+            }
+            if (session.roomId && session.peerId && (session.roomId !== roomId || session.peerId !== peerId)) {
+                (0, room_registry_1.evictPeer)(io, session.roomId, session.peerId, socket.id);
+                socket.leave(session.roomId);
+                session.roomId = null;
+                session.peerId = null;
             }
             const existingSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
             if (existingSocketId && existingSocketId !== socket.id) {
@@ -32,19 +43,29 @@ function registerMediaHandlers(ctx, worker) {
             }
             (0, room_registry_1.clearPendingDisconnect)(roomId, peerId);
             const room = await (0, room_registry_1.getOrCreateRoom)(roomId, worker);
-            if (room.isFull())
+            const repeatedJoin = room.hasPeer(peerId) && (0, room_registry_1.getPeerSocket)(roomId, peerId) === socket.id;
+            if (!repeatedJoin && room.isFull())
                 return (0, helpers_1.err)(callback, 'Room is full (max 5 participants)');
-            const peer = new Peer_1.Peer({ peerId, displayName, socketId: socket.id });
-            peer.rtpCapabilities = rtpCapabilities;
-            room.addPeer(peer);
+            if (repeatedJoin) {
+                const peer = room.getPeer(peerId);
+                peer.displayName = displayName.trim();
+                peer.rtpCapabilities = rtpCapabilities;
+            }
+            else {
+                const peer = new Peer_1.Peer({ peerId, displayName: displayName.trim(), socketId: socket.id });
+                peer.rtpCapabilities = rtpCapabilities;
+                room.addPeer(peer);
+            }
             session.roomId = roomId;
             session.peerId = peerId;
             (0, room_registry_1.setPeerSocket)(roomId, peerId, socket.id);
             socket.join(roomId);
             const existingPeers = room.getExistingPeersFor(peerId);
-            console.log(`[room] Peer ${peerId} (${displayName}) joined room ${roomId} — peers: ${room.getPeerIds().length}`);
-            // Notify other peers that someone joined, even before they produce media
-            socket.to(roomId).emit('peerJoined', { peerId, displayName });
+            console.log(`[room] ${repeatedJoin ? 'Repeated join ignored for' : 'Peer joined'} room=${roomId} peer=${peerId} socket=${socket.id} peers=${room.getPeerIds().length}`);
+            // A repeated acknowledgement from the same socket must not create a
+            // second presence event or replay the join sound for other clients.
+            if (!repeatedJoin)
+                socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() });
             // Load persisted chat history so the joining peer (or someone who just
             // reloaded the page) sees prior messages. Empty when persistence is off.
             const messages = await (0, db_1.getRoomMessages)(roomId);

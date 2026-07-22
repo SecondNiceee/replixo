@@ -65,6 +65,7 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
   })
 
   socket.on("peerJoined", ({ peerId: joinedId, displayName: joinedName }) => {
+    if (joinedId === peerIdRef.current) return
     dispatch({ type: "PEER_JOINED", peerId: joinedId, displayName: joinedName })
     playJoinSound()
   })
@@ -85,6 +86,7 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
   })
 
   socket.on("peerLeft", ({ peerId: leftId }) => {
+    if (leftId === peerIdRef.current) return
     dispatch({ type: "PEER_LEFT", peerId: leftId })
     playLeaveSound()
   })

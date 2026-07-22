@@ -12,18 +12,12 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getDisplayName, setDisplayName, DEFAULT_NAME } from "@/lib/display-name"
+import { normalizeRoomCode } from "@/lib/room-code"
 
 interface JoinCallDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onJoin: (roomCode: string) => void
-}
-
-function normalizeCode(raw: string): string {
-  // strip everything except letters, digits, dash — then ensure format XXXX-XXXX
-  const letters = raw.toUpperCase().replace(/[^A-Z0-9]/g, "")
-  if (letters.length <= 4) return letters
-  return `${letters.slice(0, 4)}-${letters.slice(4)}`
 }
 
 export function JoinCallDialog({ open, onOpenChange, onJoin }: JoinCallDialogProps) {
@@ -34,7 +28,7 @@ export function JoinCallDialog({ open, onOpenChange, onJoin }: JoinCallDialogPro
     return n === DEFAULT_NAME ? "" : n
   })
 
-  const clean = normalizeCode(value)
+  const clean = normalizeRoomCode(value)
   // valid when we have 4 letters + dash + 4 letters = 9 chars
   const isValid = clean.length === 9 && name.trim().length > 0
 

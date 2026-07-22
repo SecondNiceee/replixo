@@ -1,4 +1,5 @@
 import { ack, err, type Callback, type HandlerContext } from './helpers'
+import { canonicalRoomCode } from '../room-code'
 import {
   rooms,
   clearPendingDisconnect,
@@ -39,7 +40,11 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   // -----------------------------------------------------------------------
   socket.on(
     'rejoinProbe',
-    ({ roomId, peerId }: { roomId: string; peerId: string }, callback: Callback<void>) => {
+    ({ roomId: rawRoomId, peerId }: { roomId: string; peerId: string }, callback: Callback<void>) => {
+      const roomId = canonicalRoomCode(rawRoomId)
+      if (!roomId || typeof peerId !== 'string' || !peerId) {
+        return err(callback as Callback<never>, 'invalid rejoin payload')
+      }
       const room = rooms.get(roomId)
       if (!room || !room.hasPeer(peerId)) {
         return err(callback as Callback<never>, 'peer evicted')
@@ -59,6 +64,7 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
       socket.join(roomId)
       session.roomId = roomId
       session.peerId = peerId
+      console.log(`[socket] Rejoin accepted room=${roomId} peer=${peerId} socket=${socket.id}`)
       ack(callback, undefined)
     },
   )
@@ -66,7 +72,9 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   // -----------------------------------------------------------------------
   // leaveRoom  (explicit)
   // -----------------------------------------------------------------------
-  socket.on('leaveRoom', ({ roomId, peerId }: { roomId: string; peerId: string }) => {
+  socket.on('leaveRoom', ({ roomId: rawRoomId, peerId }: { roomId: string; peerId: string }) => {
+    const roomId = canonicalRoomCode(rawRoomId)
+    if (!roomId || session.roomId !== roomId || session.peerId !== peerId) return
     handleLeave(roomId, peerId)
   })
 
@@ -82,15 +90,20 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   // back do we finally remove it.
   // -----------------------------------------------------------------------
   socket.on('disconnect', (reason: string) => {
-    console.log(`[socket] Client disconnected: ${socket.id} (${reason})`)
-    if (!session.roomId || !session.peerId) return
+    if (!session.roomId || !session.peerId) {
+      console.log(`[socket] Disconnected socket=${socket.id} reason=${reason} room=none`)
+      return
+    }
 
     const roomId = session.roomId
     const peerId = session.peerId
 
     // If a newer socket already took over this peerId (duplicate-tab kick or a
     // fast reconnect), this stale socket must not touch the peer at all.
-    if (getPeerSocket(roomId, peerId) !== socket.id) return
+    if (getPeerSocket(roomId, peerId) !== socket.id) {
+      console.log(`[socket] Ignored stale disconnect room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason}`)
+      return
+    }
 
     // Choose how long to wait before evicting, most-decisive signal first:
     //
@@ -108,7 +121,9 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
     // `transport close` is also emitted for Wi-Fi/VPN hand-offs, browser
     // process suspension and Electron network changes. Treat it as a network
     // interruption unless an explicit leave beacon marked the session closing.
-    const graceMs = isClosing(roomId, peerId) ? CLOSE_GRACE_MS : DISCONNECT_GRACE_MS
+    const closing = isClosing(roomId, peerId)
+    const graceMs = closing ? CLOSE_GRACE_MS : DISCONNECT_GRACE_MS
+    console.log(`[socket] Disconnect scheduled room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason} graceMs=${graceMs} closing=${closing}`)
     const timer = setTimeout(() => {
       deletePendingDisconnect(roomId, peerId)
       if (getPeerSocket(roomId, peerId) !== socket.id) return

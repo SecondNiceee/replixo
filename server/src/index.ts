@@ -18,11 +18,11 @@ import {
   WINDOWS_INSTALLER_NAME,
 } from './config'
 import { setupSocketIO } from './socket'
+import { canonicalRoomCode } from './room-code'
 import { evictPeer, markClosing, scheduleEviction, getPeerSocket, CLOSE_GRACE_MS } from './socket/room-registry'
 import {
   ensureUploadRoot,
   ensureRoomDir,
-  isValidRoomId,
   sweepOrphanUploads,
 } from './uploads'
 
@@ -69,11 +69,12 @@ async function main(): Promise<void> {
   // хранится в сообщении.
   const storage = multer.diskStorage({
     destination: (req, _file, cb) => {
-      const roomId = req.params.roomId
-      if (!isValidRoomId(roomId)) {
+      const roomId = canonicalRoomCode(req.params.roomId)
+      if (!roomId) {
         cb(new Error('invalid roomId'), '')
         return
       }
+      req.params.roomId = roomId
       try {
         cb(null, ensureRoomDir(roomId))
       } catch (e) {
@@ -94,8 +95,8 @@ async function main(): Promise<void> {
   app.post(
     '/rooms/:roomId/upload',
     (req: Request, res: Response) => {
-      const { roomId } = req.params
-      if (!isValidRoomId(roomId)) {
+      const roomId = canonicalRoomCode(req.params.roomId)
+      if (!roomId) {
         res.status(400).json({ error: 'invalid roomId' })
         return
       }
@@ -183,9 +184,9 @@ async function main(): Promise<void> {
   // peerId из query, тела нет — парсер не нужен.
   // ---------------------------------------------------------------------------
   app.post('/rooms/:roomId/leave', (req: Request, res: Response) => {
-    const { roomId } = req.params
+    const roomId = canonicalRoomCode(req.params.roomId)
     const peerId = typeof req.query.peerId === 'string' ? req.query.peerId : ''
-    if (!isValidRoomId(roomId) || !peerId) {
+    if (!roomId || !peerId) {
       res.status(204).end()
       return
     }
