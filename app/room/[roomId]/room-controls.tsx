@@ -116,7 +116,7 @@ export function RoomControls({
           collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]",
         )}
       >
-        <div className="overflow-hidden">
+        <div className={cn(collapsed ? "overflow-hidden" : "overflow-visible")}>
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device settings */}
       <div className="group relative flex items-center">
