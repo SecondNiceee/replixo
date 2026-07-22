@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
@@ -79,7 +79,14 @@ export function RoomControls({
   onLeave,
 }: RoomControlsProps) {
   const [micSettingsOpen, setMicSettingsOpen] = useState(false)
-  const audioLevel = useAudioLevel(localStream, micSettingsOpen && !isMicMuted)
+  // Recreate the meter stream after a device switch. The call stream itself is
+  // mutated in place, so depending on it alone would leave the analyser attached
+  // to the stopped track from the previous microphone.
+  const micMeterStream = useMemo(() => {
+    const track = localStream?.getAudioTracks()[0]
+    return track ? new MediaStream([track]) : null
+  }, [localStream, activeMicId])
+  const audioLevel = useAudioLevel(micMeterStream, micSettingsOpen && !isMicMuted)
   const hasSignal = audioLevel >= 4
 
   return (
