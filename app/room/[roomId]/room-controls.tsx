@@ -119,7 +119,7 @@ export function RoomControls({
         <div className="overflow-hidden">
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device settings */}
-      <div className="flex items-center gap-1">
+      <div className="group/mic relative size-12">
         <Button
           variant="outline"
           size="icon"
@@ -138,7 +138,10 @@ export function RoomControls({
               <Button
                 variant="outline"
                 size="icon"
-                className="size-9 rounded-full"
+                className={cn(
+                  "absolute -top-8 left-1/2 size-8 -translate-x-1/2 rounded-full opacity-0 shadow-sm transition-[opacity,transform] group-hover/mic:opacity-100 group-focus-within/mic:opacity-100",
+                  micSettingsOpen && "opacity-100",
+                )}
               />
             )}
             disabled={isMicSwitching}
