@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
@@ -79,7 +79,14 @@ export function RoomControls({
   onLeave,
 }: RoomControlsProps) {
   const [micSettingsOpen, setMicSettingsOpen] = useState(false)
-  const audioLevel = useAudioLevel(localStream, micSettingsOpen && !isMicMuted)
+  // Recreate the meter stream after a device switch. The call stream itself is
+  // mutated in place, so depending on it alone would leave the analyser attached
+  // to the stopped track from the previous microphone.
+  const micMeterStream = useMemo(() => {
+    const track = localStream?.getAudioTracks()[0]
+    return track ? new MediaStream([track]) : null
+  }, [localStream, activeMicId])
+  const audioLevel = useAudioLevel(micMeterStream, micSettingsOpen && !isMicMuted)
   const hasSignal = audioLevel >= 4
 
   return (
@@ -174,7 +181,7 @@ export function RoomControls({
                   <DropdownMenuItem
                     key={device.deviceId}
                     disabled={isMicSwitching}
-                    onSelect={() => void onSwitchMic(device.deviceId)}
+                    onClick={() => void onSwitchMic(device.deviceId)}
                     className="flex items-center justify-between gap-4"
                   >
                     <span className={cn("truncate", selected && "font-medium")}>{device.label}</span>
@@ -238,7 +245,7 @@ export function RoomControls({
               {SCREEN_QUALITY_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
-                  onSelect={() => onSetScreenQuality(opt.value)}
+                  onClick={() => onSetScreenQuality(opt.value)}
                   className="flex items-center justify-between gap-4"
                 >
                   <span className={cn(screenQuality === opt.value && "font-medium")}>{opt.label}</span>
