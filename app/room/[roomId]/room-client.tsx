@@ -167,6 +167,16 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
   const hintSeen = useAnnotationSettingsStore((state) => state.hintSeen)
   const markHintSeen = useAnnotationSettingsStore((state) => state.markHintSeen)
 
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [])
+
   // Annotation (drawing over the shared screen) + Electron overlay lifecycle.
   const {
     canAnnotate,
