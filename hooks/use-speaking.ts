@@ -22,6 +22,53 @@ function getAudioContext(): AudioContext | null {
  * When the track is disabled (muted) the analyser reads silence, so a muted
  * participant is automatically reported as not speaking.
  */
+export function useAudioLevel(stream?: MediaStream | null, enabled = true): number {
+  const [level, setLevel] = useState(0)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !stream || stream.getAudioTracks().length === 0) {
+      setLevel(0)
+      return
+    }
+
+    const ctx = getAudioContext()
+    if (!ctx) return
+    if (ctx.state === "suspended") ctx.resume().catch(() => {})
+
+    const source = ctx.createMediaStreamSource(stream)
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 512
+    analyser.smoothingTimeConstant = 0.65
+    source.connect(analyser)
+
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    let lastUpdate = 0
+
+    const tick = (now: number) => {
+      analyser.getByteFrequencyData(data)
+      if (now - lastUpdate >= 50) {
+        let sum = 0
+        for (let i = 0; i < data.length; i++) sum += data[i]
+        const average = sum / data.length
+        setLevel(Math.min(100, Math.round((average / 55) * 100)))
+        lastUpdate = now
+      }
+      rafRef.current = requestAnimationFrame(tick)
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      source.disconnect()
+      analyser.disconnect()
+      setLevel(0)
+    }
+  }, [stream, enabled])
+
+  return level
+}
+
 export function useSpeaking(stream?: MediaStream | null, enabled = true): boolean {
   const [speaking, setSpeaking] = useState(false)
   const rafRef = useRef<number | null>(null)
