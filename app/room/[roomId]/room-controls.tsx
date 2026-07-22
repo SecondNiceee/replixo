@@ -167,15 +167,15 @@ export function RoomControls({
           </Button>
         </div>
 
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-h-[calc(100dvh-3rem)] min-w-0 overflow-hidden sm:max-w-md">
+          <DialogHeader className="min-w-0">
             <DialogTitle>Настройки микрофона</DialogTitle>
             <DialogDescription>
               Выберите устройство и проверьте, насколько хорошо вас слышно.
             </DialogDescription>
           </DialogHeader>
 
-          <section className="flex flex-col gap-3 rounded-lg border border-border p-4" aria-labelledby="mic-test-title">
+          <section className="flex min-w-0 flex-col gap-3 rounded-lg border border-border p-4" aria-labelledby="mic-test-title">
             <div className="flex items-center justify-between gap-3">
               <h3 id="mic-test-title" className="font-medium">Проверка микрофона</h3>
               <span className="text-sm text-muted-foreground" aria-live="polite">
@@ -200,9 +200,9 @@ export function RoomControls({
             </p>
           </section>
 
-          <section className="flex flex-col gap-2" aria-labelledby="mic-device-title">
+          <section className="flex min-h-0 min-w-0 flex-col gap-2" aria-labelledby="mic-device-title">
             <h3 id="mic-device-title" className="font-medium">Устройство ввода</h3>
-            <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+            <div className="flex max-h-48 min-h-0 min-w-0 flex-col gap-2 overflow-x-hidden overflow-y-auto pr-1">
               {micDevices.length === 0 && (
                 <p className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
                   Нет доступных микрофонов
@@ -217,11 +217,11 @@ export function RoomControls({
                     variant={selected ? "secondary" : "outline"}
                     disabled={isMicSwitching}
                     onClick={() => void onSwitchMic(device.deviceId)}
-                    className="h-auto justify-between py-3"
+                    className="h-auto w-full min-w-0 justify-between overflow-hidden py-3"
                     aria-pressed={selected}
                   >
-                    <span className="truncate text-left">{device.label}</span>
-                    {selected && <Check />}
+                    <span className="min-w-0 flex-1 truncate text-left">{device.label}</span>
+                    {selected && <Check className="shrink-0" />}
                   </Button>
                 )
               })}
