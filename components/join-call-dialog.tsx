@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { getDisplayName, setDisplayName, DEFAULT_NAME } from "@/lib/display-name"
 import { normalizeRoomCode } from "@/lib/room-code"
 
 interface JoinCallDialogProps {
@@ -23,14 +22,10 @@ interface JoinCallDialogProps {
 export function JoinCallDialog({ open, onOpenChange, onJoin }: JoinCallDialogProps) {
   const [value, setValue] = useState("")
   const [error, setError] = useState("")
-  const [name, setName] = useState(() => {
-    const n = getDisplayName()
-    return n === DEFAULT_NAME ? "" : n
-  })
 
   const clean = normalizeRoomCode(value)
   // valid when we have 4 letters + dash + 4 letters = 9 chars
-  const isValid = clean.length === 9 && name.trim().length > 0
+  const isValid = clean.length === 9
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setError("")
@@ -49,16 +44,11 @@ export function JoinCallDialog({ open, onOpenChange, onJoin }: JoinCallDialogPro
       setError("Введите корректный код комнаты (8 символов).")
       return
     }
-    if (name.trim().length === 0) {
-      setError("Введите ваше имя.")
-      return
-    }
-    setDisplayName(name)
     onJoin(clean)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") handleJoin()
+    if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) handleJoin()
   }
 
   return (
@@ -72,17 +62,6 @@ export function JoinCallDialog({ open, onOpenChange, onJoin }: JoinCallDialogPro
         </DialogHeader>
 
         <div className="flex flex-col gap-5 py-2">
-          <div className="flex flex-col gap-2">
-            <Input
-              placeholder="Ваше имя"
-              value={name}
-              onChange={(e) => { setError(""); setName(e.target.value) }}
-              maxLength={32}
-              aria-label="Ваше имя"
-              className="h-12 rounded-xl text-base"
-            />
-          </div>
-
           <div className="flex flex-col gap-2">
             <Input
               placeholder="XXXX-XXXX"

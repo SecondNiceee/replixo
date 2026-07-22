@@ -10,8 +10,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { getDisplayName, setDisplayName, DEFAULT_NAME } from "@/lib/display-name"
 import { copyText } from "@/lib/clipboard"
 
 interface StartCallDialogProps {
@@ -33,14 +31,8 @@ function generateRoomCode(): string {
 export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialogProps) {
   const [roomCode] = useState(() => generateRoomCode())
   const [copied, setCopied] = useState(false)
-  const [name, setName] = useState(() => {
-    const n = getDisplayName()
-    return n === DEFAULT_NAME ? "" : n
-  })
 
   function handleStart() {
-    if (name.trim().length === 0) return
-    setDisplayName(name)
     onStart(roomCode)
   }
 
@@ -63,21 +55,6 @@ export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialog
         </DialogHeader>
 
         <div className="flex flex-col gap-6 py-2">
-          {/* Name */}
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              Ваше имя
-            </p>
-            <Input
-              placeholder="Введите имя"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={32}
-              aria-label="Ваше имя"
-              className="h-12 rounded-xl text-base"
-            />
-          </div>
-
           {/* Room code block */}
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
@@ -112,7 +89,6 @@ export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialog
             size="lg"
             className="h-12 gap-2 rounded-full text-base font-semibold"
             onClick={handleStart}
-            disabled={name.trim().length === 0}
           >
             <Video className="size-5" aria-hidden="true" />
             Начать конференцию
