@@ -275,6 +275,7 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
         <div className="relative shrink-0 overflow-visible">
           <RoomControls
             isMicMuted={isMicMuted}
+            localStream={localStream}
             isCamOff={isCamOff}
             isCamStarting={isCamStarting}
             isScreenSharing={isScreenSharing}

@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
@@ -17,6 +18,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { ScreenQuality } from "@/hooks/use-mediasoup"
 import type { AudioDevice } from "@/hooks/use-audio-devices"
+import { useAudioLevel } from "@/hooks/use-speaking"
 
 const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
   { value: "auto", label: "Авто" },
@@ -26,6 +28,7 @@ const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
 
 interface RoomControlsProps {
   isMicMuted: boolean
+  localStream: MediaStream | null
   isCamOff: boolean
   // True while the camera is turning on — the camera button shows a loader.
   isCamStarting: boolean
@@ -53,6 +56,7 @@ interface RoomControlsProps {
 
 export function RoomControls({
   isMicMuted,
+  localStream,
   isCamOff,
   isCamStarting,
   isScreenSharing,
@@ -74,6 +78,10 @@ export function RoomControls({
   onSwitchMic,
   onLeave,
 }: RoomControlsProps) {
+  const [micSettingsOpen, setMicSettingsOpen] = useState(false)
+  const audioLevel = useAudioLevel(localStream, micSettingsOpen && !isMicMuted)
+  const hasSignal = audioLevel >= 4
+
   return (
     <div className="relative">
       {/* Toggle handle — always visible above the footer, kept outside the
@@ -117,7 +125,7 @@ export function RoomControls({
         >
           {isMicMuted ? <MicOff /> : <Mic />}
         </Button>
-        <DropdownMenu>
+        <DropdownMenu open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
           <DropdownMenuTrigger
             render={(
               <Button
@@ -133,6 +141,28 @@ export function RoomControls({
             {isMicSwitching ? <Loader2 className="animate-spin" /> : <Settings />}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-72">
+            <div className="flex flex-col gap-2 px-2 py-2" aria-live="polite">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium">Ваш сигнал</span>
+                <span className="text-muted-foreground">
+                  {isMicMuted ? "Микрофон выключен" : hasSignal ? "Звук есть" : "Звука нет"}
+                </span>
+              </div>
+              <div
+                className="h-2 overflow-hidden rounded-full bg-muted"
+                role="meter"
+                aria-label="Уровень сигнала микрофона"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={audioLevel}
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-75"
+                  style={{ width: `${audioLevel}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Скажите что-нибудь, чтобы проверить микрофон</p>
+            </div>
             <DropdownMenuGroup>
               <DropdownMenuLabel>Микрофон</DropdownMenuLabel>
               {micDevices.length === 0 && (
