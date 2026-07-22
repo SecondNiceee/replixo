@@ -8,6 +8,16 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -119,20 +129,20 @@ export function RoomControls({
         <div className={cn(collapsed ? "overflow-hidden" : "overflow-visible")}>
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
       {/* Mic + device settings */}
-      <div className="group relative flex items-center">
-        <div
-          className={cn(
-            "pointer-events-none absolute bottom-full left-1/2 z-10 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-            micSettingsOpen && "pointer-events-auto opacity-100",
-          )}
-        >
-          <DropdownMenu open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
-            <DropdownMenuTrigger
+      <Dialog open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
+        <div className="group relative flex items-center">
+          <div
+            className={cn(
+              "pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+              micSettingsOpen && "pointer-events-auto opacity-100",
+            )}
+          >
+            <DialogTrigger
               render={(
                 <Button
                   variant="outline"
                   size="icon"
-                  className="size-9 rounded-full bg-background shadow-md"
+                  className="size-9 rounded-full shadow-md"
                 />
               )}
               disabled={isMicSwitching}
@@ -140,67 +150,91 @@ export function RoomControls({
               aria-busy={isMicSwitching}
             >
               {isMicSwitching ? <Loader2 className="animate-spin" /> : <Settings />}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" side="top" className="w-72">
-            <div className="flex flex-col gap-2 px-2 py-2" aria-live="polite">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium">Ваш сигнал</span>
-                <span className="text-muted-foreground">
-                  {isMicMuted ? "Микрофон выключен" : hasSignal ? "Звук есть" : "Звука нет"}
-                </span>
-              </div>
-              <div
-                className="h-2 overflow-hidden rounded-full bg-muted"
-                role="meter"
-                aria-label="Уровень сигнала микрофона"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={audioLevel}
-              >
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-75"
-                  style={{ width: `${audioLevel}%` }}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">Скажите что-нибудь, чтобы проверить микрофон</p>
+            </DialogTrigger>
+          </div>
+
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onToggleMic}
+            className={cn(
+              "size-12 rounded-full",
+              isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+            )}
+            aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
+          >
+            {isMicMuted ? <MicOff /> : <Mic />}
+          </Button>
+        </div>
+
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Настройки микрофона</DialogTitle>
+            <DialogDescription>
+              Выберите устройство и проверьте, насколько хорошо вас слышно.
+            </DialogDescription>
+          </DialogHeader>
+
+          <section className="flex flex-col gap-3 rounded-lg border border-border p-4" aria-labelledby="mic-test-title">
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="mic-test-title" className="font-medium">Проверка микрофона</h3>
+              <span className="text-sm text-muted-foreground" aria-live="polite">
+                {isMicMuted ? "Микрофон выключен" : hasSignal ? "Звук есть" : "Звука нет"}
+              </span>
             </div>
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Микрофон</DropdownMenuLabel>
+            <div
+              className="h-2 overflow-hidden rounded-full bg-muted"
+              role="meter"
+              aria-label="Уровень сигнала микрофона"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={audioLevel}
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-75"
+                style={{ width: `${audioLevel}%` }}
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Скажите что-нибудь, чтобы проверить микрофон.
+            </p>
+          </section>
+
+          <section className="flex flex-col gap-2" aria-labelledby="mic-device-title">
+            <h3 id="mic-device-title" className="font-medium">Устройство ввода</h3>
+            <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
               {micDevices.length === 0 && (
-                <DropdownMenuItem disabled>Нет доступных микрофонов</DropdownMenuItem>
+                <p className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
+                  Нет доступных микрофонов
+                </p>
               )}
               {micDevices.map((device) => {
                 const selected = activeMicId === device.deviceId
                 return (
-                  <DropdownMenuItem
+                  <Button
                     key={device.deviceId}
+                    type="button"
+                    variant={selected ? "secondary" : "outline"}
                     disabled={isMicSwitching}
                     onClick={() => void onSwitchMic(device.deviceId)}
-                    className="flex items-center justify-between gap-4"
+                    className="h-auto justify-between py-3"
+                    aria-pressed={selected}
                   >
-                    <span className={cn("truncate", selected && "font-medium")}>{device.label}</span>
+                    <span className="truncate text-left">{device.label}</span>
                     {selected && <Check />}
-                  </DropdownMenuItem>
+                  </Button>
                 )
               })}
-            </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            </div>
+          </section>
 
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onToggleMic}
-          className={cn(
-            "size-12 rounded-full",
-            isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
-          )}
-          aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
-        >
-          {isMicMuted ? <MicOff /> : <Mic />}
-        </Button>
-      </div>
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              Закрыть
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Camera */}
       <Button
