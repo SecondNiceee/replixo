@@ -181,7 +181,7 @@ export function RoomControls({
                   <DropdownMenuItem
                     key={device.deviceId}
                     disabled={isMicSwitching}
-                    onSelect={() => void onSwitchMic(device.deviceId)}
+                    onClick={() => void onSwitchMic(device.deviceId)}
                     className="flex items-center justify-between gap-4"
                   >
                     <span className={cn("truncate", selected && "font-medium")}>{device.label}</span>
@@ -245,7 +245,7 @@ export function RoomControls({
               {SCREEN_QUALITY_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
-                  onSelect={() => onSetScreenQuality(opt.value)}
+                  onClick={() => onSetScreenQuality(opt.value)}
                   className="flex items-center justify-between gap-4"
                 >
                   <span className={cn(screenQuality === opt.value && "font-medium")}>{opt.label}</span>
