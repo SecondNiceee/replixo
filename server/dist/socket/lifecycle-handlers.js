@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerLifecycleHandlers = registerLifecycleHandlers;
 const helpers_1 = require("./helpers");
+const room_code_1 = require("../room-code");
 const room_registry_1 = require("./room-registry");
 // ---------------------------------------------------------------------------
 // Connection lifecycle: rejoinProbe, leaveRoom, disconnect (+ grace window)
@@ -25,7 +26,11 @@ function registerLifecycleHandlers(ctx) {
     // a socket.io reconnect. Returns null if the peer is still in the room,
     // or an error string if it was evicted (so the client can do a full rejoin).
     // -----------------------------------------------------------------------
-    socket.on('rejoinProbe', ({ roomId, peerId }, callback) => {
+    socket.on('rejoinProbe', ({ roomId: rawRoomId, peerId }, callback) => {
+        const roomId = (0, room_code_1.canonicalRoomCode)(rawRoomId);
+        if (!roomId || typeof peerId !== 'string' || !peerId) {
+            return (0, helpers_1.err)(callback, 'invalid rejoin payload');
+        }
         const room = room_registry_1.rooms.get(roomId);
         if (!room || !room.hasPeer(peerId)) {
             return (0, helpers_1.err)(callback, 'peer evicted');
@@ -44,12 +49,16 @@ function registerLifecycleHandlers(ctx) {
         socket.join(roomId);
         session.roomId = roomId;
         session.peerId = peerId;
+        console.log(`[socket] Rejoin accepted room=${roomId} peer=${peerId} socket=${socket.id}`);
         (0, helpers_1.ack)(callback, undefined);
     });
     // -----------------------------------------------------------------------
     // leaveRoom  (explicit)
     // -----------------------------------------------------------------------
-    socket.on('leaveRoom', ({ roomId, peerId }) => {
+    socket.on('leaveRoom', ({ roomId: rawRoomId, peerId }) => {
+        const roomId = (0, room_code_1.canonicalRoomCode)(rawRoomId);
+        if (!roomId || session.roomId !== roomId || session.peerId !== peerId)
+            return;
         handleLeave(roomId, peerId);
     });
     // -----------------------------------------------------------------------
@@ -64,15 +73,18 @@ function registerLifecycleHandlers(ctx) {
     // back do we finally remove it.
     // -----------------------------------------------------------------------
     socket.on('disconnect', (reason) => {
-        console.log(`[socket] Client disconnected: ${socket.id} (${reason})`);
-        if (!session.roomId || !session.peerId)
+        if (!session.roomId || !session.peerId) {
+            console.log(`[socket] Disconnected socket=${socket.id} reason=${reason} room=none`);
             return;
+        }
         const roomId = session.roomId;
         const peerId = session.peerId;
         // If a newer socket already took over this peerId (duplicate-tab kick or a
         // fast reconnect), this stale socket must not touch the peer at all.
-        if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id)
+        if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id) {
+            console.log(`[socket] Ignored stale disconnect room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason}`);
             return;
+        }
         // Choose how long to wait before evicting, most-decisive signal first:
         //
         //  1. Beacon received  -> the client positively told us it's closing.
@@ -89,7 +101,9 @@ function registerLifecycleHandlers(ctx) {
         // `transport close` is also emitted for Wi-Fi/VPN hand-offs, browser
         // process suspension and Electron network changes. Treat it as a network
         // interruption unless an explicit leave beacon marked the session closing.
-        const graceMs = (0, room_registry_1.isClosing)(roomId, peerId) ? room_registry_1.CLOSE_GRACE_MS : room_registry_1.DISCONNECT_GRACE_MS;
+        const closing = (0, room_registry_1.isClosing)(roomId, peerId);
+        const graceMs = closing ? room_registry_1.CLOSE_GRACE_MS : room_registry_1.DISCONNECT_GRACE_MS;
+        console.log(`[socket] Disconnect scheduled room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason} graceMs=${graceMs} closing=${closing}`);
         const timer = setTimeout(() => {
             (0, room_registry_1.deletePendingDisconnect)(roomId, peerId);
             if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id)

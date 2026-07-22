@@ -1,11 +1,16 @@
 const KEY = "replixo_display_name"
 const DEFAULT_NAME = "Гость"
 
-/** Read the saved display name from localStorage (falls back to "Гость"). */
-export function getDisplayName(): string {
-  if (typeof window === "undefined") return DEFAULT_NAME
+/** Read only a name explicitly saved by this browser. */
+export function getSavedDisplayName(): string | null {
+  if (typeof window === "undefined") return null
   const name = localStorage.getItem(KEY)?.trim()
-  return name && name.length > 0 ? name : DEFAULT_NAME
+  return name && name.length > 0 ? name : null
+}
+
+/** Read the saved display name (legacy callers still fall back to "Гость"). */
+export function getDisplayName(): string {
+  return getSavedDisplayName() ?? DEFAULT_NAME
 }
 
 /** Persist the display name to localStorage. Empty values are ignored. */

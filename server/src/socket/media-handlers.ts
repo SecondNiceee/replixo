@@ -12,6 +12,7 @@ import type {
   PauseProducerPayload,
 } from '../types'
 import { ack, err, type Callback, type HandlerContext } from './helpers'
+import { canonicalRoomCode } from '../room-code'
 import {
   rooms,
   clearPendingDisconnect,
@@ -34,11 +35,22 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'joinRoom',
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
-      const { roomId, peerId, displayName, rtpCapabilities, create } = payload
+      const { peerId, displayName, rtpCapabilities, create } = payload ?? {}
+      const roomId = canonicalRoomCode(payload?.roomId)
 
       try {
+        if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
+          return err(callback as Callback<never>, 'Некорректные данные подключения')
+        }
         if (!create && !rooms.has(roomId)) {
           return err(callback as Callback<never>, 'Комната не найдена')
+        }
+
+        if (session.roomId && session.peerId && (session.roomId !== roomId || session.peerId !== peerId)) {
+          evictPeer(io, session.roomId, session.peerId, socket.id)
+          socket.leave(session.roomId)
+          session.roomId = null
+          session.peerId = null
         }
 
         const existingSocketId = getPeerSocket(roomId, peerId)
@@ -56,12 +68,19 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         clearPendingDisconnect(roomId, peerId)
 
         const room = await getOrCreateRoom(roomId, worker)
+        const repeatedJoin = room.hasPeer(peerId) && getPeerSocket(roomId, peerId) === socket.id
 
-        if (room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
+        if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
 
-        const peer = new Peer({ peerId, displayName, socketId: socket.id })
-        peer.rtpCapabilities = rtpCapabilities
-        room.addPeer(peer)
+        if (repeatedJoin) {
+          const peer = room.getPeer(peerId)!
+          peer.displayName = displayName.trim()
+          peer.rtpCapabilities = rtpCapabilities
+        } else {
+          const peer = new Peer({ peerId, displayName: displayName.trim(), socketId: socket.id })
+          peer.rtpCapabilities = rtpCapabilities
+          room.addPeer(peer)
+        }
 
         session.roomId = roomId
         session.peerId = peerId
@@ -69,10 +88,11 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         socket.join(roomId)
 
         const existingPeers = room.getExistingPeersFor(peerId)
-        console.log(`[room] Peer ${peerId} (${displayName}) joined room ${roomId} — peers: ${room.getPeerIds().length}`)
+        console.log(`[room] ${repeatedJoin ? 'Repeated join ignored for' : 'Peer joined'} room=${roomId} peer=${peerId} socket=${socket.id} peers=${room.getPeerIds().length}`)
 
-        // Notify other peers that someone joined, even before they produce media
-        socket.to(roomId).emit('peerJoined', { peerId, displayName })
+        // A repeated acknowledgement from the same socket must not create a
+        // second presence event or replay the join sound for other clients.
+        if (!repeatedJoin) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() })
 
         // Load persisted chat history so the joining peer (or someone who just
         // reloaded the page) sees prior messages. Empty when persistence is off.

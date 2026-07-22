@@ -1,11 +1,11 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
-import { getDisplayName } from "@/lib/display-name"
+import { getSavedDisplayName, setDisplayName } from "@/lib/display-name"
 import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
@@ -22,6 +22,7 @@ import { useAnnotationOverlay } from "./use-annotation-overlay"
 import { RoomSettingsDialog } from "./room-settings-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
 
 import dynamic from "next/dynamic"
@@ -43,11 +44,79 @@ const Whiteboard = dynamic(
 interface RoomClientProps {
   roomId: string
   create: boolean
+  serverDisplayName: string | null
 }
 
-export default function RoomClient({ roomId, create }: RoomClientProps) {
+export default function RoomClient({ roomId, create, serverDisplayName }: RoomClientProps) {
+  const [displayName, setResolvedDisplayName] = useState<string | null>(serverDisplayName)
+  const [nameInput, setNameInput] = useState("")
+  const [storageChecked, setStorageChecked] = useState(serverDisplayName !== null)
+
+  useEffect(() => {
+    if (serverDisplayName) return
+    setResolvedDisplayName(getSavedDisplayName())
+    setStorageChecked(true)
+  }, [serverDisplayName])
+
+  const handleNameSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = nameInput.trim()
+    if (!name) return
+    setDisplayName(name)
+    setResolvedDisplayName(name)
+  }
+
+  if (!storageChecked) {
+    return <RoomStatus status="idle" error={null} roomId={roomId} />
+  }
+
+  if (!displayName) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background p-4">
+        <Dialog open>
+          <DialogContent showCloseButton={false} className="sm:max-w-sm">
+            <form onSubmit={handleNameSubmit} className="flex flex-col gap-6">
+              <DialogHeader>
+                <DialogTitle>Как вас представить?</DialogTitle>
+                <DialogDescription>
+                  Введите имя, которое увидят другие участники комнаты.
+                </DialogDescription>
+              </DialogHeader>
+              <label className="flex flex-col gap-2 text-sm font-medium" htmlFor="room-display-name">
+                Ваше имя
+                <Input
+                  id="room-display-name"
+                  value={nameInput}
+                  onChange={(event) => setNameInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
+                      event.preventDefault()
+                    }
+                  }}
+                  placeholder="Введите имя"
+                  maxLength={32}
+                  autoFocus
+                  autoComplete="nickname"
+                  required
+                />
+              </label>
+              <DialogFooter>
+                <Button type="submit" disabled={!nameInput.trim()} className="w-full">
+                  Войти в комнату
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </main>
+    )
+  }
+
+  return <ConnectedRoomClient roomId={roomId} create={create} displayName={displayName} />
+}
+
+function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientProps, "serverDisplayName"> & { displayName: string }) {
   const router = useRouter()
-  const displayName = getDisplayName()
 
   const {
     status,
