@@ -3,7 +3,7 @@
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
-  ChevronUp, Presentation, Pencil, Loader2,
+  ChevronUp, Presentation, Pencil, Loader2, Settings,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -32,7 +32,8 @@ interface RoomControlsProps {
   isScreenSharing: boolean
   screenQuality: ScreenQuality
   micDevices: AudioDevice[]
-  selectedMicLabel: string | null
+  activeMicId: string | null
+  isMicSwitching: boolean
   collapsed: boolean
   whiteboardOpen: boolean
   onToggleWhiteboard: () => void
@@ -46,8 +47,7 @@ interface RoomControlsProps {
   onToggleCam: () => void
   onToggleScreenShare: () => void
   onSetScreenQuality: (q: ScreenQuality) => void
-  onSwitchMic: (deviceId: string) => void
-  onSelectMicLabel: (label: string) => void
+  onSwitchMic: (deviceId: string) => Promise<boolean>
   onLeave: () => void
 }
 
@@ -58,7 +58,8 @@ export function RoomControls({
   isScreenSharing,
   screenQuality,
   micDevices,
-  selectedMicLabel,
+  activeMicId,
+  isMicSwitching,
   collapsed,
   whiteboardOpen,
   onToggleWhiteboard,
@@ -71,7 +72,6 @@ export function RoomControls({
   onToggleScreenShare,
   onSetScreenQuality,
   onSwitchMic,
-  onSelectMicLabel,
   onLeave,
 }: RoomControlsProps) {
   return (
@@ -103,45 +103,56 @@ export function RoomControls({
       >
         <div className="overflow-hidden">
     <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
-      {/* Mic + device picker */}
-      <div className="flex items-center">
+      {/* Mic + device settings */}
+      <div className="flex items-center gap-1">
         <Button
           variant="outline"
+          size="icon"
           onClick={onToggleMic}
           className={cn(
-            "size-12 rounded-full rounded-r-none border-r-0",
+            "size-12 rounded-full",
             isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
           )}
           aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
         >
-          {isMicMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+          {isMicMuted ? <MicOff /> : <Mic />}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
-            className={cn(
-              "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
-              isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+            render={(
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-9 rounded-full"
+              />
             )}
-            aria-label="Выбрать микрофон"
+            disabled={isMicSwitching}
+            aria-label="Настройки микрофона"
+            aria-busy={isMicSwitching}
           >
-            <ChevronDown className="size-3" />
+            {isMicSwitching ? <Loader2 className="animate-spin" /> : <Settings />}
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="center" side="top">
-            {micDevices.length === 0 && (
-              <DropdownMenuItem disabled>Нет доступных микрофонов</DropdownMenuItem>
-            )}
-            {micDevices.map((d) => (
-              <DropdownMenuItem
-                key={d.deviceId}
-                onSelect={async () => {
-                  onSelectMicLabel(d.label)
-                  await onSwitchMic(d.deviceId)
-                }}
-                className={cn(selectedMicLabel === d.label && "font-medium")}
-              >
-                {d.label}
-              </DropdownMenuItem>
-            ))}
+          <DropdownMenuContent align="start" side="top" className="w-72">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Микрофон</DropdownMenuLabel>
+              {micDevices.length === 0 && (
+                <DropdownMenuItem disabled>Нет доступных микрофонов</DropdownMenuItem>
+              )}
+              {micDevices.map((device) => {
+                const selected = activeMicId === device.deviceId
+                return (
+                  <DropdownMenuItem
+                    key={device.deviceId}
+                    disabled={isMicSwitching}
+                    onSelect={() => void onSwitchMic(device.deviceId)}
+                    className="flex items-center justify-between gap-4"
+                  >
+                    <span className={cn("truncate", selected && "font-medium")}>{device.label}</span>
+                    {selected && <Check />}
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

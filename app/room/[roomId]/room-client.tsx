@@ -59,6 +59,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
     isMicMuted,
     isCamOff,
     isCamStarting,
+    activeMicId,
+    isMicSwitching,
     isScreenSharing,
     localScreenStream,
     toggleMic,
@@ -88,7 +90,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
-  const [selectedMicLabel, setSelectedMicLabel] = useState<string | null>(null)
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -279,7 +280,8 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             isScreenSharing={isScreenSharing}
             screenQuality={screenQuality}
             micDevices={micDevices}
-            selectedMicLabel={selectedMicLabel}
+            activeMicId={activeMicId}
+            isMicSwitching={isMicSwitching}
             collapsed={controlsCollapsed}
             whiteboardOpen={whiteboardOpen}
             onToggleWhiteboard={toggleWhiteboard}
@@ -292,7 +294,6 @@ export default function RoomClient({ roomId, create }: RoomClientProps) {
             onToggleScreenShare={toggleScreenShare}
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
-            onSelectMicLabel={setSelectedMicLabel}
             onLeave={handleLeave}
           />
         </div>
