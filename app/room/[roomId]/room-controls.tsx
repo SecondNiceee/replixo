@@ -133,7 +133,7 @@ export function RoomControls({
         <div className="group relative flex items-center">
           <div
             className={cn(
-              "pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+              "pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100",
               micSettingsOpen && "pointer-events-auto opacity-100",
             )}
           >
