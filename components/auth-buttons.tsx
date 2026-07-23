@@ -50,7 +50,7 @@ export function AuthButtons({ user }: AuthButtonsProps) {
         variant="ghost"
         size="sm"
         onClick={() => router.push('/sign-in')}
-        className="h-9 px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground active:scale-95"
+        className="hidden h-9 px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground active:scale-95 sm:inline-flex"
       >
         Войти
       </Button>
