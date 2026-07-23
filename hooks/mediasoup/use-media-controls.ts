@@ -79,6 +79,7 @@ export function useMediaControls({
   const [activeMicId, setActiveMicId] = useState<string | null>(null)
   const [isMicSwitching, setIsMicSwitching] = useState(false)
   const screenRecoveryInFlightRef = useRef(false)
+  const screenCaptureCleanupRef = useRef<(() => void) | null>(null)
 
   // ---------------------------------------------------------------------------
   // Wait for the send transport to be ready (user can click mic/cam before join)
@@ -303,14 +304,38 @@ export function useMediaControls({
     }
   }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef])
 
+  const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
+    const stream = screenStreamRef.current
+    const wasSharing = !!stream || !!screenVideoProducerRef.current || !!screenAudioProducerRef.current
+
+    screenCaptureCleanupRef.current?.()
+    screenCaptureCleanupRef.current = null
+
+    for (const producer of [screenVideoProducerRef.current, screenAudioProducerRef.current]) {
+      if (!producer) continue
+      socketRef.current?.emit("closeProducer", {
+        roomId, peerId: peerIdRef.current, producerId: producer.id,
+      })
+      producer.close()
+    }
+    screenVideoProducerRef.current = null
+    screenAudioProducerRef.current = null
+    screenStreamRef.current = null
+    stream?.getTracks().forEach((track) => {
+      track.onended = null
+      track.stop()
+    })
+    dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
+    if (wasSharing && !options?.silent) playScreenShareStopSound()
+  }, [roomId, peerIdRef, socketRef, screenVideoProducerRef, screenAudioProducerRef,
+      screenStreamRef, dispatch])
+
   const recoverScreenShare = useCallback(async () => {
     if (screenRecoveryInFlightRef.current) return false
     const stream = screenStreamRef.current
     const videoTrack = stream?.getVideoTracks()[0]
     if (!stream || !videoTrack || videoTrack.readyState !== "live") {
-      screenVideoProducerRef.current = null
-      screenAudioProducerRef.current = null
-      dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
+      stopScreenShare({ silent: true })
       return false
     }
 
@@ -342,25 +367,7 @@ export function useMediaControls({
       screenRecoveryInFlightRef.current = false
     }
   }, [roomId, peerIdRef, screenStreamRef, screenVideoProducerRef, screenAudioProducerRef,
-      publishCapturedScreen, dispatch, waitForSendTransport])
-
-  const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
-    const wasSharing = !!screenVideoProducerRef.current
-    for (const producer of [screenVideoProducerRef.current, screenAudioProducerRef.current]) {
-      if (!producer) continue
-      socketRef.current?.emit("closeProducer", {
-        roomId, peerId: peerIdRef.current, producerId: producer.id,
-      })
-      producer.close()
-    }
-    screenVideoProducerRef.current = null
-    screenAudioProducerRef.current = null
-    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
-    screenStreamRef.current = null
-    dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
-    if (wasSharing && !options?.silent) playScreenShareStopSound()
-  }, [roomId, peerIdRef, socketRef, screenVideoProducerRef, screenAudioProducerRef,
-      screenStreamRef, dispatch])
+      publishCapturedScreen, dispatch, waitForSendTransport, stopScreenShare])
 
   const startScreenShare = useCallback(async (options?: { silent?: boolean }) => {
     const sendTransport = sendTransportRef.current
@@ -378,10 +385,6 @@ export function useMediaControls({
       const audioTrack = displayStream.getAudioTracks()[0]
 
       await publishCapturedScreen(sendTransport, displayStream)
-
-      if (videoTrack) {
-        videoTrack.onended = () => stopScreenShare()
-      }
 
       if (audioTrack) {
         const replaceScreenAudio = async () => {
@@ -417,16 +420,21 @@ export function useMediaControls({
           }
         }
         navigator.mediaDevices.addEventListener("devicechange", onDeviceChange)
-
-        if (videoTrack) {
-          const prevOnEnded = videoTrack.onended
-          videoTrack.onended = () => {
-            navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
-            if (typeof prevOnEnded === "function") prevOnEnded.call(videoTrack, new Event("ended"))
-            else stopScreenShare()
-          }
+        screenCaptureCleanupRef.current = () => {
+          navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange)
+          displayStream.removeEventListener("inactive", handleCaptureEnded)
+        }
+      } else {
+        screenCaptureCleanupRef.current = () => {
+          displayStream.removeEventListener("inactive", handleCaptureEnded)
         }
       }
+
+      function handleCaptureEnded() {
+        stopScreenShare()
+      }
+      displayStream.addEventListener("inactive", handleCaptureEnded)
+      if (videoTrack) videoTrack.onended = handleCaptureEnded
 
       dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
       if (!options?.silent) playScreenShareSound()
@@ -435,10 +443,12 @@ export function useMediaControls({
       screenAudioProducerRef, dispatch, stopScreenShare, publishCapturedScreen])
 
   const toggleScreenShare = useCallback(async () => {
-    const liveCapture = screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live"
-    if (liveCapture) stopScreenShare()
+    const hasScreenSession = !!screenStreamRef.current
+      || !!screenVideoProducerRef.current
+      || !!screenAudioProducerRef.current
+    if (hasScreenSession) stopScreenShare()
     else await startScreenShare()
-  }, [screenStreamRef, startScreenShare, stopScreenShare])
+  }, [screenStreamRef, screenVideoProducerRef, screenAudioProducerRef, startScreenShare, stopScreenShare])
 
   const setScreenQuality = useCallback(
     async (quality: ScreenQuality) => {

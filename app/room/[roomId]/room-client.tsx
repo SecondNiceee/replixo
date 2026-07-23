@@ -135,6 +135,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     toggleMic,
     toggleCam,
     toggleScreenShare,
+    stopScreenShare,
     screenQuality,
     setScreenQuality,
     switchMic,
@@ -490,7 +491,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           onToggleWhiteboard={toggleWhiteboard}
           onToggleMic={toggleMic}
           onToggleCam={toggleCam}
-          onStopScreenShare={toggleScreenShare}
+          onStopScreenShare={stopScreenShare}
         />
       )}
     </div>
