@@ -6,7 +6,7 @@ import { db } from "@/lib/db"
 import { annotationSettings } from "@/lib/db/schema"
 
 export type AnnotationSettingsPayload = {
-  activation: "double-click" | "hotkey"
+  activation: "none" | "double-click" | "hotkey"
   hotkey: string | null
   hintSeen: boolean
 }
@@ -14,7 +14,9 @@ export type AnnotationSettingsPayload = {
 function parseBody(body: unknown): AnnotationSettingsPayload | null {
   if (!body || typeof body !== "object") return null
   const value = body as Record<string, unknown>
-  const activation = value.activation === "hotkey" ? "hotkey" : "double-click"
+  const activation = value.activation === "hotkey" || value.activation === "double-click"
+    ? value.activation
+    : "none"
   const hotkey = typeof value.hotkey === "string" ? value.hotkey.slice(0, 32) : null
   return {
     activation,

@@ -3,7 +3,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
-export type AnnotationActivation = "double-click" | "hotkey"
+export type AnnotationActivation = "none" | "double-click" | "hotkey"
 
 export interface AnnotationSettings {
   activation: AnnotationActivation
@@ -22,7 +22,7 @@ interface AnnotationSettingsState extends AnnotationSettings {
 }
 
 const DEFAULTS: AnnotationSettings = {
-  activation: "double-click",
+  activation: "none",
   hotkey: null,
   hintSeen: false,
 }
