@@ -553,6 +553,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     toggleMic: mediaControls.toggleMic,
     toggleCam: mediaControls.toggleCam,
     toggleScreenShare: mediaControls.toggleScreenShare,
+    stopScreenShare: mediaControls.stopScreenShare,
     switchMic: mediaControls.switchMic,
     screenQuality: mediaControls.screenQuality,
     setScreenQuality: mediaControls.setScreenQuality,
