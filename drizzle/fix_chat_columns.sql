@@ -64,6 +64,9 @@ SELECT pg_temp.rename_col('message_read', 'room_id',      'roomId');
 SELECT pg_temp.rename_col('message_read', 'peer_id',      'peerId');
 SELECT pg_temp.rename_col('message_read', 'last_read_at', 'lastReadAt');
 SELECT pg_temp.rename_col('message_read', 'updated_at',   'updatedAt');
+-- CREATE TABLE IF NOT EXISTS не дополняет уже существующую неполную таблицу.
+ALTER TABLE "message_read" ADD COLUMN IF NOT EXISTS "lastReadAt" timestamp NOT NULL DEFAULT now();
+ALTER TABLE "message_read" ADD COLUMN IF NOT EXISTS "updatedAt" timestamp NOT NULL DEFAULT now();
 
 -- === whiteboard ============================================================
 CREATE TABLE IF NOT EXISTS "whiteboard" (

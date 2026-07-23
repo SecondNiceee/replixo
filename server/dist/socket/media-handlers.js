@@ -96,6 +96,38 @@ function registerMediaHandlers(ctx, worker) {
         }
     });
     // -----------------------------------------------------------------------
+    // resetMediaState — rebuild transports without removing room presence
+    // -----------------------------------------------------------------------
+    socket.on('resetMediaState', (payload, callback) => {
+        const roomId = (0, room_code_1.canonicalRoomCode)(payload?.roomId);
+        const peerId = payload?.peerId;
+        try {
+            if (!roomId || typeof peerId !== 'string')
+                return (0, helpers_1.err)(callback, 'Invalid media reset payload');
+            if (session.roomId !== roomId || session.peerId !== peerId || (0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id) {
+                console.warn(`[media] Reset rejected room=${roomId} peer=${peerId} socket=${socket.id}`);
+                return (0, helpers_1.err)(callback, 'Socket does not own this peer');
+            }
+            const room = room_registry_1.rooms.get(roomId);
+            const peer = room?.getPeer(peerId);
+            if (!room || !peer)
+                return (0, helpers_1.err)(callback, 'Peer not found');
+            const producerIds = [...peer.producers.keys()];
+            const transportCount = peer.transports.size;
+            const consumerCount = peer.consumers.size;
+            peer.resetMedia();
+            for (const producerId of producerIds) {
+                socket.to(roomId).emit('producerClosed', { peerId, producerId });
+            }
+            console.log(`[media] State reset room=${roomId} peer=${peerId} socket=${socket.id} transports=${transportCount} producers=${producerIds.length} consumers=${consumerCount}`);
+            (0, helpers_1.ack)(callback, undefined);
+        }
+        catch (e) {
+            console.error(`[media] State reset failed room=${roomId} peer=${peerId} socket=${socket.id}`, e);
+            (0, helpers_1.err)(callback, e.message);
+        }
+    });
+    // -----------------------------------------------------------------------
     // createWebRtcTransport
     // -----------------------------------------------------------------------
     socket.on('createWebRtcTransport', async (payload, callback) => {
@@ -136,10 +168,12 @@ function registerMediaHandlers(ctx, worker) {
             const room = room_registry_1.rooms.get(roomId);
             if (!room)
                 return (0, helpers_1.err)(callback, `Room ${roomId} not found`);
+            console.log(`[media] ICE restart room=${roomId} peer=${peerId} transport=${transportId} socket=${socket.id}`);
             const iceParameters = await room.restartIce(peerId, transportId);
             (0, helpers_1.ack)(callback, iceParameters);
         }
         catch (e) {
+            console.error(`[media] ICE restart failed room=${roomId} peer=${peerId} transport=${transportId} socket=${socket.id}`, e);
             (0, helpers_1.err)(callback, e.message);
         }
     });

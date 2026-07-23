@@ -21,6 +21,7 @@ interface UseTransportsParams {
   videoProducerRef: React.MutableRefObject<Producer | null>
   screenVideoProducerRef: React.MutableRefObject<Producer | null>
   screenAudioProducerRef: React.MutableRefObject<Producer | null>
+  onRecoveryExhausted: (reason: string) => void
   dispatch: (action: Action) => void
 }
 
@@ -39,6 +40,7 @@ export function useTransports({
   videoProducerRef,
   screenVideoProducerRef,
   screenAudioProducerRef,
+  onRecoveryExhausted,
   dispatch,
 }: UseTransportsParams) {
   // ---------------------------------------------------------------------------
@@ -102,59 +104,75 @@ export function useTransports({
       const socket = socketRef.current
       if (!socket || !transport || transport.closed) return
       if (attempt === 0 && iceRestartingRef.current.has(transport.id)) return
-      iceRestartingRef.current.add(transport.id)
 
+      const direction = transport === sendTransportRef.current ? "send" : "recv"
+      const failToRebuild = (reason: string) => {
+        clearIceRetry(transport.id)
+        iceRestartingRef.current.delete(transport.id)
+        console.error(`[media] ICE recovery exhausted room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} reason=${reason}`)
+        onRecoveryExhausted(`${direction}:${reason}`)
+      }
       const scheduleRetry = () => {
         if (transport.closed || transport.connectionState === "connected") {
           clearIceRetry(transport.id)
+          iceRestartingRef.current.delete(transport.id)
           return
         }
-        const delay = Math.min(1000 * 2 ** attempt, 8000)
+        if (attempt >= 2) {
+          failToRebuild("transport-still-disconnected")
+          return
+        }
+        const delay = 1000 * 2 ** attempt
         clearIceRetry(transport.id)
         const timer = setTimeout(() => restartIceForTransport(transport, attempt + 1), delay)
         iceRetryTimersRef.current.set(transport.id, timer)
       }
 
+      iceRestartingRef.current.add(transport.id)
+      console.info(`[media] ICE restart requested room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} attempt=${attempt + 1}`)
+      let acknowledged = false
+      const ackTimer = setTimeout(() => {
+        if (acknowledged) return
+        acknowledged = true
+        if (transport.closed || (transport !== sendTransportRef.current && transport !== recvTransportRef.current)) return
+        failToRebuild("restart-ack-timeout")
+      }, 8000)
+
       socket.emit(
         "restartIce",
         { roomId, peerId: peerIdRef.current, transportId: transport.id },
         async (error: string | null, iceParameters: object | undefined) => {
+          if (acknowledged) return
+          acknowledged = true
+          clearTimeout(ackTimer)
           iceRestartingRef.current.delete(transport.id)
           if (error || !iceParameters) {
+            console.warn(`[media] ICE restart rejected room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} error=${error ?? "missing-parameters"}`)
             scheduleRetry()
             return
           }
           try {
             await transport.restartIce({ iceParameters })
-            // Re-sync paused state of all producers after ICE recovery
+            console.info(`[media] ICE restart applied room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction}`)
             if (transport === sendTransportRef.current) {
               const syncSocket = socketRef.current
               if (syncSocket) {
-                for (const producer of [
-                  audioProducerRef.current,
-                  videoProducerRef.current,
-                  screenVideoProducerRef.current,
-                  screenAudioProducerRef.current,
-                ]) {
+                for (const producer of [audioProducerRef.current, videoProducerRef.current, screenVideoProducerRef.current, screenAudioProducerRef.current]) {
                   if (!producer || producer.closed) continue
-                  syncSocket.emit("pauseProducer", {
-                    roomId,
-                    peerId: peerIdRef.current,
-                    producerId: producer.id,
-                    paused: producer.paused,
-                  })
+                  syncSocket.emit("pauseProducer", { roomId, peerId: peerIdRef.current, producerId: producer.id, paused: producer.paused })
                 }
               }
             }
             scheduleRetry()
-          } catch {
+          } catch (error) {
+            console.error(`[media] ICE restart apply failed room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction}`, error)
             scheduleRetry()
           }
         },
       )
     },
     [roomId, peerIdRef, socketRef, sendTransportRef, audioProducerRef, videoProducerRef,
-     screenVideoProducerRef, screenAudioProducerRef, iceRestartingRef, iceRetryTimersRef, clearIceRetry],
+     screenVideoProducerRef, screenAudioProducerRef, iceRestartingRef, iceRetryTimersRef, clearIceRetry, onRecoveryExhausted],
   )
 
   // ---------------------------------------------------------------------------
@@ -201,11 +219,16 @@ export function useTransports({
             })
 
             transport.on("connectionstatechange", (connectionState: string) => {
+              console.info(`[media] Transport state room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} state=${connectionState}`)
               if (connectionState === "disconnected" || connectionState === "failed") {
                 restartIceForTransport(transport)
               } else if (connectionState === "connected") {
                 clearIceRetry(transport.id)
+                iceRestartingRef.current.delete(transport.id)
                 recoverVideoConsumers(transport)
+              } else if (connectionState === "closed") {
+                clearIceRetry(transport.id)
+                iceRestartingRef.current.delete(transport.id)
               }
             })
 
