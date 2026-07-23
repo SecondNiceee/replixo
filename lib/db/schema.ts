@@ -156,7 +156,7 @@ export const annotationSettings = pgTable('annotation_settings', {
   userId: text('userId')
     .primaryKey()
     .references(() => user.id, { onDelete: 'cascade' }),
-  activation: text('activation').notNull().default('double-click'),
+  activation: text('activation').notNull().default('none'),
   hotkey: text('hotkey'),
   hintSeen: boolean('hintSeen').notNull().default(false),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
