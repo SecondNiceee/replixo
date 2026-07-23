@@ -144,6 +144,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
       transports.restartIceForTransport(sendTransportRef.current)
       transports.restartIceForTransport(recvTransportRef.current)
+      window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
     })
   }, [roomId, transports])
 
@@ -393,6 +394,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         })
         joinInFlightRef.current = false
         await doJoinSequence()
+        if (screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live") {
+          await mediaControls.recoverScreenShare()
+        }
         console.info(`[media] Rebuild completed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`)
       } catch (error) {
         joinInFlightRef.current = false
@@ -432,6 +436,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         if (!error) {
           transports.restartIceForTransport(sendTransportRef.current)
           transports.restartIceForTransport(recvTransportRef.current)
+          window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
         } else {
           hasJoinedRef.current = false
           void rebuildMediaSession(`rejoin-rejected:${error}`)
