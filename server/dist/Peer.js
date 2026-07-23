@@ -31,13 +31,16 @@ class Peer {
     // ---------------------------------------------------------------------------
     // Cleanup
     // ---------------------------------------------------------------------------
-    close() {
+    resetMedia() {
         for (const transport of this.transports.values()) {
             transport.close();
         }
         this.transports.clear();
         this.producers.clear();
         this.consumers.clear();
+    }
+    close() {
+        this.resetMedia();
     }
 }
 exports.Peer = Peer;

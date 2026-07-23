@@ -73,6 +73,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const joinInFlightRef = useRef(false)
   const connectionGenerationRef = useRef(0)
   const recoveryInFlightRef = useRef(false)
+  const rebuildConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
 
   // Keep refs in sync with state (readable inside async callbacks without stale closures)
   statusRef.current = state.status
@@ -91,6 +92,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     iceRestartingRef, iceRetryTimersRef,
     audioProducerRef, videoProducerRef,
     screenVideoProducerRef, screenAudioProducerRef,
+    onRecoveryExhausted: (reason) => { void rebuildConnectionRef.current(`ice-${reason}`) },
     dispatch,
   })
 
@@ -123,17 +125,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     lastRecoverAtRef.current = now
     recoveryInFlightRef.current = true
     const generation = connectionGenerationRef.current
-    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current },
-      (error: string | null) => {
-        recoveryInFlightRef.current = false
-        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
-        if (!error) {
-          transports.restartIceForTransport(sendTransportRef.current)
-          transports.restartIceForTransport(recvTransportRef.current)
-        }
-      },
-    )
-  }, [roomId, peerIdRef, transports, sendTransportRef, recvTransportRef])
+    let settled = false
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      recoveryInFlightRef.current = false
+      void rebuildConnectionRef.current("manual-probe-timeout")
+    }, 8000)
+    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      recoveryInFlightRef.current = false
+      if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+      if (error) {
+        void rebuildConnectionRef.current(`manual-probe-rejected:${error}`)
+        return
+      }
+      transports.restartIceForTransport(sendTransportRef.current)
+      transports.restartIceForTransport(recvTransportRef.current)
+      window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+    })
+  }, [roomId, transports])
 
   // ---------------------------------------------------------------------------
   // Leave
@@ -334,57 +347,105 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       )
     }
 
+    const closeCurrentMediaSession = () => {
+      const producers = [audioProducerRef.current, videoProducerRef.current, screenVideoProducerRef.current, screenAudioProducerRef.current]
+      audioProducerRef.current = null
+      videoProducerRef.current = null
+      screenVideoProducerRef.current = null
+      screenAudioProducerRef.current = null
+      producers.forEach((producer) => producer?.close())
+      sendTransportRef.current?.close()
+      recvTransportRef.current?.close()
+      sendTransportRef.current = null
+      recvTransportRef.current = null
+      consumersRef.current.forEach((consumer) => consumer.close())
+      consumersRef.current.clear()
+      pendingClosedProducersRef.current.clear()
+      iceRestartingRef.current.clear()
+      iceRetryTimersRef.current.forEach((timer) => clearTimeout(timer))
+      iceRetryTimersRef.current.clear()
+    }
+
+    const rebuildMediaSession = async (reason: string) => {
+      if (recoveryInFlightRef.current || socketRef.current !== socket || !socket.connected) return
+      recoveryInFlightRef.current = true
+      console.warn(`[media] Rebuild started room=${roomId} peer=${peerIdRef.current} socket=${socket.id} reason=${reason}`)
+      try {
+        closeCurrentMediaSession()
+        await new Promise<void>((resolve, reject) => {
+          let settled = false
+          const timeout = setTimeout(() => {
+            if (settled) return
+            settled = true
+            reject(new Error("resetMediaState acknowledgement timeout"))
+          }, 8000)
+          socket.emit("resetMediaState", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timeout)
+            if (error) reject(new Error(error))
+            else resolve()
+          })
+        }).catch((error) => {
+          // The peer may already have been evicted during a long outage. In that
+          // case reset is unnecessary and joinRoom below recreates it.
+          console.warn(`[media] Server reset skipped room=${roomId} peer=${peerIdRef.current}`, error)
+          hasJoinedRef.current = false
+        })
+        joinInFlightRef.current = false
+        await doJoinSequence()
+        if (screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live") {
+          await mediaControls.recoverScreenShare()
+        }
+        console.info(`[media] Rebuild completed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`)
+      } catch (error) {
+        joinInFlightRef.current = false
+        console.error(`[media] Rebuild failed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`, error)
+        dispatch({ type: "ERROR", error: "Не удалось восстановить аудио/видео. Переподключитесь к комнате." })
+      } finally {
+        recoveryInFlightRef.current = false
+      }
+    }
+    rebuildConnectionRef.current = rebuildMediaSession
+
     // ---------------------------------------------------------------------------
     // Socket event listeners
     // ---------------------------------------------------------------------------
     socket.on("connect", async () => {
+      console.info(`[socket] Connected room=${roomId} peer=${peerIdRef.current} socket=${socket.id} recovered=${hasJoinedRef.current}`)
       if (!hasJoinedRef.current) {
         await doJoinSequence()
         return
       }
-
-      // Reconnect path: only one probe/rebuild may run for this socket generation.
       if (recoveryInFlightRef.current) return
       recoveryInFlightRef.current = true
-      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current },
-        async (error: string | null) => {
-          recoveryInFlightRef.current = false
-          if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
-          if (!error) {
-            transports.restartIceForTransport(sendTransportRef.current)
-            transports.restartIceForTransport(recvTransportRef.current)
-          } else {
-            // Full rejoin only after the server confirms this peer was evicted.
-            hasJoinedRef.current = false
+      let settled = false
+      const timeout = setTimeout(() => {
+        if (settled) return
+        settled = true
+        recoveryInFlightRef.current = false
+        void rebuildMediaSession("rejoin-probe-timeout")
+      }, 8000)
+      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        recoveryInFlightRef.current = false
+        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+        console.info(`[socket] Rejoin probe room=${roomId} peer=${peerIdRef.current} socket=${socket.id} result=${error ?? "accepted"}`)
+        if (!error) {
+          transports.restartIceForTransport(sendTransportRef.current)
+          transports.restartIceForTransport(recvTransportRef.current)
+          window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+        } else {
+          hasJoinedRef.current = false
+          void rebuildMediaSession(`rejoin-rejected:${error}`)
+        }
+      })
+    })
 
-            const prevAudioProducer = audioProducerRef.current
-            const prevVideoProducer = videoProducerRef.current
-            const prevScreenVideoProducer = screenVideoProducerRef.current
-            const prevScreenAudioProducer = screenAudioProducerRef.current
-            audioProducerRef.current = null
-            videoProducerRef.current = null
-            screenVideoProducerRef.current = null
-            screenAudioProducerRef.current = null
-            prevAudioProducer?.close()
-            prevVideoProducer?.close()
-            prevScreenVideoProducer?.close()
-            prevScreenAudioProducer?.close()
-
-            sendTransportRef.current?.close()
-            recvTransportRef.current?.close()
-            sendTransportRef.current = null
-            recvTransportRef.current = null
-            consumersRef.current.forEach((consumer) => consumer.close())
-            consumersRef.current.clear()
-            pendingClosedProducersRef.current.clear()
-            iceRestartingRef.current.clear()
-            iceRetryTimersRef.current.forEach((timer) => clearTimeout(timer))
-            iceRetryTimersRef.current.clear()
-
-            await doJoinSequence()
-          }
-        },
-      )
+    socket.on("disconnect", (reason) => {
+      console.warn(`[socket] Disconnected room=${roomId} peer=${peerIdRef.current} socket=${socket.id ?? "none"} reason=${reason}`)
     })
 
     registerRoomSocketListeners(socket, {
@@ -412,6 +473,23 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     return () => { leave() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Recover media after a network return, tab restore, or mobile foreground.
+  useEffect(() => {
+    const onOnline = () => recoverConnection()
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recoverConnection()
+    }
+    const onPageShow = () => recoverConnection()
+    window.addEventListener("online", onOnline)
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("pageshow", onPageShow)
+    return () => {
+      window.removeEventListener("online", onOnline)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("pageshow", onPageShow)
+    }
+  }, [recoverConnection])
 
   // ---------------------------------------------------------------------------
   // Fast leave on real tab/browser close

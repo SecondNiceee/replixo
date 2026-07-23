@@ -47,12 +47,16 @@ export class Peer implements PeerData {
   // Cleanup
   // ---------------------------------------------------------------------------
 
-  close(): void {
+  resetMedia(): void {
     for (const transport of this.transports.values()) {
       transport.close()
     }
     this.transports.clear()
     this.producers.clear()
     this.consumers.clear()
+  }
+
+  close(): void {
+    this.resetMedia()
   }
 }

@@ -305,26 +305,44 @@ export function useMediaControls({
 
   const recoverScreenShare = useCallback(async () => {
     if (screenRecoveryInFlightRef.current) return false
-    const transport = sendTransportRef.current
     const stream = screenStreamRef.current
     const videoTrack = stream?.getVideoTracks()[0]
-    if (!transport || transport.closed || !stream || !videoTrack || videoTrack.readyState !== "live") {
+    if (!stream || !videoTrack || videoTrack.readyState !== "live") {
+      screenVideoProducerRef.current = null
+      screenAudioProducerRef.current = null
+      dispatch({ type: "SET_SCREEN_SHARING", isSharing: false })
       return false
     }
 
     screenRecoveryInFlightRef.current = true
     try {
-      if (screenVideoProducerRef.current?.closed) screenVideoProducerRef.current = null
-      if (screenAudioProducerRef.current?.closed) screenAudioProducerRef.current = null
+      const transport = await waitForSendTransport()
+      if (!transport || transport.closed) return false
+
+      const currentVideo = screenVideoProducerRef.current
+      const currentAudio = screenAudioProducerRef.current
+      if (currentVideo && (currentVideo.closed || currentVideo.transport !== transport)) {
+        currentVideo.close()
+        screenVideoProducerRef.current = null
+      }
+      if (currentAudio && (currentAudio.closed || currentAudio.transport !== transport)) {
+        currentAudio.close()
+        screenAudioProducerRef.current = null
+      }
+
       await publishCapturedScreen(transport, stream)
-      dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
-      return !!screenVideoProducerRef.current
-    } catch {
+      const recovered = !!screenVideoProducerRef.current && !screenVideoProducerRef.current.closed
+      dispatch({ type: "SET_SCREEN_SHARING", isSharing: recovered })
+      console.info(`[media] Screen share recovery room=${roomId} peer=${peerIdRef.current} recovered=${recovered} audio=${!!screenAudioProducerRef.current}`)
+      return recovered
+    } catch (error) {
+      console.error(`[media] Screen share recovery failed room=${roomId} peer=${peerIdRef.current}`, error)
       return false
     } finally {
       screenRecoveryInFlightRef.current = false
     }
-  }, [sendTransportRef, screenStreamRef, screenVideoProducerRef, publishCapturedScreen, dispatch])
+  }, [roomId, peerIdRef, screenStreamRef, screenVideoProducerRef, screenAudioProducerRef,
+      publishCapturedScreen, dispatch, waitForSendTransport])
 
   const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
     const wasSharing = !!screenVideoProducerRef.current
@@ -417,9 +435,10 @@ export function useMediaControls({
       screenAudioProducerRef, dispatch, stopScreenShare, publishCapturedScreen])
 
   const toggleScreenShare = useCallback(async () => {
-    if (screenVideoProducerRef.current) stopScreenShare()
+    const liveCapture = screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live"
+    if (liveCapture) stopScreenShare()
     else await startScreenShare()
-  }, [screenVideoProducerRef, startScreenShare, stopScreenShare])
+  }, [screenStreamRef, startScreenShare, stopScreenShare])
 
   const setScreenQuality = useCallback(
     async (quality: ScreenQuality) => {
