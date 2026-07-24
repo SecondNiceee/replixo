@@ -10,6 +10,8 @@ export interface DmConversation {
   friendName: string
   friendUsername: string | null
   unreadCount: number
+  /** Маркер прочтения собеседника (ISO). Живые обновления идут через dm-store. */
+  peerLastReadAt: string | null
   lastMessageAt: string | null
   lastMessageText: string | null
   lastMessageSenderId: string | null
@@ -54,4 +56,19 @@ export const chatFetcher = (url: string) =>
 
 export function conversationTitle(c: Pick<DmConversation, 'friendName' | 'friendUsername'>): string {
   return c.friendUsername ?? c.friendName
+}
+
+/**
+ * Человекочитаемый статус оффлайн-собеседника. Точное время не показываем:
+ * presence живёт в памяти сервера и после его перезапуска неизвестно, так что
+ * формулировки намеренно расплывчатые.
+ */
+export function formatLastSeen(ts: number | undefined): string {
+  if (!ts) return 'не в сети'
+  const minutes = Math.floor((Date.now() - ts) / 60_000)
+  if (minutes < 1) return 'был(а) только что'
+  if (minutes < 60) return `был(а) ${minutes} мин назад`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `был(а) ${hours} ч назад`
+  return 'был(а) давно'
 }

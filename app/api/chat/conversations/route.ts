@@ -28,6 +28,9 @@ export async function GET() {
       id: conversation.id,
       lastMessageAt: conversation.lastMessageAt,
       unreadCount: conversationMember.unreadCount,
+      // Маркер прочтения собеседника: по нему рисуются двойные галочки на
+      // моих сообщениях до перезагрузки страницы (дальше его двигает сокет).
+      peerLastReadAt: peer.lastReadAt,
       friendId: user.id,
       friendName: user.name,
       friendUsername: user.username,

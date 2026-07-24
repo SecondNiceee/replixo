@@ -108,6 +108,15 @@ export function playMessageSound() {
   ])
 }
 
+// Two-note knock, a touch lower and softer than the room-chat ping so a direct
+// message is distinguishable from a message in the current call. (~0.3s)
+export function playIncomingMessage() {
+  playSequence([
+    { freq: 587.33, at: 0, duration: 0.09, wave: "sine", gain: 0.45 }, // D5
+    { freq: 880.0, at: 0.08, duration: 0.22, wave: "sine", gain: 0.55 }, // A5
+  ])
+}
+
 // Snappy descending arpeggio — signals demonstration has STOPPED. (~0.35s)
 export function playScreenShareStopSound() {
   playSequence([
