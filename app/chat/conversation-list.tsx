@@ -2,6 +2,7 @@
 
 import { Loader2, MessageSquarePlus, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from '@/app/profile/types'
 import { conversationTitle, type DmConversation } from './types'
 
@@ -34,6 +35,8 @@ export function ConversationList({
   onSelect,
   onStartWithFriend,
 }: ConversationListProps) {
+  const onlineIds = useDmStore((s) => s.onlineIds)
+
   // Друзья, с которыми переписки ещё нет — быстрый старт нового диалога.
   const withoutConversation = friends.filter(
     (f) => !conversations.some((c) => c.friendId === f.friendId),
@@ -74,8 +77,14 @@ export function ConversationList({
                         isActive ? 'bg-secondary' : 'hover:bg-secondary/50',
                       )}
                     >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+                      <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
                         {title.charAt(0).toUpperCase()}
+                        {onlineIds.has(c.friendId) && (
+                          <span
+                            className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
+                            aria-label="в сети"
+                          />
+                        )}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="flex items-baseline gap-2">
@@ -112,8 +121,14 @@ export function ConversationList({
                         onClick={() => onStartWithFriend(f.friendId)}
                         className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-secondary/50"
                       >
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary/60 text-sm font-medium text-muted-foreground">
+                        <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary/60 text-sm font-medium text-muted-foreground">
                           {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
+                          {onlineIds.has(f.friendId) && (
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
+                              aria-label="в сети"
+                            />
+                          )}
                         </span>
                         <span className="truncate text-sm text-foreground">
                           {f.friendUsername ?? f.friendName}

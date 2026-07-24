@@ -1,6 +1,7 @@
 import type { Server, Socket } from 'socket.io'
 import { isDmEnabled, validateSessionToken } from './db'
 import { registerDmHandlers } from './handlers'
+import { trackConnect, trackDisconnect } from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,11 @@ export function setupDmNamespace(io: Server): void {
 
     registerDmHandlers(nsp, socket)
 
+    // join уже выполнен, поэтому снапшот presence гарантированно дойдёт.
+    void trackConnect(nsp, socket, userId)
+
     socket.on('disconnect', () => {
+      void trackDisconnect(nsp, socket, userId)
       console.log(`[dm] Отключён ${userId} (socket ${socket.id})`)
     })
   })

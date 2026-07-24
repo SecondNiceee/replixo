@@ -71,6 +71,85 @@ export async function areFriends(a: string, b: string): Promise<boolean> {
   }
 }
 
+/** Все участники диалога (для адресации broadcast'ов). */
+export async function listMemberIds(conversationId: string): Promise<string[]> {
+  if (!dbPool) return []
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT "userId" FROM "dm_conversation_member" WHERE "conversationId" = $1`,
+      [conversationId],
+    )
+    return rows.map((r) => r.userId as string)
+  } catch (e) {
+    console.error('[dm] listMemberIds failed:', (e as Error).message)
+    return []
+  }
+}
+
+/** Участник ли пользователь диалога. Дешёвая проверка для частых событий. */
+export async function isMember(conversationId: string, userId: string): Promise<boolean> {
+  if (!dbPool) return false
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT 1 FROM "dm_conversation_member"
+       WHERE "conversationId" = $1 AND "userId" = $2 LIMIT 1`,
+      [conversationId, userId],
+    )
+    return rows.length > 0
+  } catch (e) {
+    console.error('[dm] isMember failed:', (e as Error).message)
+    return false
+  }
+}
+
+/** Id всех принятых друзей — адресаты событий presence. */
+export async function listFriendIds(userId: string): Promise<string[]> {
+  if (!dbPool) return []
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT CASE WHEN "requesterId" = $1 THEN "addresseeId" ELSE "requesterId" END AS "friendId"
+       FROM "friendship"
+       WHERE "status" = 'accepted' AND ("requesterId" = $1 OR "addresseeId" = $1)`,
+      [userId],
+    )
+    return rows.map((r) => r.friendId as string)
+  } catch (e) {
+    console.error('[dm] listFriendIds failed:', (e as Error).message)
+    return []
+  }
+}
+
+/**
+ * Отметить диалог прочитанным до момента ts: сдвинуть маркер и обнулить
+ * счётчик непрочитанных. GREATEST не даёт маркеру уехать назад, если события
+ * от разных устройств пришли не по порядку.
+ *
+ * null — пользователь не участник диалога (или ошибка БД).
+ */
+export async function markRead(
+  conversationId: string,
+  userId: string,
+  ts: number,
+): Promise<{ memberIds: string[]; ts: number } | null> {
+  if (!dbPool) return null
+  try {
+    const { rows } = await dbPool.query(
+      `UPDATE "dm_conversation_member"
+       SET "lastReadAt" = GREATEST("lastReadAt", to_timestamp($3 / 1000.0)),
+           "unreadCount" = 0
+       WHERE "conversationId" = $1 AND "userId" = $2
+       RETURNING (EXTRACT(EPOCH FROM "lastReadAt") * 1000)::bigint AS "ts"`,
+      [conversationId, userId, ts],
+    )
+    if (rows.length === 0) return null
+    const memberIds = await listMemberIds(conversationId)
+    return { memberIds, ts: Number(rows[0].ts) }
+  } catch (e) {
+    console.error('[dm] markRead failed:', (e as Error).message)
+    return null
+  }
+}
+
 /**
  * Записать сообщение в одной транзакции:
  *   membership → INSERT сообщения → указатель последнего сообщения →

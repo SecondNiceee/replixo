@@ -6,12 +6,14 @@ import { Button } from '@/components/ui/button'
 
 interface DmComposerProps {
   onSend: (text: string) => void
+  /** Вызывается при наборе текста; троттлинг событий — внутри useTyping. */
+  onTyping: () => void
   disabled: boolean
 }
 
 const MAX_LENGTH = 4000
 
-export function DmComposer({ onSend, disabled }: DmComposerProps) {
+export function DmComposer({ onSend, onTyping, disabled }: DmComposerProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -50,6 +52,7 @@ export function DmComposer({ onSend, disabled }: DmComposerProps) {
         value={text}
         onChange={(e) => {
           setText(e.target.value)
+          if (e.target.value.trim()) onTyping()
           const el = e.target
           el.style.height = 'auto'
           el.style.height = `${Math.min(el.scrollHeight, 140)}px`

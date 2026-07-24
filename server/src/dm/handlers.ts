@@ -1,6 +1,6 @@
 import type { Namespace, Socket } from 'socket.io'
 import { createRateLimiter } from '../socket/helpers'
-import { areFriends, insertMessage } from './db'
+import { areFriends, insertMessage, isMember, listMemberIds, markRead } from './db'
 import { userRoom, otherUserIdFrom, type DmSocketData } from './namespace-types'
 
 // ---------------------------------------------------------------------------
@@ -19,10 +19,27 @@ function respond(cb: unknown, payload: Parameters<Ack>[0]): void {
   if (typeof cb === 'function') (cb as Ack)(payload)
 }
 
+function isConversationId(value: unknown): value is string {
+  return typeof value === 'string' && !!value && value.length <= MAX_CONVERSATION_ID_LENGTH
+}
+
 export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
   const data = socket.data as DmSocketData
   // Скользящее окно: 10 сообщений за 2 секунды на соединение.
   const allowSend = createRateLimiter(10, 2000)
+  // Служебные события (read/typing) летят чаще, но и стоят дешевле.
+  const allowMeta = createRateLimiter(40, 2000)
+
+  // Membership меняется только в сторону «стал участником», поэтому
+  // положительный ответ можно кэшировать на время жизни соединения и не
+  // ходить в БД на каждое нажатие клавиши.
+  const confirmedMembership = new Set<string>()
+  const ensureMember = async (conversationId: string, userId: string): Promise<boolean> => {
+    if (confirmedMembership.has(conversationId)) return true
+    const ok = await isMember(conversationId, userId)
+    if (ok) confirmedMembership.add(conversationId)
+    return ok
+  }
 
   socket.on('dm:send', async (payload: unknown, cb?: unknown) => {
     const senderId = data.userId
@@ -102,6 +119,47 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     // так вторая вкладка тоже увидит сообщение; дубли гасит дедуп по id).
     for (const memberId of stored.memberIds) {
       nsp.to(userRoom(memberId)).emit('dm:message', { conversationId, message })
+    }
+  })
+
+  // --- Прочитано --------------------------------------------------------
+  // Рассылаем ВСЕМ участникам, включая самого читателя: его другие устройства
+  // должны погасить счётчик непрочитанных синхронно.
+  socket.on('dm:read', async (payload: unknown) => {
+    const userId = data.userId
+    if (!userId || !allowMeta()) return
+
+    const { conversationId, ts } = (payload ?? {}) as Record<string, unknown>
+    if (!isConversationId(conversationId)) return
+
+    // Метку времени берём из payload, но не даём уехать в будущее: иначе
+    // клиент мог бы «прочитать» сообщения, которых ещё нет.
+    const now = Date.now()
+    const at = typeof ts === 'number' && Number.isFinite(ts) ? Math.min(ts, now) : now
+
+    const res = await markRead(conversationId, userId, at)
+    if (!res) return // не участник — молча игнорируем
+
+    for (const memberId of res.memberIds) {
+      nsp.to(userRoom(memberId)).emit('dm:read', { conversationId, userId, ts: res.ts })
+    }
+  })
+
+  // --- «Печатает…» ------------------------------------------------------
+  // Событие эфемерное: в БД не пишется, автосброс — на стороне клиента.
+  socket.on('dm:typing', async (payload: unknown) => {
+    const userId = data.userId
+    if (!userId || !allowMeta()) return
+
+    const { conversationId, typing } = (payload ?? {}) as Record<string, unknown>
+    if (!isConversationId(conversationId) || typeof typing !== 'boolean') return
+
+    if (!(await ensureMember(conversationId, userId))) return
+
+    // Себе не отправляем: индикатор нужен только собеседнику.
+    for (const memberId of await listMemberIds(conversationId)) {
+      if (memberId === userId) continue
+      nsp.to(userRoom(memberId)).emit('dm:typing', { conversationId, userId, typing })
     }
   })
 }

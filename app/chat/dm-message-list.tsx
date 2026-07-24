@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Clock, RotateCcw } from 'lucide-react'
+import { Check, CheckCheck, Clock, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatTime } from '@/app/room/[roomId]/chat-helpers'
 import type { DmMessage } from './types'
@@ -8,6 +8,8 @@ import type { DmMessage } from './types'
 interface DmMessageListProps {
   messages: DmMessage[]
   selfId: string
+  /** До какого момента собеседник прочитал диалог (мс). */
+  peerReadAt: number
   onRetry: (id: string) => void
 }
 
@@ -22,7 +24,12 @@ function formatDayLabel(ts: number): string {
   return date.toLocaleDateString([], { day: 'numeric', month: 'long' })
 }
 
-export function DmMessageList({ messages, selfId, onRetry }: DmMessageListProps) {
+export function DmMessageList({
+  messages,
+  selfId,
+  peerReadAt,
+  onRetry,
+}: DmMessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-center">
@@ -74,9 +81,16 @@ export function DmMessageList({ messages, selfId, onRetry }: DmMessageListProps)
                 {self && m.status === 'sending' && (
                   <Clock className="size-3 text-muted-foreground/70" aria-label="Отправляется" />
                 )}
-                {self && m.status !== 'sending' && m.status !== 'failed' && (
-                  <Check className="size-3 text-muted-foreground/70" aria-label="Отправлено" />
-                )}
+                {self &&
+                  m.status !== 'sending' &&
+                  m.status !== 'failed' &&
+                  // Прочитано — не по каждому сообщению, а по маркеру времени
+                  // собеседника: одна отметка закрывает всю ленту до неё.
+                  (m.createdAt <= peerReadAt ? (
+                    <CheckCheck className="size-3 text-primary" aria-label="Прочитано" />
+                  ) : (
+                    <Check className="size-3 text-muted-foreground/70" aria-label="Отправлено" />
+                  ))}
                 {self && m.status === 'failed' && (
                   <button
                     type="button"
