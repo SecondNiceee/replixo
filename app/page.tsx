@@ -5,11 +5,13 @@ import { QualityBanner } from "@/components/quality-banner"
 
 export default function Page() {
   return (
-    <main className="relative min-h-screen bg-background">
-      <SiteHeader />
-      <Hero />
-      <Features />
-      <QualityBanner />
+    <main className="home-pattern relative min-h-screen overflow-hidden bg-background">
+      <div className="relative z-10">
+        <SiteHeader />
+        <Hero />
+        <Features />
+        <QualityBanner />
+      </div>
     </main>
   )
 }

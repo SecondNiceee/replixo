@@ -1,7 +1,6 @@
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
-import { SiteHeader } from '@/components/site-header'
 import { ProfileClient } from './profile-client'
 
 export default async function ProfilePage() {
@@ -12,11 +11,8 @@ export default async function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <SiteHeader />
-      <main className="mx-auto max-w-5xl px-6 pt-28 pb-16">
-        <ProfileClient user={session.user} />
-      </main>
-    </div>
+    <main className="mx-auto min-h-screen max-w-5xl bg-background px-6 py-16">
+      <ProfileClient user={session.user} />
+    </main>
   )
 }

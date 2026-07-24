@@ -141,6 +141,34 @@ html[data-overlay='1'] .desktop-titlebar {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+@layer components {
+  .home-pattern::before {
+    position: absolute;
+    inset: 0;
+    content: '';
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.45;
+  }
+
+  .home-pattern::after {
+    position: absolute;
+    inset: 0;
+    content: '';
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      var(--background) 0%,
+      transparent 18%,
+      transparent 68%,
+      var(--background) 100%
+    );
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
