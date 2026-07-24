@@ -25,6 +25,13 @@ import {
   ensureRoomDir,
   sweepOrphanUploads,
 } from './uploads'
+import { isDmEnabled, isMember, validateSessionToken } from './dm/db'
+import {
+  allowDmUpload,
+  dmUrlPrefix,
+  ensureDmConversationDir,
+  isValidConversationId,
+} from './dm/uploads'
 
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
@@ -127,6 +134,106 @@ async function main(): Promise<void> {
   )
 
   // ---------------------------------------------------------------------------
+  // Вложения личных чатов: POST /dm/:conversationId/upload
+  //
+  // В отличие от /rooms/:roomId/upload здесь авторизация ОБЯЗАТЕЛЬНА: комната —
+  // это одноразовый код, который знают только участники звонка, а диалог живёт
+  // постоянно и его id вычислим из пары userId. Проверяем в таком порядке:
+  //   формат id → сессия → membership → rate limit → и только затем пишем файл.
+  // Порядок важен: multer начинает писать на диск сразу, поэтому все отказы
+  // должны случиться до него, иначе неавторизованный запрос уже занял место.
+  // ---------------------------------------------------------------------------
+  const dmStorage = multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const conversationId = req.params.conversationId
+      if (!isValidConversationId(conversationId)) {
+        cb(new Error('invalid conversationId'), '')
+        return
+      }
+      try {
+        cb(null, ensureDmConversationDir(conversationId))
+      } catch (e) {
+        cb(e as Error, '')
+      }
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).slice(0, 16)
+      cb(null, `${randomUUID()}${ext}`)
+    },
+  })
+
+  const dmUpload = multer({
+    storage: dmStorage,
+    limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+  })
+
+  app.post('/dm/:conversationId/upload', (req: Request, res: Response) => {
+    void (async () => {
+      const conversationId = req.params.conversationId
+      if (!isValidConversationId(conversationId)) {
+        res.status(400).json({ error: 'invalid conversationId' })
+        return
+      }
+      if (!isDmEnabled()) {
+        res.status(503).json({ error: 'Чат недоступен' })
+        return
+      }
+
+      // Токен сессии передаёт Next-прокси (/api/chat/upload): браузер не имеет
+      // доступа к httpOnly-cookie, а кросс-доменный cookie сюда не долетит.
+      const header = req.header('authorization') ?? ''
+      const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+      if (!token) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      const identity = await validateSessionToken(token)
+      if (!identity) {
+        res.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      if (!(await isMember(conversationId, identity.userId))) {
+        res.status(403).json({ error: 'Нет доступа к диалогу' })
+        return
+      }
+
+      if (!allowDmUpload(identity.userId)) {
+        res.status(429).json({ error: 'Слишком много файлов, попробуйте позже' })
+        return
+      }
+
+      dmUpload.single('file')(req, res, (uploadErr: unknown) => {
+        if (uploadErr) {
+          const message = (uploadErr as Error).message ?? 'upload failed'
+          const tooLarge = message.includes('File too large')
+          res.status(tooLarge ? 413 : 400).json({
+            error: tooLarge ? 'Файл слишком большой' : message,
+          })
+          return
+        }
+        const file = req.file
+        if (!file) {
+          res.status(400).json({ error: 'no file' })
+          return
+        }
+        // Именно этот префикс потом проверяет dm:send — ссылка привязана к
+        // диалогу, так что подставить чужую не получится.
+        res.json({
+          url: `${dmUrlPrefix(conversationId)}${file.filename}`,
+          name: file.originalname.slice(0, 255),
+          size: file.size,
+          mime: file.mimetype || 'application/octet-stream',
+        })
+      })
+    })().catch((e: unknown) => {
+      console.error('[dm] upload failed:', (e as Error).message)
+      if (!res.headersSent) res.status(500).json({ error: 'upload failed' })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // Скачивание установщика приложения (Windows .exe, ~900 МБ).
   //
   // Файл лежит на диске VPS (WINDOWS_INSTALLER_PATH) и НЕ хранится в git.
@@ -181,7 +288,7 @@ async function main(): Promise<void> {
   // rejoinProbe/joinRoom. Реальное закрытие вкладки/браузера — никто не
   // вернётся, и остальные увидят выход почти сразу (а не через полное
   // grace-окно, как при обычном обрыве сети). sendBeacon шлёт POST; мы читаем
-  // peerId из query, тела нет — парсер не нужен.
+  // peerId из query, те��а нет — парсер не нужен.
   // ---------------------------------------------------------------------------
   app.post('/rooms/:roomId/leave', (req: Request, res: Response) => {
     const roomId = canonicalRoomCode(req.params.roomId)

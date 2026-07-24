@@ -1,7 +1,8 @@
 import type { Namespace, Socket } from 'socket.io'
 import { createRateLimiter } from '../socket/helpers'
-import { areFriends, insertMessage, isMember, listMemberIds, markRead } from './db'
+import { areFriends, insertMessage, isMember, listMemberIds, markRead, type DmAttachment } from './db'
 import { userRoom, otherUserIdFrom, type DmSocketData } from './namespace-types'
+import { isDmAttachmentUrl } from './uploads'
 
 // ---------------------------------------------------------------------------
 // События личного чата. Авторство берётся ТОЛЬКО из socket.data.userId,
@@ -19,8 +20,42 @@ function respond(cb: unknown, payload: Parameters<Ack>[0]): void {
   if (typeof cb === 'function') (cb as Ack)(payload)
 }
 
+const MAX_NAME_LENGTH = 255
+const MAX_MIME_LENGTH = 128
+
 function isConversationId(value: unknown): value is string {
   return typeof value === 'string' && !!value && value.length <= MAX_CONVERSATION_ID_LENGTH
+}
+
+/**
+ * Разбор вложения из payload.
+ *
+ * `undefined` — вложения нет (это нормально).
+ * `null`      — вложение прислали, но оно невалидное → сообщение отбрасываем.
+ *
+ * Главная проверка — url указывает строго в папку ЭТОГО диалога. Файл уже лежит
+ * на диске (его загрузил авторизованный POST /dm/:id/upload), поэтому без этой
+ * привязки клиент мог бы подставить ссылку на вложение чужой переписки.
+ */
+function parseAttachment(
+  raw: unknown,
+  conversationId: string,
+): DmAttachment | null | undefined {
+  if (raw == null) return undefined
+  if (typeof raw !== 'object') return null
+
+  const { url, name, size, mime } = raw as Record<string, unknown>
+  if (typeof url !== 'string' || !isDmAttachmentUrl(url, conversationId)) return null
+  if (typeof name !== 'string' || !name) return null
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return null
+  if (typeof mime !== 'string' || !mime) return null
+
+  return {
+    url,
+    name: name.slice(0, MAX_NAME_LENGTH),
+    size,
+    mime: mime.slice(0, MAX_MIME_LENGTH),
+  }
 }
 
 export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
@@ -53,7 +88,7 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       respond(cb, { ok: false, error: 'bad_payload' })
       return
     }
-    const { conversationId, id, text } = payload as Record<string, unknown>
+    const { conversationId, id, text, attachment } = payload as Record<string, unknown>
 
     if (
       typeof conversationId !== 'string' ||
@@ -72,8 +107,16 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       return
     }
 
+    const safeAttachment = parseAttachment(attachment, conversationId)
+    if (safeAttachment === null) {
+      respond(cb, { ok: false, error: 'bad_attachment' })
+      return
+    }
+
     const trimmed = text.trim().slice(0, MAX_TEXT_LENGTH)
-    if (!trimmed) {
+    // Сообщение должно нести хоть что-то: текст или вложение. Файл без подписи
+    // — обычный случай, поэтому пустой текст сам по себе не ошибка.
+    if (!trimmed && !safeAttachment) {
       respond(cb, { ok: false, error: 'empty' })
       return
     }
@@ -95,7 +138,13 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     }
 
     // Membership проверяется внутри транзакции: null = не участник.
-    const stored = await insertMessage({ id, conversationId, senderId, text: trimmed })
+    const stored = await insertMessage({
+      id,
+      conversationId,
+      senderId,
+      text: trimmed,
+      attachment: safeAttachment ?? null,
+    })
     if (!stored) {
       respond(cb, { ok: false, error: 'not_member' })
       return
@@ -111,7 +160,7 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       senderId,
       senderName: data.name ?? '',
       text: trimmed,
-      attachment: null,
+      attachment: safeAttachment ?? null,
       createdAt: stored.createdAt,
     }
 
