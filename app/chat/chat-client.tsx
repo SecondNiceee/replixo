@@ -1,10 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { ArrowLeft, MessageSquare } from 'lucide-react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { useDmPresence } from '@/hooks/dm/use-dm-presence'
+import { playIncomingMessage } from '@/lib/sounds'
 import type { Friend } from '@/app/profile/types'
 import { ConversationList } from './conversation-list'
 import { ConversationView } from './conversation-view'
@@ -15,6 +17,11 @@ const CONVERSATIONS_KEY = '/api/chat/conversations'
 export function ChatClient({ selfId }: { selfId: string }) {
   const { socket, connected, unavailable } = useDmSocket()
   const searchParams = useSearchParams()
+
+  // Единственный на приложение подписчик на эфемерные события: presence,
+  // «печатает…», прочтение собеседника. Без него точки «в сети», индикатор
+  // набора и вторые галочки не работают.
+  useDmPresence(socket, selfId)
 
   const { data, mutate, isLoading } = useSWR<{ conversations: DmConversation[] }>(
     CONVERSATIONS_KEY,
@@ -54,22 +61,60 @@ export function ChatClient({ selfId }: { selfId: string }) {
   }, [searchParams])
 
   // Любое новое сообщение меняет порядок диалогов и счётчики — перечитываем
-  // список. Если сообщение пришло в открытый диалог, сразу гасим непрочитанное.
+  // список. Открытый диалог гасим сразу, но только при видимой вкладке:
+  // «прочитано» в фоне было бы нечестным (та же логика, что в useDmRead).
   useEffect(() => {
     if (!socket) return
+
     const onMessage = (payload: unknown) => {
-      const { conversationId } = (payload ?? {}) as { conversationId?: string }
-      if (conversationId && conversationId === activeId) {
+      const { conversationId, message } = (payload ?? {}) as {
+        conversationId?: string
+        message?: { senderId?: string }
+      }
+      const visible = document.visibilityState === 'visible'
+      const isForeign = message?.senderId !== undefined && message.senderId !== selfId
+
+      // Звук — только на чужие сообщения и только когда пользователь их не
+      // видит: в открытом активном диалоге он и так следит за лентой.
+      if (isForeign && (!visible || conversationId !== activeId)) {
+        playIncomingMessage()
+      }
+
+      if (conversationId && conversationId === activeId && visible) {
         void markRead(conversationId)
         return
       }
       void mutate()
     }
+
+    // Прочтение с другого устройства обнуляет счётчик в БД — список должен
+    // это увидеть (сценарий «два устройства одного пользователя»).
+    const onRead = (payload: unknown) => {
+      const { userId } = (payload ?? {}) as { userId?: string }
+      if (userId === selfId) void mutate()
+    }
+
     socket.on('dm:message', onMessage)
+    socket.on('dm:read', onRead)
     return () => {
       socket.off('dm:message', onMessage)
+      socket.off('dm:read', onRead)
     }
-  }, [socket, mutate, activeId, markRead])
+  }, [socket, mutate, activeId, markRead, selfId])
+
+  // Непрочитанные в заголовке вкладки: «(3) Replixo».
+  const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
+  const baseTitle = useRef('')
+  useEffect(() => {
+    if (!baseTitle.current) {
+      baseTitle.current = document.title.replace(/^\(\d+\)\s*/, '')
+    }
+    const base = baseTitle.current
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base
+    return () => {
+      document.title = base
+    }
+  }, [totalUnread])
 
   // Начать (или открыть существующий) диалог с другом.
   const startWithFriend = useCallback(
@@ -100,6 +145,14 @@ export function ChatClient({ selfId }: { selfId: string }) {
         <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">
           <MessageSquare className="size-5 text-muted-foreground" />
           Сообщения
+          {totalUnread > 0 && (
+            <span
+              className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground"
+              aria-label={`${totalUnread} непрочитанных сообщений`}
+            >
+              {totalUnread > 99 ? '99+' : totalUnread}
+            </span>
+          )}
         </h1>
         {unavailable ? (
           <span className="ml-auto text-xs text-destructive">Чат недоступен</span>
@@ -135,6 +188,7 @@ export function ChatClient({ selfId }: { selfId: string }) {
             socket={socket}
             connected={connected}
             onBack={() => setActiveId(null)}
+            onReadFallback={markRead}
           />
         </div>
       </div>
