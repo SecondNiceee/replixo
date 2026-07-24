@@ -75,6 +75,68 @@ export const friendship = pgTable(
   (t) => [unique().on(t.requesterId, t.addresseeId)],
 )
 
+// --- Личные чаты (ЛС между друзьями) ---------------------------------------
+// В отличие от чата комнаты (эфемерный, идентичность — peerId), здесь
+// идентичность — зарегистрированный user.id, а история постоянна.
+// Префикс dm_ в именах таблиц, чтобы не путать с `message` / `message_read`.
+
+// Диалог. type заложен на будущее: 'direct' (1:1) | 'group'.
+// Для 'direct' id детерминированный: `direct:<minUserId>:<maxUserId>` —
+// это гарантирует уникальность пары без отдельного unique-индекса.
+export const conversation = pgTable('dm_conversation', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull().default('direct'),
+  // Денормализованный указатель на последнее сообщение: список диалогов
+  // строится одним запросом без коррелированных подзапросов.
+  lastMessageId: text('lastMessageId'),
+  lastMessageAt: timestamp('lastMessageAt'),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+})
+
+// Участник диалога + его личное состояние прочитанности.
+export const conversationMember = pgTable(
+  'dm_conversation_member',
+  {
+    conversationId: text('conversationId')
+      .notNull()
+      .references(() => conversation.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // До какого момента пользователь прочитал диалог.
+    lastReadAt: timestamp('lastReadAt').notNull().defaultNow(),
+    // Кэш непрочитанных: инкремент при доставке, сброс при отметке прочтения.
+    unreadCount: integer('unreadCount').notNull().default(0),
+    joinedAt: timestamp('joinedAt').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.conversationId, t.userId] }),
+    index('dm_member_userId_idx').on(t.userId),
+  ],
+)
+
+export const directMessage = pgTable(
+  'dm_message',
+  {
+    // id генерирует отправитель — оптимистичная копия и запись в БД
+    // разделяют один id, поэтому повторная отправка идемпотентна.
+    id: text('id').primaryKey(),
+    conversationId: text('conversationId')
+      .notNull()
+      .references(() => conversation.id, { onDelete: 'cascade' }),
+    senderId: text('senderId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    text: text('text').notNull().default(''),
+    // Вложение: { url, name, size, mime } | null (заполняется на шаге вложений).
+    attachment: jsonb('attachment'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    editedAt: timestamp('editedAt'),
+    deletedAt: timestamp('deletedAt'),
+  },
+  (t) => [index('dm_message_conv_createdAt_idx').on(t.conversationId, t.createdAt)],
+)
+
 // --- Room chat -------------------------------------------------------------
 // Эфемерный чат конференции. Сообщения пишутся mediasoup-сервером и
 // удаляются целиком, когда комната уничтожается (становится пустой).
