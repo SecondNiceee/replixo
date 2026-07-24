@@ -142,6 +142,65 @@ html[data-overlay='1'] .desktop-titlebar {
 }
 
 @layer components {
+  /* --- Hero: светлая многослойная подложка --- */
+  .hero-surface {
+    background:
+      /* верхнее мягкое свечение */
+      radial-gradient(
+        120% 80% at 50% -10%,
+        oklch(0.42 0.045 265) 0%,
+        oklch(0.32 0.038 265) 40%,
+        transparent 75%
+      ),
+      /* боковые подсветки */
+      radial-gradient(65% 60% at 6% 18%, oklch(0.34 0.04 265) 0%, transparent 72%),
+      radial-gradient(65% 60% at 94% 22%, oklch(0.33 0.038 265) 0%, transparent 72%),
+      /* базовый вертикальный градиент к фону страницы */
+      linear-gradient(
+        to bottom,
+        oklch(0.28 0.03 265) 0%,
+        oklch(0.235 0.028 265) 50%,
+        oklch(0.17 0.024 265) 82%,
+        var(--background) 100%
+      );
+  }
+
+  /* Узор: тонкая сетка + диагональные штрихи, затухающие к краям */
+  .hero-grid {
+    background-image:
+      linear-gradient(to right, oklch(1 0 0 / 6%) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 6%) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(80% 65% at 50% 32%, black 0%, transparent 100%);
+    mask-image: radial-gradient(80% 65% at 50% 32%, black 0%, transparent 100%);
+  }
+
+  .hero-dots {
+    background-image: radial-gradient(oklch(1 0 0 / 14%) 1px, transparent 1.2px);
+    background-size: 16px 16px;
+    -webkit-mask-image: radial-gradient(55% 45% at 50% 40%, black 0%, transparent 100%);
+    mask-image: radial-gradient(55% 45% at 50% 40%, black 0%, transparent 100%);
+  }
+
+  .hero-stripes {
+    background-image: repeating-linear-gradient(
+      135deg,
+      oklch(1 0 0 / 4%) 0px,
+      oklch(1 0 0 / 4%) 1px,
+      transparent 1px,
+      transparent 12px
+    );
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 55%);
+    mask-image: linear-gradient(to bottom, black 0%, transparent 55%);
+  }
+
+  /* Виньетка по краям, чтобы центр читался чище */
+  .hero-vignette {
+    background:
+      radial-gradient(85% 70% at 50% 36%, transparent 55%, oklch(0.14 0.02 265 / 32%) 100%),
+      linear-gradient(to bottom, transparent 68%, var(--background) 100%);
+  }
+
   .home-pattern::before {
     position: absolute;
     inset: 0;
