@@ -13,7 +13,7 @@
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
-import { UPLOAD_DIR, UPLOAD_TTL_MS } from './config'
+import { DM_UPLOAD_SUBDIR, UPLOAD_DIR, UPLOAD_TTL_MS } from './config'
 
 // roomId приходит из URL — строго ограничиваем символы, чтобы исключить выход
 // за пределы UPLOAD_DIR (path traversal вроде "../../etc").
@@ -59,6 +59,10 @@ export async function deleteRoomUploads(roomId: string): Promise<void> {
  * Защита от утечки места на диске, если штатная очистка не отработала
  * (например, сервер был убит во время звонка). Активные комнаты не трогаются —
  * у них свежие файлы, mtime обновляется при каждой загрузке.
+ *
+ * ВАЖНО: папка личных чатов (<UPLOAD_DIR>/dm) исключена. Её файлы привязаны к
+ * постоянной истории сообщений, и TTL удалил бы вложения из переписки, которую
+ * просто давно не открывали.
  */
 export async function sweepOrphanUploads(): Promise<void> {
   let entries: fs.Dirent[]
@@ -70,6 +74,8 @@ export async function sweepOrphanUploads(): Promise<void> {
   const now = Date.now()
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
+    // Вложения ЛС живут вместе с историей сообщений — никогда не подчищаем.
+    if (entry.name === DM_UPLOAD_SUBDIR) continue
     const dir = path.join(UPLOAD_DIR, entry.name)
     try {
       const stat = await fsp.stat(dir)

@@ -16,6 +16,14 @@ export interface DmIdentity {
   username: string | null
 }
 
+/** Вложение сообщения. Хранится в dm_message.attachment (jsonb). */
+export interface DmAttachment {
+  url: string
+  name: string
+  size: number
+  mime: string
+}
+
 export interface InsertedMessage {
   createdAt: number // мс
   memberIds: string[]
@@ -164,6 +172,7 @@ export async function insertMessage(msg: {
   conversationId: string
   senderId: string
   text: string
+  attachment?: DmAttachment | null
 }): Promise<InsertedMessage | null> {
   if (!dbPool) return null
   const client = await dbPool.connect()
@@ -180,12 +189,20 @@ export async function insertMessage(msg: {
       return null
     }
 
+    // attachment — jsonb: node-postgres сам сериализует объект, но null нужно
+    // передать именно как null, а не как строку "null".
     const inserted = await client.query(
-      `INSERT INTO "dm_message" ("id", "conversationId", "senderId", "text", "createdAt")
-       VALUES ($1, $2, $3, $4, now())
+      `INSERT INTO "dm_message" ("id", "conversationId", "senderId", "text", "attachment", "createdAt")
+       VALUES ($1, $2, $3, $4, $5::jsonb, now())
        ON CONFLICT ("id") DO NOTHING
        RETURNING (EXTRACT(EPOCH FROM "createdAt") * 1000)::bigint AS "ts"`,
-      [msg.id, msg.conversationId, msg.senderId, msg.text],
+      [
+        msg.id,
+        msg.conversationId,
+        msg.senderId,
+        msg.text,
+        msg.attachment ? JSON.stringify(msg.attachment) : null,
+      ],
     )
 
     if (inserted.rows.length === 0) {
