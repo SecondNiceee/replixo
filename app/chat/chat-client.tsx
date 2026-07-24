@@ -35,8 +35,49 @@ export function ChatClient({ selfId }: { selfId: string }) {
   const [activeId, setActiveId] = useState<string | null>(null)
   const active = conversations.find((c) => c.id === activeId) ?? null
 
-  // Отметить диалог прочитанным и обновить счётчики в списке.
-  const markRead = useCallback(
+  // Локально погасить счётчик, ничего не записывая на сервер. Нужно, чтобы
+  // бейдж и заголовок вкладки реагировали мгновенно: авторитетную запись
+  // делает useDmRead через сокет (и только когда это честно — вкладка видима
+  // и лента доскроллена вниз), а это занимает как минимум дебаунс.
+  const zeroUnreadLocally = useCallback(
+    (conversationId: string) => {
+      void mutate(
+        (current) =>
+          current
+            ? {
+                conversations: current.conversations.map((c) =>
+                  c.id === conversationId ? { ...c, unreadCount: 0 } : c,
+                ),
+              }
+            : current,
+        { revalidate: false },
+      )
+    },
+    [mutate],
+  )
+
+  // Перечитать список, но сохранить нулевой счётчик активного диалога: в БД он
+  // ещё не обнулён (сокетная отметка в пути), и без этого бейдж мигал бы.
+  const refreshKeepingRead = useCallback(
+    (conversationId: string) => {
+      void mutate(async () => {
+        const fresh = (await chatFetcher(CONVERSATIONS_KEY)) as {
+          conversations: DmConversation[]
+        }
+        return {
+          conversations: fresh.conversations.map((c) =>
+            c.id === conversationId ? { ...c, unreadCount: 0 } : c,
+          ),
+        }
+      }, { revalidate: false })
+    },
+    [mutate],
+  )
+
+  // Аварийная отметка прочтения по HTTP — только когда сокета нет. Этот роут
+  // не рассылает dm:read, поэтому вторые галочки у собеседника появятся лишь
+  // после его перезагрузки. Основной путь — сокет (см. useDmRead).
+  const markReadFallback = useCallback(
     async (conversationId: string) => {
       await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}/read`, {
         method: 'POST',
@@ -49,9 +90,9 @@ export function ChatClient({ selfId }: { selfId: string }) {
   const openConversation = useCallback(
     (conversationId: string) => {
       setActiveId(conversationId)
-      void markRead(conversationId)
+      zeroUnreadLocally(conversationId)
     },
-    [markRead],
+    [zeroUnreadLocally],
   )
 
   // Глубокая ссылка ?c=<id> (кнопка «Написать» из профиля).
@@ -61,8 +102,9 @@ export function ChatClient({ selfId }: { selfId: string }) {
   }, [searchParams])
 
   // Любое новое сообщение меняет порядок диалогов и счётчики — перечитываем
-  // список. Открытый диалог гасим сразу, но только при видимой вкладке:
-  // «прочитано» в фоне было бы нечестным (та же логика, что в useDmRead).
+  // список. Отметку «прочитано» здесь НЕ ставим: этим занимается useDmRead
+  // через сокет, только он даёт собеседнику вторые галочки и только он знает,
+  // доскроллен ли пользователь до низа ленты.
   useEffect(() => {
     if (!socket) return
 
@@ -81,7 +123,9 @@ export function ChatClient({ selfId }: { selfId: string }) {
       }
 
       if (conversationId && conversationId === activeId && visible) {
-        void markRead(conversationId)
+        // Диалог открыт и на виду — обновляем превью, но бейдж держим на нуле
+        // до подтверждения сокетом.
+        refreshKeepingRead(conversationId)
         return
       }
       void mutate()
@@ -100,7 +144,15 @@ export function ChatClient({ selfId }: { selfId: string }) {
       socket.off('dm:message', onMessage)
       socket.off('dm:read', onRead)
     }
-  }, [socket, mutate, activeId, markRead, selfId])
+  }, [socket, mutate, activeId, refreshKeepingRead, selfId])
+
+  // Стор эфемерного состояния очищается при разрыве соединения (useDmPresence
+  // делает reset), поэтому живой peerReadAt теряется. После реконнекта
+  // перечитываем список — в нём есть peerLastReadAt из БД, и галочки
+  // восстанавливаются, а не откатываются к одной.
+  useEffect(() => {
+    if (connected) void mutate()
+  }, [connected, mutate])
 
   // Непрочитанные в заголовке вкладки: «(3) Replixo».
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
@@ -188,7 +240,7 @@ export function ChatClient({ selfId }: { selfId: string }) {
             socket={socket}
             connected={connected}
             onBack={() => setActiveId(null)}
-            onReadFallback={markRead}
+            onReadFallback={markReadFallback}
           />
         </div>
       </div>
