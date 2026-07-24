@@ -56,8 +56,13 @@ export function useDmSocket(): DmSocketState {
         created.on('disconnect', () => setConnected(false))
         created.on('connect_error', (e) => {
           setConnected(false)
-          // 'unauthorized' — сессия истекла: переподключение не поможет.
-          if (e.message === 'unauthorized') setUnavailable(true)
+          // Оба случая безнадёжны, реконнект не поможет:
+          //   'unauthorized'      — сессия истекла;
+          //   'Invalid namespace' — сервер поднят без DATABASE_URL, /dm нет.
+          if (e.message === 'unauthorized' || e.message === 'Invalid namespace') {
+            setUnavailable(true)
+            created?.disconnect()
+          }
         })
 
         if (cancelled) {

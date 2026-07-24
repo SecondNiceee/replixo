@@ -1,6 +1,6 @@
 import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq, ne, or } from 'drizzle-orm'
+import { and, eq, ne, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
@@ -43,7 +43,9 @@ export async function GET() {
     .innerJoin(user, eq(user.id, peer.userId))
     .leftJoin(directMessage, eq(directMessage.id, conversation.lastMessageId))
     .where(eq(conversationMember.userId, userId))
-    .orderBy(desc(conversation.lastMessageAt))
+    // NULLS LAST обязателен: в Postgres DESC ставит NULL первыми, из-за чего
+    // только что созданные диалоги без сообщений висели бы выше активных.
+    .orderBy(sql`${conversation.lastMessageAt} DESC NULLS LAST`)
 
   return NextResponse.json({ conversations: rows })
 }
