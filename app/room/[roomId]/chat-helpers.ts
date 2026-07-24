@@ -1,4 +1,6 @@
-import type { ChatAttachment } from "@/hooks/use-mediasoup"
+// Форматирование, общее с личным чатом, живёт в @/lib/chat-format
+// (formatTime, formatFileSize, isImageAttachment). Здесь — только специфика
+// комнаты: цвета имён по peerId и «прочитано всеми участниками».
 
 // Stable per-name color so each participant's name reads consistently.
 export const NAME_COLORS = [
@@ -16,20 +18,6 @@ export function colorForPeer(peerId: string): string {
     hash = (hash * 31 + peerId.charCodeAt(i)) >>> 0
   }
   return NAME_COLORS[hash % NAME_COLORS.length]
-}
-
-export function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-}
-
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} КБ`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
-}
-
-export function isImageAttachment(a: ChatAttachment): boolean {
-  return a.mime.startsWith("image/")
 }
 
 // A message is "read" once every currently-connected peer has a read marker at

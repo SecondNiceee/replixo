@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
 import {
   normalizeMessage,
+  type DmAttachment,
   type DmMessage,
   type RawDmMessage,
 } from '@/app/chat/types'
@@ -115,7 +116,7 @@ export function useConversationMessages(
 
   // --- Отправка -----------------------------------------------------------
   const emit = useCallback(
-    (id: string, cid: string, text: string) => {
+    (id: string, cid: string, text: string, attachment: DmAttachment | null) => {
       if (!socket) {
         setMessages((prev) =>
           prev.map((m) => (m.id === id ? { ...m, status: 'failed' } : m)),
@@ -125,42 +126,49 @@ export function useConversationMessages(
 
       socket
         .timeout(ACK_TIMEOUT_MS)
-        .emit('dm:send', { conversationId: cid, id, text }, (err: unknown, res: unknown) => {
-          if (activeIdRef.current !== cid) return
-          const ok = !err && (res as { ok?: boolean } | undefined)?.ok === true
-          const createdAt = (res as { createdAt?: number } | undefined)?.createdAt
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === id
-                ? {
-                    ...m,
-                    status: ok ? 'sent' : 'failed',
-                    createdAt: ok && createdAt ? createdAt : m.createdAt,
-                  }
-                : m,
-            ),
-          )
-        })
+        .emit(
+          'dm:send',
+          { conversationId: cid, id, text, attachment },
+          (err: unknown, res: unknown) => {
+            if (activeIdRef.current !== cid) return
+            const ok = !err && (res as { ok?: boolean } | undefined)?.ok === true
+            const createdAt = (res as { createdAt?: number } | undefined)?.createdAt
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      status: ok ? 'sent' : 'failed',
+                      createdAt: ok && createdAt ? createdAt : m.createdAt,
+                    }
+                  : m,
+              ),
+            )
+          },
+        )
     },
     [socket],
   )
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, attachment: DmAttachment | null = null) => {
       const cid = conversationId
       const trimmed = text.trim().slice(0, 4000)
-      if (!cid || !trimmed) return
+      // Файл без подписи — нормальный случай, поэтому пустой текст сам по себе
+      // не блокирует отправку (та же логика, что в dm:send на сервере).
+      if (!cid || (!trimmed && !attachment)) return
 
       const id = createMessageId()
       const selfMessage: DmMessage = {
         id,
         senderId: selfId,
         text: trimmed,
+        attachment,
         createdAt: Date.now(),
         status: 'sending',
       }
       setMessages((prev) => [...prev, selfMessage])
-      emit(id, cid, trimmed)
+      emit(id, cid, trimmed, attachment)
     },
     [conversationId, emit, selfId],
   )
@@ -174,7 +182,8 @@ export function useConversationMessages(
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, status: 'sending' } : m)),
       )
-      emit(id, cid, target.text)
+      // Файл уже лежит на сервере — повторяем то же вложение, заново не грузим.
+      emit(id, cid, target.text, target.attachment)
     },
     [conversationId, messages, emit],
   )

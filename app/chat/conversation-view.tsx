@@ -11,7 +11,12 @@ import { useDmStore } from '@/stores/dm-store'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
-import { conversationTitle, formatLastSeen, type DmConversation } from './types'
+import {
+  conversationTitle,
+  formatLastSeen,
+  type DmAttachment,
+  type DmConversation,
+} from './types'
 
 interface ConversationViewProps {
   conversation: DmConversation | null
@@ -88,11 +93,11 @@ export function ConversationView({
   }, [lastMessageId, conversationId])
 
   const handleSend = useCallback(
-    (text: string) => {
+    (text: string, attachment: DmAttachment | null) => {
       // Сообщение ушло — индикатор набора у собеседника гасим сразу, не
       // дожидаясь таймаута молчания.
       stopTyping()
-      send(text)
+      send(text, attachment)
     },
     [send, stopTyping],
   )
@@ -190,7 +195,12 @@ export function ConversationView({
         {peerTyping && <TypingIndicator name={title} />}
       </div>
 
-      <DmComposer onSend={handleSend} onTyping={notifyTyping} disabled={!connected} />
+      <DmComposer
+        conversationId={conversation.id}
+        onSend={handleSend}
+        onTyping={notifyTyping}
+        disabled={!connected}
+      />
     </section>
   )
 }

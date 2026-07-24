@@ -1,8 +1,9 @@
 import { Check, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
-import { AttachmentView } from "./chat-attachment-view"
-import { colorForPeer, formatTime, isReadByEveryone } from "./chat-helpers"
+import { AttachmentView } from "@/components/chat/attachment-view"
+import { formatTime } from "@/lib/chat-format"
+import { colorForPeer, isReadByEveryone } from "./chat-helpers"
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
@@ -80,9 +81,9 @@ export function ChatMessageList({
               >
                 {m.attachment && (
                   <AttachmentView
-                    attachment={m.attachment}
-                    mediaBaseUrl={mediaBaseUrl}
-                    self={m.self}
+                  attachment={m.attachment}
+                  baseUrl={mediaBaseUrl}
+                  self={m.self}
                   />
                 )}
                 {m.text && (

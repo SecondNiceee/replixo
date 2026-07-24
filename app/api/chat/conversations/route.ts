@@ -35,6 +35,9 @@ export async function GET() {
       friendName: user.name,
       friendUsername: user.username,
       lastMessageText: directMessage.text,
+      // Нужен для превью: у сообщения-файла текст пустой, и без этого в списке
+      // висело бы «Нет сообщений».
+      lastMessageAttachment: directMessage.attachment,
       lastMessageSenderId: directMessage.senderId,
     })
     .from(conversationMember)

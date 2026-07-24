@@ -1,11 +1,16 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
-import { SendHorizonal } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { FileText, Loader2, Paperclip, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SERVER_URL } from '@/hooks/mediasoup/types'
+import { formatFileSize, isImageAttachment } from '@/lib/chat-format'
+import { normalizeAttachment, type DmAttachment } from './types'
 
 interface DmComposerProps {
-  onSend: (text: string) => void
+  /** Нужен для загрузки: файл кладётся в папку конкретного диалога. */
+  conversationId: string
+  onSend: (text: string, attachment: DmAttachment | null) => void
   /** Вызывается при наборе текста; троттлинг событий — внутри useTyping. */
   onTyping: () => void
   disabled: boolean
@@ -13,19 +18,79 @@ interface DmComposerProps {
 
 const MAX_LENGTH = 4000
 
-export function DmComposer({ onSend, onTyping, disabled }: DmComposerProps) {
+export function DmComposer({
+  conversationId,
+  onSend,
+  onTyping,
+  disabled,
+}: DmComposerProps) {
   const [text, setText] = useState('')
+  // Загруженное вложение, ожидающее отправки со следующим сообщением. Файл уже
+  // лежит на сервере: так отправка мгновенна, а ошибка загрузки видна заранее.
+  const [pending, setPending] = useState<DmAttachment | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // При переключении диалога черновик и вложение сбрасываем: ссылка вложения
+  // привязана к conversationId, в другом диалоге сервер её отвергнет.
+  useEffect(() => {
+    setText('')
+    setPending(null)
+    setUploadError(null)
+  }, [conversationId])
+
+  const uploadFile = useCallback(
+    async (file: File) => {
+      setUploading(true)
+      setUploadError(null)
+      try {
+        const body = new FormData()
+        body.append('file', file)
+        const res = await fetch(
+          `/api/chat/upload?conversationId=${encodeURIComponent(conversationId)}`,
+          { method: 'POST', body },
+        )
+        const payload = (await res.json().catch(() => null)) as
+          | (Record<string, unknown> & { error?: string })
+          | null
+        if (!res.ok) {
+          throw new Error(payload?.error ?? 'Не удалось загрузить файл')
+        }
+        const attachment = normalizeAttachment(payload)
+        if (!attachment) throw new Error('Сервер вернул некорректный файл')
+        setPending(attachment)
+      } catch (e) {
+        setUploadError((e as Error).message)
+      } finally {
+        setUploading(false)
+      }
+    },
+    [conversationId],
+  )
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      // Сброс значения, чтобы выбор того же файла снова вызвал change.
+      e.target.value = ''
+      if (file) void uploadFile(file)
+    },
+    [uploadFile],
+  )
 
   const submit = useCallback(() => {
     const trimmed = text.trim()
-    if (!trimmed || disabled) return
-    onSend(trimmed)
+    // Пустое сообщение с вложением — допустимо, без вложения — нет.
+    if (disabled || uploading || (!trimmed && !pending)) return
+    onSend(trimmed, pending)
     setText('')
+    setPending(null)
     // Возвращаем высоту после отправки: textarea растёт по содержимому.
     const el = textareaRef.current
     if (el) el.style.height = 'auto'
-  }, [text, disabled, onSend])
+  }, [text, pending, disabled, uploading, onSend])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -39,40 +104,137 @@ export function DmComposer({ onSend, onTyping, disabled }: DmComposerProps) {
     [submit],
   )
 
+  // Drag & drop файла на композер — тот же путь, что и через скрепку.
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      if (disabled || uploading) return
+      const file = e.dataTransfer.files?.[0]
+      if (file) void uploadFile(file)
+    },
+    [disabled, uploading, uploadFile],
+  )
+
+  const canSend = (text.trim().length > 0 || !!pending) && !uploading && !disabled
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        submit()
-      }}
-      className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-3"
+    <div
+      onDrop={handleDrop}
+      onDragOver={(e) => e.preventDefault()}
+      className="shrink-0 border-t border-border"
     >
-      <textarea
-        ref={textareaRef}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value)
-          if (e.target.value.trim()) onTyping()
-          const el = e.target
-          el.style.height = 'auto'
-          el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+      {/* Статус загрузки / готовое вложение */}
+      {(pending || uploading || uploadError) && (
+        <div className="px-3 pt-3">
+          {uploading && (
+            <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Загрузка файла…
+            </div>
+          )}
+
+          {uploadError && !uploading && (
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <span className="truncate">{uploadError}</span>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="shrink-0 opacity-70 hover:opacity-100"
+                aria-label="Скрыть ошибку"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
+
+          {pending && !uploading && (
+            <div className="flex items-center gap-3 rounded-lg bg-muted px-3 py-2">
+              {isImageAttachment(pending) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`${SERVER_URL}${pending.url}` || '/placeholder.svg'}
+                  alt={pending.name}
+                  className="size-10 shrink-0 rounded-md object-cover"
+                />
+              ) : (
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                  <FileText className="size-4" />
+                </span>
+              )}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium text-foreground">
+                  {pending.name}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {formatFileSize(pending.size)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                aria-label="Убрать вложение"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
         }}
-        onKeyDown={handleKeyDown}
-        rows={1}
-        maxLength={MAX_LENGTH}
-        placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
-        aria-label="Текст сообщения"
-        className="max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-input bg-background px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
-      />
-      <Button
-        type="submit"
-        size="icon"
-        disabled={disabled || text.trim().length === 0}
-        className="size-10 shrink-0 rounded-full"
-        aria-label="Отправить сообщение"
+        className="flex items-end gap-2 px-3 py-3"
       >
-        <SendHorizonal className="size-4" />
-      </Button>
-    </form>
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handleFileChange}
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || uploading}
+          className="size-10 shrink-0 rounded-full"
+          aria-label="Прикрепить файл"
+        >
+          <Paperclip className="size-4" />
+        </Button>
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value)
+            if (e.target.value.trim()) onTyping()
+            const el = e.target
+            el.style.height = 'auto'
+            el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+          }}
+          onKeyDown={handleKeyDown}
+          rows={1}
+          maxLength={MAX_LENGTH}
+          placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
+          aria-label="Текст сообщения"
+          className="max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-input bg-background px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
+        />
+        <Button
+          type="submit"
+          size="icon"
+          disabled={!canSend}
+          className="size-10 shrink-0 rounded-full"
+          aria-label="Отправить сообщение"
+        >
+          <SendHorizonal className="size-4" />
+        </Button>
+      </form>
+    </div>
   )
 }
