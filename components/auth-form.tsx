@@ -45,20 +45,32 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     setLoading(true)
 
     const trimmedUsername = username.trim()
+    const normalizedEmail = email.trim().toLowerCase()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = isSignUp
       ? await (authClient as any).signUp.email({
-          email,
+          email: normalizedEmail,
           password,
           name: trimmedUsername,
           username: trimmedUsername,
         })
-      : await authClient.signIn.email({ email, password })
+      : await authClient.signIn.email({
+          email: normalizedEmail,
+          password,
+        })
 
     setLoading(false)
 
     if (error) {
-      setError(error.message ?? 'Что-то пошло не так')
+      const isInvalidCredentials =
+        error.status === 401 ||
+        error.message?.toLowerCase().includes('invalid email or password')
+
+      setError(
+        isInvalidCredentials
+          ? 'Неверная почта или пароль'
+          : error.message ?? 'Что-то пошло не так',
+      )
       return
     }
 

@@ -41,12 +41,17 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
+    revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
       const transport = createTransport()
       if (!transport) {
         console.error('[auth] SMTP env vars not set — cannot send reset email')
         return
       }
+
+      const resetUrl = new URL(url)
+      resetUrl.searchParams.set('email', user.email)
+
       await transport.sendMail({
         from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
         to: user.email,
@@ -60,7 +65,7 @@ export const auth = betterAuth({
               Ссылка действует <strong>1 час</strong>.
             </p>
             <a
-              href="${url}"
+              href="${resetUrl.toString()}"
               style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;
                      padding:12px 24px;border-radius:8px;font-weight:600"
             >

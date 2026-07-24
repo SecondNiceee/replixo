@@ -13,6 +13,7 @@ function ResetPasswordForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams.get('token')
+  const email = searchParams.get('email')?.trim().toLowerCase()
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -71,6 +72,19 @@ function ResetPasswordForm() {
         setError(error.message ?? 'Что-то пошло не так')
       }
       return
+    }
+
+    if (email) {
+      const signInResult = await authClient.signIn.email({
+        email,
+        password,
+      })
+
+      if (!signInResult.error) {
+        router.push('/')
+        router.refresh()
+        return
+      }
     }
 
     setDone(true)
