@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS "dm_conversation" (
   "createdAt" timestamp NOT NULL DEFAULT now()
 );
 
+-- Список диалогов сортируется по свежести — снимаем шаг сортировки.
+CREATE INDEX IF NOT EXISTS "dm_conversation_lastMessageAt_idx"
+  ON "dm_conversation" ("lastMessageAt");
+
 CREATE TABLE IF NOT EXISTS "dm_conversation_member" (
   "conversationId" text NOT NULL REFERENCES "dm_conversation"("id") ON DELETE CASCADE,
   "userId" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,

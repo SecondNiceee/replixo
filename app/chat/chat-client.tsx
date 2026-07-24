@@ -184,6 +184,18 @@ export function ChatClient({ selfId }: { selfId: string }) {
     [mutate, openConversation],
   )
 
+  // Глубокая ссылка ?u=<friendId> (кнопка «Написать» в списке друзей).
+  // В отличие от ?c=, диалога в БД может ещё не быть, поэтому идём через
+  // startWithFriend: он создаёт его при необходимости и только потом
+  // открывает. Иначе пользователь увидел бы пустой экран «Выберите диалог».
+  const handledFriendParam = useRef<string | null>(null)
+  useEffect(() => {
+    const friendId = searchParams.get('u')
+    if (!friendId || handledFriendParam.current === friendId) return
+    handledFriendParam.current = friendId
+    void startWithFriend(friendId)
+  }, [searchParams, startWithFriend])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <header className="flex shrink-0 items-center gap-3">

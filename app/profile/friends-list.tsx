@@ -1,7 +1,9 @@
 'use client'
 
 import { mutate } from 'swr'
-import { Users, UserMinus, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Users, UserMinus, Loader2, MessageSquare } from 'lucide-react'
+import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from './types'
 
 interface FriendsListProps {
@@ -10,6 +12,11 @@ interface FriendsListProps {
 }
 
 export function FriendsList({ friends, isLoading }: FriendsListProps) {
+  const router = useRouter()
+  // Точки «в сети» живут ровно столько, сколько открыт сокет presence
+  // (его держит ProfileClient). Без соединения набор пуст — и точек нет.
+  const onlineIds = useDmStore((s) => s.onlineIds)
+
   const handleRemove = async (friendshipId: string) => {
     const res = await fetch('/api/friends/remove', {
       method: 'DELETE',
@@ -49,21 +56,37 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
               key={f.id}
               className="group flex items-center justify-between rounded-lg px-2 py-2 hover:bg-secondary/50"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
                   {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
-                </div>
-                <span className="text-sm text-foreground">
+                  {onlineIds.has(f.friendId) && (
+                    <span
+                      className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
+                      aria-label="в сети"
+                      role="img"
+                    />
+                  )}
+                </span>
+                <span className="truncate text-sm text-foreground">
                   {f.friendUsername ?? f.friendName}
                 </span>
               </div>
-              <button
-                onClick={() => handleRemove(f.id)}
-                className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
-                aria-label="Удалить из друзей"
-              >
-                <UserMinus className="size-4" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={() => router.push(`/chat?u=${encodeURIComponent(f.friendId)}`)}
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label={`Написать ${f.friendUsername ?? f.friendName}`}
+                >
+                  <MessageSquare className="size-4" />
+                </button>
+                <button
+                  onClick={() => handleRemove(f.id)}
+                  className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
+                  aria-label="Удалить из друзей"
+                >
+                  <UserMinus className="size-4" />
+                </button>
+              </div>
             </li>
           ))}
         </ul>

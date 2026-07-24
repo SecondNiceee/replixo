@@ -83,15 +83,21 @@ export const friendship = pgTable(
 // Диалог. type заложен на будущее: 'direct' (1:1) | 'group'.
 // Для 'direct' id детерминированный: `direct:<minUserId>:<maxUserId>` —
 // это гарантирует уникальность пары без отдельного unique-индекса.
-export const conversation = pgTable('dm_conversation', {
-  id: text('id').primaryKey(),
-  type: text('type').notNull().default('direct'),
-  // Денормализованный указатель на последнее сообщение: список диалогов
-  // строится одним запросом без коррелированных подзапросов.
-  lastMessageId: text('lastMessageId'),
-  lastMessageAt: timestamp('lastMessageAt'),
-  createdAt: timestamp('createdAt').notNull().defaultNow(),
-})
+export const conversation = pgTable(
+  'dm_conversation',
+  {
+    id: text('id').primaryKey(),
+    type: text('type').notNull().default('direct'),
+    // Денормализованный указатель на последнее сообщение: список диалогов
+    // строится одним запросом без коррелированных подзапросов.
+    lastMessageId: text('lastMessageId'),
+    lastMessageAt: timestamp('lastMessageAt'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  // Список диалогов всегда отдаётся отсортированным по свежести. Без этого
+  // индекса планировщик добавляет отдельный шаг сортировки на каждый запрос.
+  (t) => [index('dm_conversation_lastMessageAt_idx').on(t.lastMessageAt)],
+)
 
 // Участник диалога + его личное состояние прочитанности.
 export const conversationMember = pgTable(

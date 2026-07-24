@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
 import { ArrowLeft, Loader2, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,9 @@ export function ConversationView({
   const [atBottom, setAtBottom] = useState(true)
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
   const lastMessageId = lastMessage?.id ?? null
+  // Меняется только когда в начало ленты добавили порцию старых сообщений —
+  // именно этот момент нужно скомпенсировать скроллом.
+  const firstMessageId = messages.length > 0 ? messages[0].id : null
 
   const { notifyTyping, stopTyping } = useTyping(socket, conversationId)
 
@@ -91,6 +94,26 @@ export function ConversationView({
     if (el) el.scrollTop = el.scrollHeight
     setAtBottom(true)
   }, [lastMessageId, conversationId])
+
+  // Якорь на время догрузки истории: высота и позиция ленты до вставки.
+  const restoreRef = useRef<{ height: number; top: number } | null>(null)
+
+  const handleLoadMore = useCallback(() => {
+    const el = scrollRef.current
+    if (el) restoreRef.current = { height: el.scrollHeight, top: el.scrollTop }
+    void loadMore()
+  }, [loadMore])
+
+  // Вставка старых сообщений увеличивает scrollHeight сверху, и без правки
+  // scrollTop лента визуально «улетает» вниз ровно на высоту вставленного
+  // блока. Компенсируем до отрисовки — иначе будет заметный прыжок.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const saved = restoreRef.current
+    if (!el || !saved) return
+    restoreRef.current = null
+    el.scrollTop = el.scrollHeight - saved.height + saved.top
+  }, [firstMessageId])
 
   const handleSend = useCallback(
     (text: string, attachment: DmAttachment | null) => {
@@ -156,7 +179,7 @@ export function ConversationView({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => void loadMore()}
+              onClick={handleLoadMore}
               disabled={loadingMore}
               className="text-xs"
             >
