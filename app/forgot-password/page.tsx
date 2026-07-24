@@ -19,8 +19,10 @@ export default function ForgotPasswordPage() {
     setError(null)
     setLoading(true)
 
+    const normalizedEmail = email.trim().toLowerCase()
+
     const { error } = await authClient.requestPasswordReset({
-      email: email.trim(),
+      email: normalizedEmail,
       redirectTo: '/reset-password',
     })
 
@@ -31,6 +33,7 @@ export default function ForgotPasswordPage() {
       return
     }
 
+    setEmail(normalizedEmail)
     setSent(true)
   }
 
