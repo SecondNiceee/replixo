@@ -68,6 +68,16 @@ SELECT pg_temp.rename_col('message_read', 'updated_at',   'updatedAt');
 ALTER TABLE "message_read" ADD COLUMN IF NOT EXISTS "lastReadAt" timestamp NOT NULL DEFAULT now();
 ALTER TABLE "message_read" ADD COLUMN IF NOT EXISTS "updatedAt" timestamp NOT NULL DEFAULT now();
 
+-- Старые инсталляции могли создать таблицу без составного PK. Сначала оставляем
+-- только самую свежую строку каждой пары, затем добавляем conflict target.
+DELETE FROM "message_read" a
+USING "message_read" b
+WHERE a.ctid < b.ctid
+  AND a."roomId" = b."roomId"
+  AND a."peerId" = b."peerId";
+CREATE UNIQUE INDEX IF NOT EXISTS "message_read_roomId_peerId_unique"
+  ON "message_read" ("roomId", "peerId");
+
 -- === whiteboard ============================================================
 CREATE TABLE IF NOT EXISTS "whiteboard" (
   "roomId"    text PRIMARY KEY,

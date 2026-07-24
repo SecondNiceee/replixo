@@ -78,7 +78,7 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       'replixo:annotation-auth-mode',
       isSignUp ? 'sign-up' : 'sign-in',
     )
-    router.push('/')
+    router.replace('/profile')
     router.refresh()
   }
 
