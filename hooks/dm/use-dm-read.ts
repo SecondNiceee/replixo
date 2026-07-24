@@ -11,6 +11,12 @@ import type { Socket } from 'socket.io-client'
 // старую переписку выше или вообще держит вкладку в фоне.
 //
 // Дебаунс 500 мс: при быстрой серии входящих сообщений уходит одно событие.
+//
+// Канонический путь — ТОЛЬКО сокет: сервер в ответ на dm:read рассылает это
+// событие всем участникам, и именно так у собеседника появляются вторые
+// галочки. HTTP-роут /read такой рассылки сделать не может (у Next нет ручки
+// на socket.io), поэтому он остаётся аварийным путём и его результат НЕ
+// считается доставленным — после реконнекта эмит повторяется.
 // ---------------------------------------------------------------------------
 
 const DEBOUNCE_MS = 500
@@ -45,9 +51,28 @@ export function useDmRead({
   onFallback,
 }: UseDmReadOptions): void {
   const visible = useDocumentVisible()
-  // Что уже отмечено: `${conversationId}` → ts. Защита от повторной отправки
-  // того же состояния на каждый ререндер.
+  // Что уже подтверждённо отправлено по сокету: conversationId → ts. Защита от
+  // повторной отправки того же состояния на каждый ререндер.
   const sent = useRef(new Map<string, number>())
+
+  // Счётчик подключений. Растёт на каждый (ре)коннект и заставляет эффект
+  // ниже переотправить отметку: пока сокета не было, она могла уйти только по
+  // HTTP, а значит собеседник о ней не узнал.
+  const [socketEpoch, setSocketEpoch] = useState(0)
+  useEffect(() => {
+    if (!socket) return
+    const onConnect = () => {
+      // Отметки, сделанные до разрыва, могли не дойти до сервера — снимаем
+      // защиту и позволяем эффекту отправить их заново. Сервер идемпотентен:
+      // lastReadAt двигается через GREATEST.
+      sent.current.clear()
+      setSocketEpoch((n) => n + 1)
+    }
+    socket.on('connect', onConnect)
+    return () => {
+      socket.off('connect', onConnect)
+    }
+  }, [socket])
 
   useEffect(() => {
     if (!conversationId || !visible || !atBottom) return
@@ -55,14 +80,17 @@ export function useDmRead({
     if ((sent.current.get(conversationId) ?? 0) >= lastMessageAt) return
 
     const timer = setTimeout(() => {
-      sent.current.set(conversationId, lastMessageAt)
       if (socket?.connected) {
         socket.emit('dm:read', { conversationId, ts: lastMessageAt })
+        // Записываем только успешный эмит по сокету.
+        sent.current.set(conversationId, lastMessageAt)
       } else {
+        // Аварийный путь: отметка сохранится в БД, но dm:read не разойдётся.
+        // Намеренно НЕ пишем в `sent`, чтобы после реконнекта отправить эмит.
         onFallback?.(conversationId)
       }
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [socket, conversationId, lastMessageAt, atBottom, visible, onFallback])
+  }, [socket, socketEpoch, conversationId, lastMessageAt, atBottom, visible, onFallback])
 }
