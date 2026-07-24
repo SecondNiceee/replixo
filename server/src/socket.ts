@@ -9,6 +9,7 @@ import { registerWhiteboardHandlers } from './socket/whiteboard-handlers'
 import { registerPresentationHandlers } from './socket/presentation-handlers'
 import { registerAnnotationHandlers } from './socket/annotation-handlers'
 import { registerLifecycleHandlers } from './socket/lifecycle-handlers'
+import { setupDmNamespace } from './dm/namespace'
 
 // ---------------------------------------------------------------------------
 // Socket.io setup — thin orchestrator.
@@ -53,6 +54,10 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     registerAnnotationHandlers(ctx)
     registerLifecycleHandlers(ctx)
   })
+
+  // Личные сообщения живут в отдельном namespace со своей аутентификацией
+  // по сессии Better Auth. Корневой namespace (звонки) не затрагивается.
+  setupDmNamespace(io)
 
   return io
 }
