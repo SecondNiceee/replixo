@@ -14,15 +14,30 @@ export interface DmConversation {
   peerLastReadAt: string | null
   lastMessageAt: string | null
   lastMessageText: string | null
+  /** jsonb последнего сообщения — для превью «Файл: …» в списке диалогов. */
+  lastMessageAttachment?: unknown
   lastMessageSenderId: string | null
 }
 
 export type DmMessageStatus = 'sending' | 'sent' | 'failed'
 
+/**
+ * Вложение сообщения. `url` — относительный путь на mediasoup-сервере
+ * (`/uploads/dm/<conversationId>/<uuid>.<ext>`); абсолютный адрес собирается
+ * при рендере, поэтому смена домена сервера не ломает историю.
+ */
+export interface DmAttachment {
+  url: string
+  name: string
+  size: number
+  mime: string
+}
+
 export interface DmMessage {
   id: string
   senderId: string
   text: string
+  attachment: DmAttachment | null
   createdAt: number
   /** Локальный статус оптимистичной отправки. Отсутствует у истории из БД. */
   status?: DmMessageStatus
@@ -33,7 +48,25 @@ export interface RawDmMessage {
   id: string
   senderId: string
   text: string
+  /** jsonb из БД — то есть на клиенте это `unknown` до проверки формы. */
+  attachment?: unknown
   createdAt: string | number
+}
+
+/**
+ * Приведение вложения к известной форме. Столбец jsonb может содержать что
+ * угодно (в том числе данные, записанные более старой версией кода), а рендер
+ * обращается к полям напрямую — поэтому кривое значение превращаем в null,
+ * а не пробрасываем в разметку.
+ */
+export function normalizeAttachment(raw: unknown): DmAttachment | null {
+  if (!raw || typeof raw !== 'object') return null
+  const { url, name, size, mime } = raw as Record<string, unknown>
+  if (typeof url !== 'string' || !url) return null
+  if (typeof name !== 'string' || !name) return null
+  if (typeof mime !== 'string' || !mime) return null
+  const safeSize = typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : 0
+  return { url, name, size: safeSize, mime }
 }
 
 export function normalizeMessage(raw: RawDmMessage): DmMessage {
@@ -41,6 +74,7 @@ export function normalizeMessage(raw: RawDmMessage): DmMessage {
     id: raw.id,
     senderId: raw.senderId,
     text: raw.text ?? '',
+    attachment: normalizeAttachment(raw.attachment),
     createdAt:
       typeof raw.createdAt === 'number'
         ? raw.createdAt

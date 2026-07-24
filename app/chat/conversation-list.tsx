@@ -4,7 +4,7 @@ import { Loader2, MessageSquarePlus, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from '@/app/profile/types'
-import { conversationTitle, type DmConversation } from './types'
+import { conversationTitle, normalizeAttachment, type DmConversation } from './types'
 
 interface ConversationListProps {
   conversations: DmConversation[]
@@ -24,6 +24,17 @@ function formatListTime(iso: string | null): string {
   return sameDay
     ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString([], { day: '2-digit', month: '2-digit' })
+}
+
+/**
+ * Превью последнего сообщения. Сообщение может быть без текста (только файл) —
+ * тогда показываем имя вложения, иначе строка выглядела бы как пустой диалог.
+ */
+function formatPreview(c: DmConversation, selfId: string): string {
+  const attachment = normalizeAttachment(c.lastMessageAttachment)
+  const body = c.lastMessageText || (attachment ? `Файл: ${attachment.name}` : '')
+  if (!body) return 'Нет сообщений'
+  return `${c.lastMessageSenderId === selfId ? 'Вы: ' : ''}${body}`
 }
 
 export function ConversationList({
@@ -63,9 +74,7 @@ export function ConversationList({
               {conversations.map((c) => {
                 const title = conversationTitle(c)
                 const isActive = c.id === activeId
-                const preview = c.lastMessageText
-                  ? `${c.lastMessageSenderId === selfId ? 'Вы: ' : ''}${c.lastMessageText}`
-                  : 'Нет сообщений'
+                const preview = formatPreview(c, selfId)
                 return (
                   <li key={c.id}>
                     <button

@@ -2,7 +2,9 @@
 
 import { Check, CheckCheck, Clock, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { formatTime } from '@/app/room/[roomId]/chat-helpers'
+import { AttachmentView } from '@/components/chat/attachment-view'
+import { SERVER_URL } from '@/hooks/mediasoup/types'
+import { formatTime } from '@/lib/chat-format'
 import type { DmMessage } from './types'
 
 interface DmMessageListProps {
@@ -64,14 +66,26 @@ export function DmMessageList({
             <div className={cn('flex flex-col gap-0.5', self ? 'items-end' : 'items-start')}>
               <div
                 className={cn(
-                  'max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed',
+                  'flex max-w-[85%] flex-col gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed',
                   self
                     ? 'rounded-br-sm bg-primary text-primary-foreground'
                     : 'rounded-bl-sm bg-secondary text-secondary-foreground',
                   m.status === 'failed' && 'ring-1 ring-destructive',
                 )}
               >
-                <span className="select-text whitespace-pre-wrap break-words">{m.text}</span>
+                {m.attachment && (
+                  <AttachmentView
+                    attachment={m.attachment}
+                    // Файлы раздаёт mediasoup-сервер, а в БД хранится
+                    // относительный путь — абсолютный собираем здесь.
+                    baseUrl={SERVER_URL}
+                    self={self}
+                  />
+                )}
+                {/* Вложение без подписи — обычный случай, пустой абзац не рисуем. */}
+                {m.text && (
+                  <span className="select-text whitespace-pre-wrap break-words">{m.text}</span>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 px-1">

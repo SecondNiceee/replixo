@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import type { ChatMessage, ChatAttachment } from "@/hooks/use-mediasoup"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 import { ChatMessageList } from "./chat-message-list"
-import { formatFileSize, isImageAttachment } from "./chat-helpers"
+import { formatFileSize, isImageAttachment } from "@/lib/chat-format"
 
 interface RoomChatProps {
   open: boolean
