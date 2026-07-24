@@ -11,6 +11,12 @@ import { SERVER_URL } from '@/hooks/mediasoup/types'
 // в JS недоступен), затем передаём его в handshake. Сервер валидирует токен
 // прямо в таблице "session" и выставляет личность сокета — клиент никогда не
 // сообщает, кем он является.
+//
+// Соединение ОДНО на вкладку и разделяется всеми подписчиками (страница чата,
+// бейдж в шапке, точки online в профиле). Иначе каждый вызов хука открывал бы
+// свой websocket: сервер считал бы пользователя онлайн по нескольку раз, а
+// одно и то же dm:message приходило бы в несколько слушателей — то есть звук
+// уведомления играл бы дважды. Отсюда refcount вместо сокета на компонент.
 // ---------------------------------------------------------------------------
 
 export interface DmSocketState {
@@ -20,70 +26,102 @@ export interface DmSocketState {
   unavailable: boolean
 }
 
+type Listener = (state: DmSocketState) => void
+
+let shared: Socket | null = null
+let refCount = 0
+let state: DmSocketState = { socket: null, connected: false, unavailable: false }
+const listeners = new Set<Listener>()
+// Отложенный разрыв: при переходе между страницами и при двойном монтировании
+// в StrictMode счётчик на мгновение падает до нуля, и без отсрочки соединение
+// рвалось бы и поднималось заново на каждой навигации.
+let teardownTimer: ReturnType<typeof setTimeout> | null = null
+const TEARDOWN_GRACE_MS = 1000
+
+function publish(patch: Partial<DmSocketState>) {
+  state = { ...state, ...patch }
+  for (const listener of listeners) listener(state)
+}
+
+async function openShared() {
+  if (shared) return
+  try {
+    const res = await fetch('/api/chat/socket-token', { cache: 'no-store' })
+    if (!res.ok) {
+      publish({ unavailable: true })
+      return
+    }
+    const { token } = (await res.json()) as { token?: string }
+    if (!token) {
+      publish({ unavailable: true })
+      return
+    }
+    // Пока ждали токен, последний подписчик мог отмонтироваться.
+    if (refCount === 0) return
+
+    const socket = io(`${SERVER_URL}/dm`, {
+      auth: { token },
+      withCredentials: true,
+      // Тот же путь /socket.io/, что и у звонков: nginx уже проксирует его.
+      transports: ['websocket', 'polling'],
+    })
+    shared = socket
+
+    socket.on('connect', () => publish({ connected: true, unavailable: false }))
+    socket.on('disconnect', () => publish({ connected: false }))
+    socket.on('connect_error', (e) => {
+      // Оба случая безнадёжны, реконнект не поможет:
+      //   'unauthorized'      — сессия истекла;
+      //   'Invalid namespace' — сервер поднят без DATABASE_URL, /dm нет.
+      if (e.message === 'unauthorized' || e.message === 'Invalid namespace') {
+        socket.disconnect()
+        shared = null
+        publish({ socket: null, connected: false, unavailable: true })
+        return
+      }
+      publish({ connected: false })
+    })
+
+    publish({ socket, connected: socket.connected })
+  } catch {
+    publish({ unavailable: true })
+  }
+}
+
+function closeShared() {
+  shared?.disconnect()
+  shared = null
+  // unavailable не сбрасываем: если чат недоступен, это свойство сервера, а не
+  // конкретного соединения — иначе следующий подписчик снова пойдёт за токеном.
+  publish({ socket: null, connected: false })
+}
+
 export function useDmSocket(): DmSocketState {
-  const [socket, setSocket] = useState<Socket | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [unavailable, setUnavailable] = useState(false)
+  const [local, setLocal] = useState<DmSocketState>(state)
 
   useEffect(() => {
-    let cancelled = false
-    let created: Socket | null = null
-
-    const connect = async () => {
-      try {
-        const res = await fetch('/api/chat/socket-token', { cache: 'no-store' })
-        if (!res.ok) {
-          if (!cancelled) setUnavailable(true)
-          return
-        }
-        const { token } = (await res.json()) as { token?: string }
-        if (cancelled || !token) {
-          if (!cancelled) setUnavailable(true)
-          return
-        }
-
-        created = io(`${SERVER_URL}/dm`, {
-          auth: { token },
-          withCredentials: true,
-          // Тот же путь /socket.io/, что и у звонков: nginx уже проксирует его.
-          transports: ['websocket', 'polling'],
-        })
-
-        created.on('connect', () => {
-          setConnected(true)
-          setUnavailable(false)
-        })
-        created.on('disconnect', () => setConnected(false))
-        created.on('connect_error', (e) => {
-          setConnected(false)
-          // Оба случая безнадёжны, реконнект не поможет:
-          //   'unauthorized'      — сессия истекла;
-          //   'Invalid namespace' — сервер поднят без DATABASE_URL, /dm нет.
-          if (e.message === 'unauthorized' || e.message === 'Invalid namespace') {
-            setUnavailable(true)
-            created?.disconnect()
-          }
-        })
-
-        if (cancelled) {
-          created.disconnect()
-          return
-        }
-        setSocket(created)
-      } catch {
-        if (!cancelled) setUnavailable(true)
-      }
+    listeners.add(setLocal)
+    refCount += 1
+    if (teardownTimer) {
+      clearTimeout(teardownTimer)
+      teardownTimer = null
     }
-
-    void connect()
+    // Синхронизируемся с текущим состоянием: соединение могло быть открыто
+    // другим подписчиком ещё до нашего монтирования.
+    setLocal(state)
+    if (!shared && !state.unavailable) void openShared()
 
     return () => {
-      cancelled = true
-      created?.disconnect()
-      setSocket(null)
-      setConnected(false)
+      listeners.delete(setLocal)
+      refCount -= 1
+      if (refCount === 0 && !teardownTimer) {
+        teardownTimer = setTimeout(() => {
+          teardownTimer = null
+          if (refCount === 0) closeShared()
+        }, TEARDOWN_GRACE_MS)
+      }
     }
   }, [])
 
-  return { socket, connected, unavailable }
+  return local
 }

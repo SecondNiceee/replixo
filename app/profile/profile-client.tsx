@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { useDmPresence } from '@/hooks/dm/use-dm-presence'
 import { ProfileHeader } from './profile-header'
 import { FriendsList } from './friends-list'
 import { SentRequests } from './sent-requests'
@@ -13,6 +15,11 @@ type Tab = 'friends' | 'sent'
 
 export function ProfileClient({ user }: { user: User }) {
   const [activeTab, setActiveTab] = useState<Tab>('friends')
+
+  // Presence нужен только для точек «в сети» в списке друзей. Сокет живёт,
+  // пока открыта страница; если чат недоступен, точек просто не будет.
+  const { socket } = useDmSocket()
+  useDmPresence(socket, user.id)
 
   const { data: friendsData, isLoading: friendsLoading } = useSWR<{ friends: Friend[] }>(
     '/api/friends',

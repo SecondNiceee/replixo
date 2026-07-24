@@ -19,7 +19,15 @@ interface DmStore {
   typing: Record<string, Record<string, boolean>>
   /** conversationId → lastReadAt собеседника (мс), по нему рисуются галочки. */
   peerReadAt: Record<string, number>
+  /**
+   * Открытый сейчас диалог, либо null. Нужен глобальному уведомителю: звук
+   * не должен играть по сообщению из диалога, который пользователь и так
+   * видит на экране. Живёт в сторе, потому что уведомитель монтируется вне
+   * страницы чата и о её локальном состоянии ничего не знает.
+   */
+  activeConversationId: string | null
 
+  setActiveConversationId: (conversationId: string | null) => void
   applyPresenceSnapshot: (onlineUserIds: string[], lastSeenAt: Record<string, number>) => void
   setPresence: (userId: string, online: boolean, lastSeenAt?: number) => void
   setTyping: (conversationId: string, userId: string, typing: boolean) => void
@@ -32,6 +40,9 @@ export const useDmStore = create<DmStore>((set) => ({
   lastSeenAt: {},
   typing: {},
   peerReadAt: {},
+  activeConversationId: null,
+
+  setActiveConversationId: (conversationId) => set({ activeConversationId: conversationId }),
 
   applyPresenceSnapshot: (onlineUserIds, lastSeenAt) =>
     set({ onlineIds: new Set(onlineUserIds), lastSeenAt }),
