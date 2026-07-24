@@ -19,16 +19,36 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center px-6 text-center">
-      {/* subtle radial glow */}
+    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 text-center">
+      {/* базовая светлая подложка */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,oklch(0.22_0_0)_0%,transparent_70%)] blur-3xl"
+        className="hero-surface pointer-events-none absolute inset-0 -z-30"
       />
-      {/* faint grid */}
+      {/* крупная сетка */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-20 opacity-[0.04] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:48px_48px]"
+        className="hero-grid pointer-events-none absolute inset-0 -z-20"
+      />
+      {/* точечный узор */}
+      <div
+        aria-hidden="true"
+        className="hero-dots pointer-events-none absolute inset-0 -z-20"
+      />
+      {/* диагональные штрихи сверху */}
+      <div
+        aria-hidden="true"
+        className="hero-stripes pointer-events-none absolute inset-x-0 top-0 -z-20 h-[55%]"
+      />
+      {/* центральное свечение */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-[38%] -z-10 h-[560px] w-[900px] max-w-[130vw] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,oklch(0.42_0.05_265/0.35)_0%,transparent_70%)] blur-3xl"
+      />
+      {/* виньетка и переход к следующей секции */}
+      <div
+        aria-hidden="true"
+        className="hero-vignette pointer-events-none absolute inset-0 -z-10"
       />
 
       <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-1.5 text-xs font-medium text-muted-foreground">
