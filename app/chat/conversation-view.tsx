@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
-import { ArrowLeft, Loader2, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useConversationMessages } from '@/hooks/dm/use-conversation-messages'
 import { useDmRead } from '@/hooks/dm/use-dm-read'
@@ -11,6 +11,7 @@ import { useDmStore } from '@/stores/dm-store'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
+import { EmptyState } from './empty-state'
 import {
   conversationTitle,
   formatLastSeen,
@@ -126,14 +127,7 @@ export function ConversationView({
   )
 
   if (!conversation) {
-    return (
-      <section className="flex min-h-0 w-full flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card px-6 text-center">
-        <MessageSquare className="size-10 text-muted-foreground/30" />
-        <p className="text-pretty text-sm text-muted-foreground">
-          Выберите диалог, чтобы начать переписку
-        </p>
-      </section>
-    )
+    return <EmptyState />
   }
 
   const title = conversationTitle(conversation)

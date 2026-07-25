@@ -6,13 +6,12 @@ import useSWR from 'swr'
 import { ArrowLeft, MessageSquare } from 'lucide-react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
+import { useConversations } from '@/hooks/dm/use-conversations'
 import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from '@/app/profile/types'
 import { ConversationList } from './conversation-list'
 import { ConversationView } from './conversation-view'
-import { chatFetcher, type DmConversation } from './types'
-
-const CONVERSATIONS_KEY = '/api/chat/conversations'
+import { chatFetcher } from './types'
 
 export function ChatClient({ selfId }: { selfId: string }) {
   const { socket, connected, unavailable } = useDmSocket()
@@ -23,16 +22,23 @@ export function ChatClient({ selfId }: { selfId: string }) {
   // набора и вторые галочки не работают.
   useDmPresence(socket, selfId)
 
-  const { data, mutate, isLoading } = useSWR<{ conversations: DmConversation[] }>(
-    CONVERSATIONS_KEY,
-    chatFetcher,
-  )
-  const { data: friendsData } = useSWR<{ friends: Friend[] }>('/api/friends', chatFetcher)
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  const conversations = data?.conversations ?? []
+  // Список диалогов, счётчики и все мутации живут в useConversations: тот же
+  // SWR-ключ читают бейджи вне этой страницы, поэтому число непрочитанных
+  // всегда совпадает.
+  const {
+    conversations,
+    isLoading,
+    totalUnread,
+    zeroUnreadLocally,
+    startWithFriend,
+    markReadFallback,
+  } = useConversations(selfId, activeId)
+
+  const { data: friendsData } = useSWR<{ friends: Friend[] }>('/api/friends', chatFetcher)
   const friends = friendsData?.friends ?? []
 
-  const [activeId, setActiveId] = useState<string | null>(null)
   const active = conversations.find((c) => c.id === activeId) ?? null
 
   // Сообщаем глобальному уведомителю, какой диалог открыт: он монтируется вне
@@ -45,58 +51,6 @@ export function ChatClient({ selfId }: { selfId: string }) {
     // уведомитель продолжал бы считать его открытым и молчал бы.
     return () => setActiveConversationId(null)
   }, [activeId, setActiveConversationId])
-
-  // Локально погасить счётчик, ничего не записывая на сервер. Нужно, чтобы
-  // бейдж и заголовок вкладки реагировали мгновенно: авторитетную запись
-  // делает useDmRead через сокет (и только когда это честно — вкладка видима
-  // и лента доскроллена вниз), а это занимает как минимум дебаунс.
-  const zeroUnreadLocally = useCallback(
-    (conversationId: string) => {
-      void mutate(
-        (current) =>
-          current
-            ? {
-                conversations: current.conversations.map((c) =>
-                  c.id === conversationId ? { ...c, unreadCount: 0 } : c,
-                ),
-              }
-            : current,
-        { revalidate: false },
-      )
-    },
-    [mutate],
-  )
-
-  // Перечитать список, но сохранить нулевой счётчик активного диалога: в БД он
-  // ещё не обнулён (сокетная отметка в пути), и без этого бейдж мигал бы.
-  const refreshKeepingRead = useCallback(
-    (conversationId: string) => {
-      void mutate(async () => {
-        const fresh = (await chatFetcher(CONVERSATIONS_KEY)) as {
-          conversations: DmConversation[]
-        }
-        return {
-          conversations: fresh.conversations.map((c) =>
-            c.id === conversationId ? { ...c, unreadCount: 0 } : c,
-          ),
-        }
-      }, { revalidate: false })
-    },
-    [mutate],
-  )
-
-  // Аварийная отметка прочтения по HTTP — только когда сокета нет. Этот роут
-  // не рассылает dm:read, поэтому вторые галочки у собеседника появятся лишь
-  // после его перезагрузки. Основной путь — сокет (см. useDmRead).
-  const markReadFallback = useCallback(
-    async (conversationId: string) => {
-      await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}/read`, {
-        method: 'POST',
-      }).catch(() => undefined)
-      void mutate()
-    },
-    [mutate],
-  )
 
   const openConversation = useCallback(
     (conversationId: string) => {
@@ -112,70 +66,14 @@ export function ChatClient({ selfId }: { selfId: string }) {
     if (fromUrl) setActiveId(fromUrl)
   }, [searchParams])
 
-  // Любое новое сообщение меняет порядок диалогов и счётчики — перечитываем
-  // список. Отметку «прочитано» здесь НЕ ставим: этим занимается useDmRead
-  // через сокет, только он даёт собеседнику вторые галочки и только он знает,
-  // доскроллен ли пользователь до низа ленты.
-  useEffect(() => {
-    if (!socket) return
-
-    const onMessage = (payload: unknown) => {
-      const { conversationId } = (payload ?? {}) as { conversationId?: string }
-      const visible = document.visibilityState === 'visible'
-
-      // Звук здесь не играем: этим занимается DmNotifier, один на приложение.
-      // Дублирование обработчика привело бы к двойному сигналу.
-      if (conversationId && conversationId === activeId && visible) {
-        // Диалог открыт и на виду — обновляем превью, но бейдж держим на нуле
-        // до подтверждения сокетом.
-        refreshKeepingRead(conversationId)
-        return
-      }
-      void mutate()
-    }
-
-    // Прочтение с другого устройства обнуляет счётчик в БД — список должен
-    // это увидеть (сценарий «два устройства одного пользователя»).
-    const onRead = (payload: unknown) => {
-      const { userId } = (payload ?? {}) as { userId?: string }
-      if (userId === selfId) void mutate()
-    }
-
-    socket.on('dm:message', onMessage)
-    socket.on('dm:read', onRead)
-    return () => {
-      socket.off('dm:message', onMessage)
-      socket.off('dm:read', onRead)
-    }
-  }, [socket, mutate, activeId, refreshKeepingRead, selfId])
-
-  // Стор эфемерного состояния очищается при разрыве соединения (useDmPresence
-  // делает reset), поэтому живой peerReadAt теряется. После реконнекта
-  // перечитываем список — в нём есть peerLastReadAt из БД, и галочки
-  // восстанавливаются, а не откатываются к одной.
-  useEffect(() => {
-    if (connected) void mutate()
-  }, [connected, mutate])
-
-  // Число для бейджа в шапке страницы. Заголовок вкладки отсюда не трогаем —
-  // им владеет DmNotifier, который делает это на всех страницах, а не только
-  // на этой.
-  const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
-
-  // Начать (или открыть существующий) диалог с другом.
-  const startWithFriend = useCallback(
+  // Создать диалог и сразу открыть его. Обёртка над startWithFriend из хука:
+  // сам хук об активном диалоге ничего не знает.
+  const openWithFriend = useCallback(
     async (friendId: string) => {
-      const res = await fetch(CONVERSATIONS_KEY, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ friendId }),
-      })
-      if (!res.ok) return
-      const { conversationId } = (await res.json()) as { conversationId: string }
-      await mutate()
-      openConversation(conversationId)
+      const conversationId = await startWithFriend(friendId)
+      if (conversationId) openConversation(conversationId)
     },
-    [mutate, openConversation],
+    [startWithFriend, openConversation],
   )
 
   // Глубокая ссылка ?u=<friendId> (кнопка «Написать» в списке друзей).
@@ -187,8 +85,8 @@ export function ChatClient({ selfId }: { selfId: string }) {
     const friendId = searchParams.get('u')
     if (!friendId || handledFriendParam.current === friendId) return
     handledFriendParam.current = friendId
-    void startWithFriend(friendId)
-  }, [searchParams, startWithFriend])
+    void openWithFriend(friendId)
+  }, [searchParams, openWithFriend])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -235,7 +133,7 @@ export function ChatClient({ selfId }: { selfId: string }) {
             isLoading={isLoading}
             selfId={selfId}
             onSelect={openConversation}
-            onStartWithFriend={startWithFriend}
+            onStartWithFriend={openWithFriend}
           />
         </div>
 
