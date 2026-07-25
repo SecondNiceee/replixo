@@ -6,7 +6,7 @@ import useSWR from 'swr'
 import { ArrowLeft, MessageSquare } from 'lucide-react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
-import { playIncomingMessage } from '@/lib/sounds'
+import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from '@/app/profile/types'
 import { ConversationList } from './conversation-list'
 import { ConversationView } from './conversation-view'
@@ -34,6 +34,17 @@ export function ChatClient({ selfId }: { selfId: string }) {
 
   const [activeId, setActiveId] = useState<string | null>(null)
   const active = conversations.find((c) => c.id === activeId) ?? null
+
+  // Сообщаем глобальному уведомителю, какой диалог открыт: он монтируется вне
+  // этой страницы и о локальном activeId ничего не знает, а без этого играл бы
+  // звук по сообщениям из диалога, который пользователь и так видит.
+  const setActiveConversationId = useDmStore((s) => s.setActiveConversationId)
+  useEffect(() => {
+    setActiveConversationId(activeId)
+    // При уходе со страницы чата активного диалога больше нет — иначе
+    // уведомитель продолжал бы считать его открытым и молчал бы.
+    return () => setActiveConversationId(null)
+  }, [activeId, setActiveConversationId])
 
   // Локально погасить счётчик, ничего не записывая на сервер. Нужно, чтобы
   // бейдж и заголовок вкладки реагировали мгновенно: авторитетную запись
@@ -109,19 +120,11 @@ export function ChatClient({ selfId }: { selfId: string }) {
     if (!socket) return
 
     const onMessage = (payload: unknown) => {
-      const { conversationId, message } = (payload ?? {}) as {
-        conversationId?: string
-        message?: { senderId?: string }
-      }
+      const { conversationId } = (payload ?? {}) as { conversationId?: string }
       const visible = document.visibilityState === 'visible'
-      const isForeign = message?.senderId !== undefined && message.senderId !== selfId
 
-      // Звук — только на чужие сообщения и только когда пользователь их не
-      // видит: в открытом активном диалоге он и так следит за лентой.
-      if (isForeign && (!visible || conversationId !== activeId)) {
-        playIncomingMessage()
-      }
-
+      // Звук здесь не играем: этим занимается DmNotifier, один на приложение.
+      // Дублирование обработчика привело бы к двойному сигналу.
       if (conversationId && conversationId === activeId && visible) {
         // Диалог открыт и на виду — обновляем превью, но бейдж держим на нуле
         // до подтверждения сокетом.
@@ -154,19 +157,10 @@ export function ChatClient({ selfId }: { selfId: string }) {
     if (connected) void mutate()
   }, [connected, mutate])
 
-  // Непрочитанные в заголовке вкладки: «(3) Replixo».
+  // Число для бейджа в шапке страницы. Заголовок вкладки отсюда не трогаем —
+  // им владеет DmNotifier, который делает это на всех страницах, а не только
+  // на этой.
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
-  const baseTitle = useRef('')
-  useEffect(() => {
-    if (!baseTitle.current) {
-      baseTitle.current = document.title.replace(/^\(\d+\)\s*/, '')
-    }
-    const base = baseTitle.current
-    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base
-    return () => {
-      document.title = base
-    }
-  }, [totalUnread])
 
   // Начать (или открыть существующий) диалог с другом.
   const startWithFriend = useCallback(

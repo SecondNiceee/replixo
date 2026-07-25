@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
-import { LogOut, MessageSquare, UserCircle } from 'lucide-react'
+import { MessagesButton } from '@/components/messages-button'
+import { LogOut, UserCircle } from 'lucide-react'
 
 interface AuthButtonsProps {
   user: { name: string; email: string } | null
@@ -21,16 +22,7 @@ export function AuthButtons({ user }: AuthButtonsProps) {
   if (user) {
     return (
       <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push('/chat')}
-          className="text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
-          aria-label="Сообщения"
-        >
-          <MessageSquare className="size-4" aria-hidden="true" />
-          <span className="hidden md:inline">Сообщения</span>
-        </Button>
+        <MessagesButton />
         <Button
           variant="ghost"
           size="sm"
