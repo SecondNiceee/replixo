@@ -17,7 +17,15 @@ export interface DmConversation {
   /** jsonb последнего сообщения — для превью «Файл: …» в списке диалогов. */
   lastMessageAttachment?: unknown
   lastMessageSenderId: string | null
+  /**
+   * Удалено ли последнее сообщение (ISO). Нужно превью: тело такого сообщения
+   * роут не отдаёт, и без этого признака в списке висело бы «Нет сообщений».
+   */
+  lastMessageDeletedAt?: string | null
 }
+
+/** Заглушка вместо тела удалённого сообщения — одна на ленту и на превью. */
+export const DELETED_MESSAGE_TEXT = 'Сообщение удалено'
 
 export type DmMessageStatus = 'sending' | 'sent' | 'failed'
 
@@ -39,6 +47,10 @@ export interface DmMessage {
   text: string
   attachment: DmAttachment | null
   createdAt: number
+  /** Момент последней правки (мс) либо null — рисует пометку «изменено». */
+  editedAt: number | null
+  /** Момент удаления (мс) либо null. У удалённого тело не показываем. */
+  deletedAt: number | null
   /** Локальный статус оптимистичной отправки. Отсутствует у истории из БД. */
   status?: DmMessageStatus
 }
@@ -51,6 +63,10 @@ export interface RawDmMessage {
   /** jsonb из БД — то есть на клиенте это `unknown` до проверки формы. */
   attachment?: unknown
   createdAt: string | number
+  // Отсутствуют в payload сокета: у только что созданного сообщения правок и
+  // удаления быть не может, поэтому поля опциональны.
+  editedAt?: string | number | null
+  deletedAt?: string | number | null
 }
 
 /**
@@ -69,16 +85,30 @@ export function normalizeAttachment(raw: unknown): DmAttachment | null {
   return { url, name, size: safeSize, mime }
 }
 
+/**
+ * Метка времени к миллисекундам. Источники разные: HTTP отдаёт ISO-строку,
+ * сокет — число, а необязательные поля приходят как null/undefined. Битую
+ * строку приводим к null, иначе NaN просочился бы в сравнения и рендер.
+ */
+function toMillis(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined) return null
+  const ms = typeof value === 'number' ? value : new Date(value).getTime()
+  return Number.isFinite(ms) ? ms : null
+}
+
 export function normalizeMessage(raw: RawDmMessage): DmMessage {
+  const deletedAt = toMillis(raw.deletedAt)
   return {
     id: raw.id,
     senderId: raw.senderId,
-    text: raw.text ?? '',
-    attachment: normalizeAttachment(raw.attachment),
-    createdAt:
-      typeof raw.createdAt === 'number'
-        ? raw.createdAt
-        : new Date(raw.createdAt).getTime(),
+    // Тело удалённого сообщения не показываем. Роуты его и так не отдают, но
+    // клиент не должен на это полагаться: одна пропущенная проверка на
+    // сервере иначе сразу утекла бы в разметку.
+    text: deletedAt ? '' : (raw.text ?? ''),
+    attachment: deletedAt ? null : normalizeAttachment(raw.attachment),
+    createdAt: toMillis(raw.createdAt) ?? Date.now(),
+    editedAt: toMillis(raw.editedAt),
+    deletedAt,
   }
 }
 

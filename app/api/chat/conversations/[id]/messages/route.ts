@@ -59,6 +59,8 @@ export async function GET(
       text: directMessage.text,
       attachment: directMessage.attachment,
       createdAt: directMessage.createdAt,
+      editedAt: directMessage.editedAt,
+      deletedAt: directMessage.deletedAt,
     })
     .from(directMessage)
     .where(
@@ -76,5 +78,12 @@ export async function GET(
   const hasMore = rows.length > limit
   const page = hasMore ? rows.slice(0, limit) : rows
 
-  return NextResponse.json({ messages: page.reverse(), hasMore })
+  // Мягкое удаление: строка остаётся в БД (нужна для порядка и курсора), но
+  // тело за пределы сервера не выходит. Иначе удалённый текст и ссылку на файл
+  // можно было бы прочитать прямо в ответе API, минуя разметку.
+  const messages = page.reverse().map((m) =>
+    m.deletedAt ? { ...m, text: '', attachment: null } : m,
+  )
+
+  return NextResponse.json({ messages, hasMore })
 }
