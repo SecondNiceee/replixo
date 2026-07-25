@@ -39,7 +39,6 @@ export async function GET() {
       // висело бы «Нет сообщений».
       lastMessageAttachment: directMessage.attachment,
       lastMessageSenderId: directMessage.senderId,
-      lastMessageDeletedAt: directMessage.deletedAt,
     })
     .from(conversationMember)
     .innerJoin(conversation, eq(conversation.id, conversationMember.conversationId))
@@ -54,15 +53,7 @@ export async function GET() {
     // только что созданные диалоги без сообщений висели бы выше активных.
     .orderBy(sql`${conversation.lastMessageAt} DESC NULLS LAST`)
 
-  // Как и в истории сообщений, тело удалённого наружу не отдаём — превью
-  // соберёт заглушку по признаку lastMessageDeletedAt.
-  const conversations = rows.map((c) =>
-    c.lastMessageDeletedAt
-      ? { ...c, lastMessageText: '', lastMessageAttachment: null }
-      : c,
-  )
-
-  return NextResponse.json({ conversations })
+  return NextResponse.json({ conversations: rows })
 }
 
 // ---------------------------------------------------------------------------

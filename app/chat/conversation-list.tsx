@@ -4,12 +4,7 @@ import { Loader2, MessageSquarePlus, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDmStore } from '@/stores/dm-store'
 import type { Friend } from '@/app/profile/types'
-import {
-  conversationTitle,
-  normalizeAttachment,
-  DELETED_MESSAGE_TEXT,
-  type DmConversation,
-} from './types'
+import { conversationTitle, normalizeAttachment, type DmConversation } from './types'
 
 interface ConversationListProps {
   conversations: DmConversation[]
@@ -36,14 +31,10 @@ function formatListTime(iso: string | null): string {
  * тогда показываем имя вложения, иначе строка выглядела бы как пустой диалог.
  */
 function formatPreview(c: DmConversation, selfId: string): string {
-  const prefix = c.lastMessageSenderId === selfId ? 'Вы: ' : ''
-  // Удалённое проверяем до текста: роут отдаёт его с пустым телом, иначе
-  // превью показало бы «Нет сообщений» у диалога, где переписка есть.
-  if (c.lastMessageDeletedAt) return `${prefix}${DELETED_MESSAGE_TEXT.toLowerCase()}`
   const attachment = normalizeAttachment(c.lastMessageAttachment)
   const body = c.lastMessageText || (attachment ? `Файл: ${attachment.name}` : '')
   if (!body) return 'Нет сообщений'
-  return `${prefix}${body}`
+  return `${c.lastMessageSenderId === selfId ? 'Вы: ' : ''}${body}`
 }
 
 export function ConversationList({
