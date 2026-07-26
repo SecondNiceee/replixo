@@ -274,8 +274,12 @@ app/chat/typing-indicator.tsx         — «Иван печатает…»
 app/chat/empty-state.tsx              — «Выберите диалог»
 app/chat/types.ts                     — Conversation, DirectMessage, Attachment
 
-hooks/dm/use-dm-socket.ts             — подключение к /dm, реконнект, listeners
-hooks/dm/use-conversations.ts         — SWR список + мутации от сокета
+hooks/dm/use-dm-socket.ts             — подключение к /dm, реконнект, listeners (refcount, одно на вкладку)
+hooks/dm/use-conversations.ts         — SWR список + мутации от сокета. Единый источник правды:
+                                        сам берёт сокет из use-dm-socket, отдаёт conversations,
+                                        totalUnread, zeroUnreadLocally, refreshKeepingRead,
+                                        startWithFriend, markReadFallback
+hooks/dm/use-unread-total.ts          — тонкая обёртка над use-conversations для бейджей вне /chat
 hooks/dm/use-conversation-messages.ts — история + пагинация + оптимистичная отправка
 hooks/dm/use-typing.ts               — debounce отправки typing, авто-сброс приёма
 stores/dm-store.ts                    — zustand: activeConversationId, unread map, online set, typing map
@@ -352,7 +356,10 @@ MessageSquare, Users), размер 16/20. Layout: flexbox. Мобильный �
 - [ ] Rate limit: сокет 10 сообщений / 2 с; upload 20 файлов / мин на пользователя.
 - [ ] Текст обрезается до 4000, имя файла до 255, mime до 128.
 - [ ] Никакого рендера HTML из сообщений — только текст (React экранирует по умолчанию).
-- [ ] CORS namespace `/dm` — тот же `CLIENT_ORIGIN`.
+- [ ] CORS namespace `/dm` — тот же `CLIENT_ORIGIN`. Отдельно в `dm/namespace.ts` **не задаётся**:
+      namespace наследует `cors` от корневого `io` в `server/src/socket.ts`, где origin уже равен
+      `CLIENT_ORIGIN`. Дублировать настройку не нужно — достаточно убедиться, что корневой
+      конфиг не открыт в `*`.
 
 ---
 
@@ -379,7 +386,7 @@ MessageSquare, Users), размер 16/20. Layout: flexbox. Мобильный �
 
 ## 11. Вне объёма v1 (задел на будущее)
 
-- Групповые чаты (`type='group'` уже в схеме; нужен UI участников и права).
+- Групповые чаты (`type='group'` уже в с��еме; нужен UI участников и права).
 - Редактирование/удаление (`editedAt`, `deletedAt` уже в схеме).
 - Ответы (reply-to), реакции, пересылка.
 - Поиск по истории (Postgres full-text по `dm_message.text`).
