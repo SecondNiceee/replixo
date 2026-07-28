@@ -43,7 +43,7 @@ Forwarding Unit) на базе **mediasoup** и обменивается сиг�
 - вложения чата: `UPLOAD_DIR` (по умолчанию `<cwd>/uploads`),
   `MAX_FILE_SIZE` (25 МБ), `UPLOAD_TTL_MS` (48 ч — TTL осиротевших папок);
 - установщик: `WINDOWS_INSTALLER_PATH` (по умолчанию
-  `<cwd>/downloads/Replixo-Setup.exe`), `WINDOWS_INSTALLER_NAME`;
+  `<cwd>/downloads/Replixo-Setup-version-3.exe`), `WINDOWS_INSTALLER_NAME`;
 - `workerSettings` — диапазон RTC-портов `40000–49999`, уровни логирования;
 - `mediaCodecs` — поддерживаемые кодеки: Opus с FEC и DTX (аудио), VP8 и H264
   (видео);
@@ -99,7 +99,7 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 | `socket/room-registry.ts` | In-memory хранилище: `rooms` (`Map<roomId, Room>`), `peerSockets` (peerId → socketId), таймеры grace-window, `getOrCreateRoom` (с гидрацией доски и рисунков из БД), `cleanupRoomIfEmpty` (удаляет пустую комнату + историю чата и вложения), `authedRoom` (проверка, что отправитель владеет peerId). |
 | `socket/media-handlers.ts` | WebRTC-сигналинг (см. ниже). |
 | `socket/chat-handlers.ts` | Текстовый чат комнаты. |
-| `socket/whiteboard-handlers.ts` | Совместная доска (tldraw). |
+| `socket/whiteboard-handlers.ts` | Совместна�� доска (tldraw). |
 | `socket/presentation-handlers.ts` | Синхронизация слайдов + рисование поверх слайдов. |
 | `socket/annotation-handlers.ts` | Эфемерное рисование поверх демонстрации экрана. |
 | `socket/lifecycle-handlers.ts` | Переподключение и выход (`rejoinProbe`, `leaveRoom`, `disconnect`). |
@@ -109,7 +109,7 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 - **`joinRoom`** — проверяет: при отсутствии `create` комната должна
   существовать (иначе «Комната не найдена»); комната не должна быть полной
   (макс. 5). Если этот `peerId` уже подключён с другого сокета (другая
-  вкладка/устройство), старая сессия «кикается» (`kicked`). Добавляет
+  вкладка/устройство), ��тарая сессия «кикается» (`kicked`). Добавляет
   участника, уведомляет остальных `peerJoined`, возвра��ает RTP-capabilities,
   список участников, историю чата, отметки о прочтении, состояние доски,
   текущий слайд презентации и рисунки по слайдам.
@@ -209,7 +209,7 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 Слой работы с PostgreSQL (та же БД, что у Next.js-приложения): сохраняет
 историю чата (`saveMessage`), маркеры прочтения (`saveReadMarker`), состояние
 и снапшот доски (`saveWhiteboard`), состояние презентации и рисунки по слайдам.
-Используется для гидрации комнаты при её пересоздании (`getOrCreateRoom`) и
+Используется для гидрации комнаты при её пересо��дании (`getOrCreateRoom`) и
 чистки при уничтожении пустой комнаты.
 
 ---

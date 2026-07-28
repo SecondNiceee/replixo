@@ -35,7 +35,7 @@ export default function AppDownloadPage() {
           <div className="flex flex-col items-center gap-4">
             <a
               href="/download/windows"
-              download="Replixo-Setup-version-2.exe"
+              download="Replixo-Setup-version-3.exe"
               className="inline-flex h-14 items-center justify-center gap-3 rounded-xl bg-primary px-7 text-base font-medium text-primary-foreground transition-all hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring active:scale-[0.98]"
             >
               <Download className="size-5" aria-hidden="true" />

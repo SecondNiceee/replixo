@@ -42,4 +42,4 @@ nsis:
   shortcutName: Replixo
   # Имя установщика без пробелов, чтобы ссылка /download/windows отдавала файл
   # с корректным именем.
-  artifactName: Replixo-Setup-version-2.exe
+  artifactName: Replixo-Setup-version-3.exe
