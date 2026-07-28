@@ -63,8 +63,17 @@ const REF_WIDTH = 1000
 export const PEN_WIDTH_OPTIONS = [0.001, 0.004, 0.008, 0.014] as const
 export const DEFAULT_PEN_WIDTH = PEN_WIDTH_OPTIONS[1] // ~4px at 1000px
 const ERASER_WIDTH = 0.03 // ~30px at 1000px
+// Pen-shaped cursor. Drawn as a long, slim stylus that spans the whole SVG
+// diagonal so the pointer reads clearly as "рисование" — the hotspot sits on
+// the nib at the bottom-left, exactly where the stroke is laid down.
+// 48px canvas (up from 32px) makes the pen noticeably bigger and longer while
+// staying well under the browsers' 128px cursor limit.
+const CURSOR_SIZE = 48
+// Nib position in the 24×24 viewBox is ≈(2.1, 21.9) → scale to the real size.
+const CURSOR_HOTSPOT_X = Math.round((2.1 / 24) * CURSOR_SIZE)
+const CURSOR_HOTSPOT_Y = Math.round((21.9 / 24) * CURSOR_SIZE)
 const FEATHER_CURSOR =
-  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z' fill='%23171717'/%3E%3Cpath d='M16 8 2 22M17.5 15H9'/%3E%3C/svg%3E") 2 30, pointer`
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${CURSOR_SIZE}' height='${CURSOR_SIZE}' viewBox='0 0 24 24' fill='%23171717' stroke='%23ffffff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.36a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z'/%3E%3Cpath d='M15.5 5.5 18.5 8.5' stroke-width='1.2'/%3E%3C/svg%3E") ${CURSOR_HOTSPOT_X} ${CURSOR_HOTSPOT_Y}, crosshair`
 
 export function StreamAnnotationCanvas({
   active,
