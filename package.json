@@ -14,8 +14,9 @@
     "db:studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate",
     "electron": "electron .",
-    "dist": "electron-builder --win --config electron-builder.yml",
-    "dist:dir": "electron-builder --win --dir --config electron-builder.yml"
+    "check:native": "node scripts/check-native-helper.mjs --pre",
+    "dist": "node scripts/check-native-helper.mjs --pre && electron-builder --win --config electron-builder.yml && node scripts/check-native-helper.mjs --post",
+    "dist:dir": "node scripts/check-native-helper.mjs --pre && electron-builder --win --dir --config electron-builder.yml && node scripts/check-native-helper.mjs --post --dir"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
