@@ -21,6 +21,15 @@ if(MSVC)
   target_compile_options(process-loopback-capture PRIVATE /O2 /EHsc)
 endif()
 
+# Всегда кладём бинарь ровно в bin/process-loopback-capture.exe.
+# Visual Studio — multi-config генератор, и CMake по умолчанию дописывает
+# подпапку конфигурации (bin/Release/...), а electron-builder.yml и
+# scripts/check-native-helper.mjs ждут файл плоско в bin/. Поэтому задаём
+# RUNTIME_OUTPUT_DIRECTORY отдельно для каждой конфигурации.
 set_target_properties(process-loopback-capture PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_SOURCE_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_SOURCE_DIR}/bin"
 )
