@@ -102,6 +102,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     audioProducerRef, videoProducerRef,
     screenVideoProducerRef, screenAudioProducerRef,
     screenStreamRef, screenQualityRef, selectedMicIdRef,
+    isCamOffRef,
     dispatch,
   })
 
@@ -144,9 +145,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
       transports.restartIceForTransport(sendTransportRef.current)
       transports.restartIceForTransport(recvTransportRef.current)
+      void mediaControls.recoverCamera()
       window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
     })
-  }, [roomId, transports])
+  }, [roomId, transports, mediaControls])
 
   // ---------------------------------------------------------------------------
   // Leave
@@ -324,7 +326,25 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           }
 
           if (hasCamRef.current && !videoProducerRef.current) {
-            const videoTrack = localStreamRef.current?.getVideoTracks()[0]
+            let videoTrack = localStreamRef.current?.getVideoTracks()[0]
+            // Same failure mode as the mic above, but far more common for video:
+            // a network drop / device sleep / OS reclaim ends the camera capture
+            // track. An ended track can't be produced, so without re-acquiring it
+            // we'd publish nothing and every participant (including us) would see
+            // a frozen black tile until the user manually toggled the camera.
+            if (!videoTrack || videoTrack.readyState === "ended") {
+              try {
+                if (videoTrack) {
+                  videoTrack.stop()
+                  localStreamRef.current?.removeTrack(videoTrack)
+                }
+                const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
+                videoTrack = camStream.getVideoTracks()[0]
+                if (videoTrack) localStreamRef.current?.addTrack(videoTrack)
+              } catch {
+                videoTrack = undefined
+              }
+            }
             if (videoTrack && videoTrack.readyState === "live") {
               const { CAMERA_PRODUCE_OPTIONS } = await import("./mediasoup/types")
               const producer = await newSendTransport.produce({ track: videoTrack, ...CAMERA_PRODUCE_OPTIONS })
@@ -333,6 +353,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                 videoTrack.enabled = false
                 producer.pause()
               }
+            } else {
+              // The camera is genuinely gone (unplugged, permission revoked).
+              // Reflect that in the UI instead of showing a dead "camera on" tile.
+              dispatch({ type: "TOGGLE_CAM", isOff: true })
             }
           }
 
@@ -436,6 +460,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         if (!error) {
           transports.restartIceForTransport(sendTransportRef.current)
           transports.restartIceForTransport(recvTransportRef.current)
+          // The camera capture track often dies during the outage even though
+          // the transport itself is reusable. Re-check and republish it.
+          void mediaControls.recoverCamera()
           window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
         } else {
           hasJoinedRef.current = false
