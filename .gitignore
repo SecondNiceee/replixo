@@ -17,6 +17,10 @@ node_modules
 # Electron build output
 release/
 
+# CMake артефакты нативного helper'а (сам .exe уже покрыт правилом *.exe ниже)
+electron/native/process-loopback/build/
+electron/native/process-loopback/bin/
+
 # Uploaded chat attachments (live on the server disk, not in git)
 server/uploads/
 uploads/
