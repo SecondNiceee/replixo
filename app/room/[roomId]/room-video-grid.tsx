@@ -28,6 +28,10 @@ interface RoomVideoGridProps {
   onParticipantsHiddenChange?: (hidden: boolean) => void
   /** Electron overlay-режим: показывать только правый сайдбар участников поверх прозрачного окна */
   overlayMode?: boolean
+  /** Открыта совместная доска: рендерим ТОЛЬКО сайдбар участников слева,
+   *  остальное место занимает доска (рендерится родителем рядом с нами).
+   *  Сетка при этом не размонтируется — тайлы держат <audio> участников. */
+  whiteboardOpen?: boolean
   /** Рисование поверх демонстрации экрана — накладывается на тайлы со стримом */
   annotation?: VideoTileAnnotation
 }
@@ -43,6 +47,7 @@ export function RoomVideoGrid({
   participantsHidden = false,
   onParticipantsHiddenChange,
   overlayMode = false,
+  whiteboardOpen = false,
   annotation,
 }: RoomVideoGridProps) {
   const setParticipantsHidden = (v: boolean | ((prev: boolean) => boolean)) => {
@@ -209,43 +214,61 @@ export function RoomVideoGrid({
     </div>
   )
 
+  // Collapsible participants panel — bottom strip on mobile, LEFT column on
+  // large screens. Выезжает слева. Используется и при демонстрации экрана,
+  // и при открытой доске.
+  const participantsColumn = (
+    <div className="relative flex shrink-0">
+      {/* Toggle handle: sits below the strip on mobile, on the right edge of
+          the column on large screens */}
+      <button
+        onClick={() => setParticipantsHidden((v) => !v)}
+        aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
+        className={cn(
+          "absolute left-1/2 -bottom-7 z-10 flex h-7 w-14 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
+          "lg:left-auto lg:-right-7 lg:top-1/2 lg:h-14 lg:w-7 lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-b-none lg:rounded-r-xl lg:border-t lg:border-l-0",
+        )}
+      >
+        <ChevronRight
+          className={cn(
+            "size-4 -rotate-90 text-muted-foreground transition-transform duration-300 lg:rotate-180",
+            participantsHidden && "rotate-90 lg:rotate-0",
+          )}
+        />
+      </button>
+
+      {/* Collapsing area: height collapses on mobile, width on large screens */}
+      <div
+        className={cn(
+          "grid overflow-hidden transition-all duration-300 ease-in-out",
+          participantsHidden
+            ? "grid-rows-[0fr] lg:grid-rows-[1fr] lg:grid-cols-[0fr]"
+            : "grid-rows-[1fr] lg:grid-cols-[1fr]",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">{sidebarTiles}</div>
+      </div>
+    </div>
+  )
+
+  // ---------------------------------------------------------------------------
+  // Доска открыта (обычное, не overlay окно): показываем только участников —
+  // саму доску родитель рисует рядом, во всё оставшееся место. Отступы снизу /
+  // справа резервируют место под стрелку-хэндл, чтобы она не легла на доску.
+  // ---------------------------------------------------------------------------
+  if (whiteboardOpen) {
+    return (
+      <main className="relative z-20 flex shrink-0 bg-black p-2 pb-8 lg:pb-2 lg:pr-8">
+        {participantsColumn}
+      </main>
+    )
+  }
+
   // Screen share layout
   if (hasScreenShare) {
     return (
       <main className="flex flex-1 flex-col gap-2 overflow-hidden bg-black p-2 lg:flex-row">
-        {/* Collapsible participants panel — bottom strip on mobile, LEFT column
-            on large screens. Выезжает слева. */}
-        <div className="relative flex shrink-0">
-          {/* Toggle handle: sits below the strip on mobile, on the right edge of
-              the column on large screens */}
-          <button
-            onClick={() => setParticipantsHidden((v) => !v)}
-            aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
-            className={cn(
-              "absolute left-1/2 -bottom-7 z-10 flex h-7 w-14 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
-              "lg:left-auto lg:-right-7 lg:top-1/2 lg:h-14 lg:w-7 lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-b-none lg:rounded-r-xl lg:border-t lg:border-l-0",
-            )}
-          >
-            <ChevronRight
-              className={cn(
-                "size-4 -rotate-90 text-muted-foreground transition-transform duration-300 lg:rotate-180",
-                participantsHidden && "rotate-90 lg:rotate-0",
-              )}
-            />
-          </button>
-
-          {/* Collapsing area: height collapses on mobile, width on large screens */}
-          <div
-            className={cn(
-              "grid overflow-hidden transition-all duration-300 ease-in-out",
-              participantsHidden
-                ? "grid-rows-[0fr] lg:grid-rows-[1fr] lg:grid-cols-[0fr]"
-                : "grid-rows-[1fr] lg:grid-cols-[1fr]",
-            )}
-          >
-            <div className="min-h-0 overflow-hidden">{sidebarTiles}</div>
-          </div>
-        </div>
+        {participantsColumn}
 
         <div
           className={cn(

@@ -23,7 +23,6 @@ import { RoomSettingsDialog } from "./room-settings-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
 
 import dynamic from "next/dynamic"
 
@@ -164,9 +163,6 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
   const [participantsHidden, setParticipantsHidden] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<"chat" | "annotation" | "sounds">("chat")
-  const [annotationHintOpen, setAnnotationHintOpen] = useState(false)
-  const hintSeen = useAnnotationSettingsStore((state) => state.hintSeen)
-  const markHintSeen = useAnnotationSettingsStore((state) => state.markHintSeen)
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -202,23 +198,8 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     markChatRead,
   })
 
-  const handleAnnotationButtonClick = useCallback(() => {
-    toggleAnnotation()
-
-    if (isElectron) {
-      const desktopHintKey = "replixo:desktop-annotation-hint-seen"
-      if (window.localStorage.getItem(desktopHintKey) !== "true") {
-        window.localStorage.setItem(desktopHintKey, "true")
-        setAnnotationHintOpen(true)
-      }
-      return
-    }
-
-    if (!hintSeen) {
-      markHintSeen()
-      setAnnotationHintOpen(true)
-    }
-  }, [hintSeen, isElectron, markHintSeen, toggleAnnotation])
+  // Перо включается/выключается сразу, без подсказки о двойном нажатии.
+  const handleAnnotationButtonClick = toggleAnnotation
 
   const openSettings = useCallback((tab: "chat" | "annotation" | "sounds" = "chat") => {
     setSettingsTab(tab)
@@ -301,11 +282,22 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
 
       {/* The video grid stays MOUNTED even while the whiteboard is open — it
           hosts the participants' <audio> elements, so unmounting it (a ternary
-          swap) would cut everyone's audio. Instead we hide it behind the board
-          with `hidden` (display:none keeps media playing) and overlay the
-          whiteboard on top. */}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className={cn("flex min-h-0 flex-1 flex-col", whiteboardOpen && "hidden")}>
+          swap) would cut everyone's audio. While the board is open the grid
+          switches to a compact "participants only" column on the left (exactly
+          like the screen-share layout) and the board takes the rest of the
+          space, so people + chat stay reachable via their arrow handles. */}
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1",
+          whiteboardOpen ? "flex-col lg:flex-row" : "flex-col",
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-h-0 min-w-0",
+            whiteboardOpen ? "shrink-0" : "flex-1 flex-col",
+          )}
+        >
           <RoomVideoGrid
             localStream={localStream}
             localScreenStream={localScreenStream}
@@ -317,6 +309,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             participantsHidden={participantsHidden}
             onParticipantsHiddenChange={setParticipantsHidden}
             overlayMode={overlayMode}
+            whiteboardOpen={whiteboardOpen && !overlayMode}
             annotation={{
               active: annotationActive,
               tool: annotationTool,
@@ -334,9 +327,15 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           <div
             {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
             className={cn(
-              "absolute inset-0 pointer-events-auto",
-              // Поверх видеослоя, но ниже Electron overlay-контролов (z-9990+).
-              overlayMode && "z-[9980]",
+              "pointer-events-auto",
+              overlayMode
+                // Overlay (Electron, идёт демонстрация): доска растянута на всё
+                // прозрачное окно, поверх видеослоя, но ниже overlay-контролов
+                // (z-9990+). Сайдбар участников — fixed слева, поэтому
+                // отступаем, чтобы он не накрывал доску.
+                ? cn("absolute inset-0 z-[9980]", !participantsHidden && "lg:left-52")
+                // Обычное окно: доска — сосед колонки участников по flex-строке.
+                : "relative min-h-0 min-w-0 flex-1",
             )}
           >
             <Whiteboard
@@ -392,7 +391,10 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
         className={cn(
-          "fixed inset-y-0 right-0 z-30 flex transition-transform duration-300 ease-in-out",
+          "fixed inset-y-0 right-0 flex transition-transform duration-300 ease-in-out",
+          // В overlay-режиме доска растянута на всё окно с z-9980, поэтому чат
+          // нужно поднять выше неё (но ниже overlay-контролов на z-9990+).
+          overlayMode ? "z-[9985]" : "z-30",
           chatOpen ? "translate-x-0" : "translate-x-full",
         )}
       >
@@ -451,22 +453,6 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           рабочего стола. Полноэкранный прозрачный холст и контролы вынесены в
           RoomOverlayLayer. */}
       <RoomSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialTab={settingsTab} />
-
-      <Dialog open={annotationHintOpen} onOpenChange={setAnnotationHintOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Быстрое управление пером</DialogTitle>
-            <DialogDescription className="flex flex-col gap-2 text-left leading-relaxed">
-              <span>Чтобы включить или выключить перо, нажмите быстро дважды по экрану.</span>
-              <span>В настройках можно изменить кнопку включения/выключения пера.</span>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setAnnotationHintOpen(false); openSettings("annotation") }}>Настройки</Button>
-            <Button onClick={() => setAnnotationHintOpen(false)}>Хорошо</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {overlayMode && (
         <RoomOverlayLayer
