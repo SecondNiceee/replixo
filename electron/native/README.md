@@ -43,7 +43,26 @@ cmake --build build --config Release
 ## Packaging
 
 `electron-builder.yml` ships the built `.exe` via `extraResources` so it lands in
-`process.resourcesPath` inside the installed app. If the binary is missing (or the
-OS is older than build 19041), `electron/main.js` reports the feature as
-unsupported and the renderer falls back to the previous loopback + AEC path — no
-regression.
+`process.resourcesPath` inside the installed app. At **runtime**, if the binary is
+missing (or the OS is older than build 19041), `electron/main.js` reports the
+feature as unsupported and the renderer falls back to the previous loopback + AEC
+path — no regression.
+
+### Сборка обязательна (build gate)
+
+electron-builder **молча** игнорирует отсутствующие `extraResources`: glob ничего
+не находит — и установщик собирается без helper'а. Поэтому `pnpm run dist` и
+`pnpm run dist:dir` обёрнуты проверкой
+[`scripts/check-native-helper.mjs`](../../scripts/check-native-helper.mjs):
+
+- **до** упаковки: `bin/process-loopback-capture.exe` существует, не заглушка
+  (> 8 KB) и является валидным **x64** PE-файлом;
+- **после** упаковки: тот же бинарь лежит в
+  `release/win-unpacked/resources/native/` с совпадающим размером, а установщик
+  `.exe` действительно создан.
+
+Любая из проверок валит сборку с ненулевым кодом выхода. Проверить отдельно:
+
+```powershell
+pnpm run check:native
+```
