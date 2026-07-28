@@ -53,6 +53,9 @@ interface UseMediaControlsParams {
   screenStreamRef: React.MutableRefObject<MediaStream | null>
   screenQualityRef: React.MutableRefObject<ScreenQuality>
   selectedMicIdRef: React.MutableRefObject<string | undefined>
+  // Reflects the user's camera intent, so recovery can republish paused
+  // instead of unexpectedly turning the camera back on.
+  isCamOffRef?: React.MutableRefObject<boolean>
   dispatch: (action: Action) => void
 }
 
@@ -69,6 +72,7 @@ export function useMediaControls({
   screenStreamRef,
   screenQualityRef,
   selectedMicIdRef,
+  isCamOffRef,
   dispatch,
 }: UseMediaControlsParams) {
   const [permissionError, setPermissionError] = useState<string | null>(null)
@@ -79,6 +83,10 @@ export function useMediaControls({
   const [activeMicId, setActiveMicId] = useState<string | null>(null)
   const [isMicSwitching, setIsMicSwitching] = useState(false)
   const screenRecoveryInFlightRef = useRef(false)
+  const camRecoveryInFlightRef = useRef(false)
+  // Indirection so the camera track's "ended" watcher can call recovery even
+  // though recoverCamera is declared further down.
+  const recoverCameraRef = useRef<() => Promise<boolean>>(async () => false)
   const screenCaptureCleanupRef = useRef<(() => void) | null>(null)
 
   // ---------------------------------------------------------------------------
@@ -201,6 +209,17 @@ export function useMediaControls({
     }
   }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch, isMicSwitching])
 
+  // Watch a camera track so we notice the moment the OS/browser kills it
+  // (network drop, device sleep, driver reset). Without this the tile silently
+  // freezes on a black frame until the user toggles the camera manually.
+  const watchCameraTrack = useCallback((track: MediaStreamTrack) => {
+    track.addEventListener("ended", () => {
+      // Only self-heal if this is still the track we're publishing.
+      if (localStreamRef.current?.getVideoTracks()[0] !== track) return
+      void recoverCameraRef.current()
+    })
+  }, [localStreamRef])
+
   // ---------------------------------------------------------------------------
   // Camera toggle
   // ---------------------------------------------------------------------------
@@ -218,6 +237,7 @@ export function useMediaControls({
         setPermissionError(null)
         const track = camStream.getVideoTracks()[0]
         stream.addTrack(track)
+        watchCameraTrack(track)
         dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })
         const transport = sendTransportRef.current ?? (await waitForSendTransport())
         if (transport && !videoProducerRef.current && track.readyState === "live") {
@@ -250,7 +270,105 @@ export function useMediaControls({
     }
     dispatch({ type: "TOGGLE_CAM", isOff: true })
   }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, videoProducerRef,
-      dispatch, waitForSendTransport])
+      dispatch, waitForSendTransport, watchCameraTrack])
+
+  // ---------------------------------------------------------------------------
+  // Camera recovery after a network blip / device sleep
+  //
+  // A short outage frequently ends the camera capture track while leaving the
+  // mic alive. An ended video track keeps rendering as a frozen black frame
+  // locally and stops producing frames for everyone else, and because nothing
+  // throws, the failure is silent. The ICE-restart recovery path reuses the
+  // existing transport, so nothing would otherwise re-check the track — this
+  // re-acquires the camera and re-publishes it without any user interaction.
+  // ---------------------------------------------------------------------------
+  const recoverCamera = useCallback(async () => {
+    if (camRecoveryInFlightRef.current) return false
+    const stream = localStreamRef.current
+    if (!stream) return false
+
+    const existingTrack = stream.getVideoTracks()[0]
+    const producer = videoProducerRef.current
+    const trackDead = !existingTrack || existingTrack.readyState === "ended"
+    const producerDead = !producer || producer.closed
+
+    // Nothing to do while the track is live and the producer is still attached
+    // to the current send transport.
+    if (!trackDead && !producerDead && producer.transport === sendTransportRef.current) return false
+    // The user intentionally has no camera running — leave it that way.
+    if (!existingTrack && !producer) return false
+
+    camRecoveryInFlightRef.current = true
+    try {
+      let track = existingTrack
+
+      if (trackDead) {
+        if (existingTrack) {
+          existingTrack.stop()
+          stream.removeTrack(existingTrack)
+        }
+        try {
+          const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
+          track = camStream.getVideoTracks()[0]
+          if (track) {
+            stream.addTrack(track)
+            watchCameraTrack(track)
+          }
+        } catch {
+          // Camera unplugged or permission revoked — surface it as "cam off"
+          // so the UI stops showing a dead tile.
+          if (producer) {
+            socketRef.current?.emit("closeProducer", {
+              roomId, peerId: peerIdRef.current, producerId: producer.id,
+            })
+            producer.close()
+            videoProducerRef.current = null
+          }
+          dispatch({ type: "TOGGLE_CAM", isOff: true })
+          return false
+        }
+      }
+
+      if (!track || track.readyState !== "live") return false
+
+      // Drop the stale producer: it references the dead track (or a transport
+      // that no longer exists) and can never resume on its own.
+      if (producer) {
+        if (!producer.closed) {
+          socketRef.current?.emit("closeProducer", {
+            roomId, peerId: peerIdRef.current, producerId: producer.id,
+          })
+          producer.close()
+        }
+        videoProducerRef.current = null
+      }
+
+      const transport = sendTransportRef.current ?? (await waitForSendTransport())
+      if (!transport || transport.closed) return false
+
+      const nextProducer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
+      videoProducerRef.current = nextProducer
+
+      // Preserve the user's intent: if the camera was toggled off, republish
+      // paused rather than surprising them with a live feed.
+      if (isCamOffRef?.current) {
+        track.enabled = false
+        nextProducer.pause()
+      } else {
+        track.enabled = true
+        dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })
+      }
+      return true
+    } catch {
+      return false
+    } finally {
+      camRecoveryInFlightRef.current = false
+    }
+  }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, videoProducerRef,
+      isCamOffRef, dispatch, waitForSendTransport, watchCameraTrack])
+
+  // Keep the indirection ref pointing at the latest recovery closure.
+  recoverCameraRef.current = recoverCamera
 
   // ---------------------------------------------------------------------------
   // Screen share
@@ -472,6 +590,7 @@ export function useMediaControls({
     toggleMic,
     switchMic,
     toggleCam,
+    recoverCamera,
     toggleScreenShare,
     startScreenShare,
     stopScreenShare,
