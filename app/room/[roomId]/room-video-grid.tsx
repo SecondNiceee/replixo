@@ -258,7 +258,7 @@ export function RoomVideoGrid({
   // ---------------------------------------------------------------------------
   if (whiteboardOpen) {
     return (
-      <main className="relative z-20 flex shrink-0 bg-black p-2 pb-8 lg:pb-2 lg:pr-8">
+      <main className="relative z-20 flex min-h-0 shrink-0 bg-black p-2 pb-8 lg:pb-2 lg:pr-8">
         {participantsColumn}
       </main>
     )

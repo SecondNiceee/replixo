@@ -180,7 +180,11 @@ export function Whiteboard({ initialSnapshot, onChange, onSnapshot, subscribeRem
   }, [])
 
   return (
-    <div className="absolute inset-0">
+    // `isolate` (isolation: isolate) — обязательно: tldraw рисует свои панели с
+    // z-index: 300 (--layer-panels), а .tl-container не создаёт stacking
+    // context. Без изоляции тулбары доски всплыли бы в корневой слой и накрыли
+    // панель чата (z-30), сайдбар участников и плавающую кнопку чата (z-40).
+    <div className="absolute inset-0 isolate">
       <Tldraw onMount={handleMount} assetUrls={TLDRAW_ASSET_URLS} />
     </div>
   )
