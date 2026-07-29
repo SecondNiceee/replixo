@@ -1,3 +1,5 @@
+// Должен идти первым: патчит console, чтобы каждая строка логов имела дату/время.
+import './logger'
 import 'dotenv/config'
 import http from 'http'
 import path from 'path'
