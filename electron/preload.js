@@ -76,4 +76,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("audio-capture-ended", handler)
     return () => ipcRenderer.removeListener("audio-capture-ended", handler)
   },
+
+  // -------------------------------------------------------------------------
+  // Диагностика: путь к логу и открытие папки логов в проводнике, чтобы
+  // пользователь мог прислать файл после вылета.
+  // -------------------------------------------------------------------------
+  getLogPath: () => ipcRenderer.invoke("get-log-path"),
+  openLogsFolder: () => ipcRenderer.invoke("open-logs-folder"),
 })
