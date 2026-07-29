@@ -3,6 +3,16 @@ const path = require("path")
 const fs = require("fs")
 const os = require("os")
 const { spawn } = require("child_process")
+const {
+  initDiagnostics,
+  attachWindowDiagnostics,
+  setupDiagnosticsIpc,
+  log,
+} = require("./diagnostics")
+
+// Диагностика включается ДО app.whenReady() и до создания дочерних процессов,
+// иначе их краши не попадут в minidump'ы.
+initDiagnostics()
 
 // URL задеплоенного приложения. Можно переопределить переменной окружения APP_URL.
 const APP_URL = process.env.APP_URL || "https://replixo.ru"
@@ -34,6 +44,8 @@ function createWindow() {
     },
   })
 
+  attachWindowDiagnostics(mainWindow)
+
   mainWindow.once("ready-to-show", () => {
     mainWindow.show()
   })
@@ -47,6 +59,16 @@ function createWindow() {
     }
     shell.openExternal(url)
     return { action: "deny" }
+  })
+
+  // Перезагрузка страницы (F5, потеря соединения, навигация) уничтожает
+  // AudioWorklet в renderer, но нативный хелпер и IPC-помпа продолжали жить и
+  // качать PCM в никуда — утечка процесса и лишняя нагрузка при каждом reload.
+  mainWindow.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      stopAudioCapture()
+      stopGlobalMouseHook()
+    }
   })
 
   mainWindow.on("closed", () => {
@@ -269,7 +291,7 @@ function startGlobalMouseHook() {
     globalMouseHook.start()
   } catch (error) {
     stopGlobalMouseHook()
-    console.error("[global-mouse-hook] Failed to start:", error)
+    log.error("global-mouse-hook", "failed to start", error)
   }
 }
 
@@ -352,6 +374,7 @@ function setupClipboard() {
 let audioCaptureProc = null
 let audioCaptureTimer = null
 let audioCaptureQueue = Buffer.alloc(0)
+let lastOverflowLogAt = 0
 
 const AUDIO_FRAME_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT
 const AUDIO_IPC_FRAMES = 960 // 20 ms at 48 kHz
@@ -442,8 +465,28 @@ function setupAudioCapture() {
         stdio: ["ignore", "pipe", "pipe"],
       })
     } catch (err) {
+      log.error("loopback", "spawn threw", err)
       return { supported: false, reason: "spawn-failed", error: String(err) }
     }
+
+    // КРИТИЧНО: spawn() НЕ бросает исключение синхронно, если .exe не удалось
+    // запустить (антивирус, файл занят, повреждённая установка) — он асинхронно
+    // эмитит событие "error". Без слушателя это превращается в
+    // uncaughtException и МГНОВЕННО убивает main-процесс: приложение просто
+    // исчезает без единого сообщения. То же самое с EPIPE на stdout/stderr,
+    // когда хелпер умирает в момент записи PCM.
+    //
+    // Это и была причина вылетов при "демонстрации со звуком": единственный
+    // сценарий, в котором приложение вообще спавнит дочерний процесс.
+    audioCaptureProc.on("error", (err) => {
+      log.error("loopback", "helper process error", err)
+      stopAudioCapture()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("audio-capture-ended", -1)
+      }
+    })
+    audioCaptureProc.stdout.on("error", (err) => log.error("loopback", "stdout error", err))
+    audioCaptureProc.stderr.on("error", (err) => log.error("loopback", "stderr error", err))
 
     startAudioCapturePump()
 
@@ -456,17 +499,24 @@ function setupAudioCapture() {
         const excess = audioCaptureQueue.length - AUDIO_MAX_QUEUE_BYTES
         const alignedDrop = Math.ceil(excess / AUDIO_FRAME_BYTES) * AUDIO_FRAME_BYTES
         audioCaptureQueue = audioCaptureQueue.subarray(alignedDrop)
-        console.warn("[loopback] PCM queue overflow; dropped oldest audio")
+        // Троттлим лог: при затыке renderer'а это событие срабатывает десятки раз
+        // в секунду, и сам логгер становится источником нагрузки.
+        const now = Date.now()
+        if (now - lastOverflowLogAt > 1000) {
+          lastOverflowLogAt = now
+          log.warn("loopback", "PCM queue overflow; dropped oldest audio", { droppedBytes: alignedDrop })
+        }
       }
     })
 
     audioCaptureProc.stderr.on("data", (buf) => {
       const text = String(buf).trim()
-      if (text) console.log("[loopback]", text)
+      if (text) log.info("loopback", text)
     })
 
     const captureProc = audioCaptureProc
-    captureProc.on("exit", (code) => {
+    captureProc.on("exit", (code, signal) => {
+      log.info("loopback", "helper exited", { code, signal })
       // Ignore the stale exit event if another helper has already replaced it.
       if (audioCaptureProc !== captureProc) return
       audioCaptureProc = null
@@ -492,6 +542,7 @@ app.whenReady().then(() => {
   setupOverlayMode()
   setupClipboard()
   setupAudioCapture()
+  setupDiagnosticsIpc()
   createWindow()
 
   app.on("activate", () => {

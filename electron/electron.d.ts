@@ -38,6 +38,10 @@ interface ElectronAPI {
   stopAudioCapture: () => Promise<boolean>
   onAudioCaptureData: (callback: (chunk: Uint8Array) => void) => () => void
   onAudioCaptureEnded: (callback: (code: number | null) => void) => () => void
+
+  // Диагностика крашей: путь к main.log и открытие папки логов.
+  getLogPath: () => Promise<string | null>
+  openLogsFolder: () => Promise<boolean>
 }
 
 interface AudioCaptureSupport {
