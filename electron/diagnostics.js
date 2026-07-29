@@ -26,13 +26,41 @@ const path = require("path")
 const fs = require("fs")
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024 // 5 МБ, дальше ротация
+const MAX_ARCHIVES = 5 // сколько датированных архивов храним
 
 let logStream = null
 let logDir = null
 let logFilePath = null
 
-function timestamp() {
-  return new Date().toISOString()
+const pad = (n, width = 2) => String(n).padStart(width, "0")
+
+/**
+ * Локальная дата и время в читаемом виде со смещением часового пояса:
+ *   2026-07-29 14:03:12.345 +03:00
+ *
+ * Именно локальное время, а не UTC: пользователь сообщает "упало примерно в
+ * три часа дня", и лог должен совпадать с его часами без пересчёта. Смещение
+ * пишем явно, иначе логи из разных таймзон невозможно сопоставить.
+ */
+function timestamp(date = new Date()) {
+  const offsetMin = -date.getTimezoneOffset()
+  const sign = offsetMin >= 0 ? "+" : "-"
+  const abs = Math.abs(offsetMin)
+  const offset = `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.` +
+    `${pad(date.getMilliseconds(), 3)} ${offset}`
+  )
+}
+
+/** Компактная дата для имени файла: 2026-07-29_140312 */
+function fileStamp(date = new Date()) {
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  )
 }
 
 function serialize(value) {
@@ -73,15 +101,16 @@ function openLogFile() {
   fs.mkdirSync(logDir, { recursive: true })
   logFilePath = path.join(logDir, "main.log")
 
-  // Ротация: предыдущий запуск сохраняем отдельно, чтобы лог с крашем не был
-  // перезаписан автоматическим перезапуском приложения пользователем.
+  // Ротация: архив получает дату в имени, поэтому по файлам сразу видно, к
+  // какому дню относится краш, и старый архив не затирается новым.
   try {
     if (fs.existsSync(logFilePath)) {
-      const { size } = fs.statSync(logFilePath)
-      if (size > MAX_LOG_BYTES) {
-        fs.renameSync(logFilePath, path.join(logDir, "main.prev.log"))
+      const stat = fs.statSync(logFilePath)
+      if (stat.size > MAX_LOG_BYTES) {
+        fs.renameSync(logFilePath, path.join(logDir, `main.${fileStamp(stat.mtime)}.log`))
       }
     }
+    pruneOldLogs()
   } catch {
     /* ignore */
   }
@@ -90,6 +119,33 @@ function openLogFile() {
   logStream.on("error", () => {
     logStream = null
   })
+
+  // Разделитель между запусками: в append-режиме без него непонятно, где
+  // закончилась прошлая сессия (та, что упала) и началась новая.
+  const now = new Date()
+  try {
+    logStream.write(
+      `\n=== session start ${timestamp(now)} (${now.toISOString()} UTC) ===\n`,
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Держим не больше MAX_ARCHIVES датированных архивов, удаляя самые старые. */
+function pruneOldLogs() {
+  const archives = fs
+    .readdirSync(logDir)
+    .filter((name) => /^main\..+\.log$/.test(name))
+    .sort()
+
+  for (const name of archives.slice(0, Math.max(0, archives.length - MAX_ARCHIVES))) {
+    try {
+      fs.unlinkSync(path.join(logDir, name))
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /**
@@ -112,6 +168,9 @@ function initDiagnostics() {
   crashReporter.start({ uploadToServer: false, compress: true })
 
   log.info("startup", {
+    startedAt: timestamp(),
+    startedAtUtc: new Date().toISOString(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     version: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
@@ -162,7 +221,7 @@ function initDiagnostics() {
   })
 
   app.on("quit", (_event, exitCode) => {
-    log.info("quit", { exitCode })
+    log.info("quit", { exitCode, uptimeSec: Math.round(process.uptime()) })
   })
 
   app.on("before-quit", () => log.info("before-quit"))
