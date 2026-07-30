@@ -146,9 +146,18 @@ function resolveServerUrl(): string {
 
 export const SERVER_URL = resolveServerUrl()
 
+// Legacy per-tab key. Kept only so an already open tab keeps its identity
+// instead of instantly kicking itself after this update ships.
 export const PEER_ID_KEY = "replixo_peer_session_id"
 
-let memoryPeerId: string | null = null
+// Identity is now per browser profile AND per room, stored in localStorage.
+// sessionStorage gave every tab (and every fresh page open) a brand new ID, so
+// the server had no way to tell that two "participants" were the same human —
+// which is how one person ended up in the room twice, with each clone holding
+// its own microphone and transports.
+const PEER_ID_PREFIX = "replixo_peer_id:"
+
+const memoryPeerIds = new Map<string, string>()
 
 function createPeerId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -157,23 +166,41 @@ function createPeerId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-export function getOrCreatePeerId(): string {
-  if (memoryPeerId) return memoryPeerId
+function roomKey(roomId: string | undefined): string {
+  const normalized = (roomId ?? "").trim().toLowerCase()
+  return `${PEER_ID_PREFIX}${normalized || "default"}`
+}
+
+/**
+ * Stable identity of this browser inside a given room.
+ *
+ * Same browser + same room always resolves to the same peerId, so opening the
+ * room a second time makes the server recognise a duplicate and kick the stale
+ * session (`kicked: duplicate`) instead of seating a second copy of the person.
+ */
+export function getOrCreatePeerId(roomId?: string): string {
+  const key = roomKey(roomId)
+  const cached = memoryPeerIds.get(key)
+  if (cached) return cached
   if (typeof window === "undefined") return createPeerId()
 
+  let peerId: string | null = null
   try {
-    const stored = window.sessionStorage.getItem(PEER_ID_KEY)
-    if (stored) {
-      memoryPeerId = stored
-      return stored
+    peerId = window.localStorage.getItem(key)
+    if (!peerId) {
+      // Adopt the ID this tab was already using, if any, so a live reload right
+      // after the update does not look like a duplicate to the server.
+      peerId = window.sessionStorage.getItem(PEER_ID_KEY) ?? createPeerId()
+      window.localStorage.setItem(key, peerId)
     }
-    memoryPeerId = createPeerId()
-    window.sessionStorage.setItem(PEER_ID_KEY, memoryPeerId)
+    // Keep the tab-scoped copy in sync for older code paths / debugging.
+    window.sessionStorage.setItem(PEER_ID_KEY, peerId)
   } catch {
     // Storage can be blocked in private/embedded contexts. The in-memory ID
     // still remains stable for the lifetime of this page.
-    memoryPeerId = createPeerId()
+    peerId = peerId ?? createPeerId()
   }
 
-  return memoryPeerId
+  memoryPeerIds.set(key, peerId)
+  return peerId
 }

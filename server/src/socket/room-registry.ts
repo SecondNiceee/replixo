@@ -27,6 +27,23 @@ export function setPeerSocket(roomId: string, peerId: string, socketId: string):
   peerSockets.set(roomPeerKey(roomId, peerId), socketId)
 }
 
+// roomId + peerId → clientId: a nonce generated once per page load. Since the
+// peerId is now stable per browser+room, a reconnect from the SAME page arrives
+// with the same peerId but a new socket id — indistinguishable from a real
+// second tab unless we also compare the page instance. Without this the client
+// could kick itself while recovering from a network hand-off.
+const peerClients = new Map<string, string>()
+
+export function getPeerClient(roomId: string, peerId: string): string | undefined {
+  return peerClients.get(roomPeerKey(roomId, peerId))
+}
+
+export function setPeerClient(roomId: string, peerId: string, clientId: string | undefined): void {
+  const key = roomPeerKey(roomId, peerId)
+  if (clientId) peerClients.set(key, clientId)
+  else peerClients.delete(key)
+}
+
 // roomId + peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
 // Wi-Fi hand-off, tunnel switch) we DON'T evict the peer immediately. Instead we
 // keep its producers/consumers/transports alive for a grace window so that when
@@ -117,6 +134,7 @@ export function evictPeer(io: Server, roomId: string, peerId: string, expectedSo
   room.removePeer(peerId)
   io.to(roomId).emit('peerLeft', { peerId })
   peerSockets.delete(roomPeerKey(roomId, peerId))
+  peerClients.delete(roomPeerKey(roomId, peerId))
 
   console.log(`[room] Peer ${peerId} evicted from room ${roomId}`)
   cleanupRoomIfEmpty(roomId)
