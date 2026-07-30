@@ -57,8 +57,11 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         if (existingSocketId && existingSocketId !== socket.id) {
           const oldSocket = io.sockets.sockets.get(existingSocketId)
           if (oldSocket?.connected) {
-            // A genuine duplicate session in this room. Independent tabs now
-            // have different peer IDs, so this only handles an actual clone.
+            // The same device is joining this room again (extra tab/window, or
+            // a reload while the old socket is still alive). peerId is derived
+            // from a persistent device id, so the stale session is kicked here
+            // instead of becoming a second participant that takes a slot and
+            // fights over producers.
             oldSocket.emit('kicked', { reason: 'duplicate' })
             oldSocket.disconnect(true)
           }

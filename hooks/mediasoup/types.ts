@@ -146,34 +146,75 @@ function resolveServerUrl(): string {
 
 export const SERVER_URL = resolveServerUrl()
 
-export const PEER_ID_KEY = "replixo_peer_session_id"
+// A device identity that survives reloads, tab duplication and new windows.
+// It lives in localStorage (shared by every tab of the same origin/profile) so
+// one human always maps to ONE participant, no matter how many tabs they open.
+export const DEVICE_ID_KEY = "replixo_device_id"
 
-let memoryPeerId: string | null = null
+// Legacy per-tab key. Removed on first read so old sessions don't keep a
+// tab-scoped identity that would still produce duplicate participants.
+const LEGACY_PEER_ID_KEY = "replixo_peer_session_id"
 
-function createPeerId(): string {
+let memoryDeviceId: string | null = null
+
+function createRandomId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID()
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-export function getOrCreatePeerId(): string {
-  if (memoryPeerId) return memoryPeerId
-  if (typeof window === "undefined") return createPeerId()
+function getOrCreateDeviceId(): string {
+  if (memoryDeviceId) return memoryDeviceId
+  if (typeof window === "undefined") return createRandomId()
 
   try {
-    const stored = window.sessionStorage.getItem(PEER_ID_KEY)
+    window.sessionStorage.removeItem(LEGACY_PEER_ID_KEY)
+  } catch {
+    // Ignore: sessionStorage may be unavailable.
+  }
+
+  try {
+    const stored = window.localStorage.getItem(DEVICE_ID_KEY)
     if (stored) {
-      memoryPeerId = stored
+      memoryDeviceId = stored
       return stored
     }
-    memoryPeerId = createPeerId()
-    window.sessionStorage.setItem(PEER_ID_KEY, memoryPeerId)
+    memoryDeviceId = createRandomId()
+    window.localStorage.setItem(DEVICE_ID_KEY, memoryDeviceId)
   } catch {
     // Storage can be blocked in private/embedded contexts. The in-memory ID
     // still remains stable for the lifetime of this page.
-    memoryPeerId = createPeerId()
+    memoryDeviceId = createRandomId()
   }
 
-  return memoryPeerId
+  return memoryDeviceId
+}
+
+// FNV-1a. Two passes with different offset bases give a 64-bit digest, which
+// keeps accidental collisions between two devices in one room negligible.
+function fnv1a(input: string, seed: number): string {
+  let hash = seed
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, "0")
+}
+
+/**
+ * Deterministic per-(device, room) peer identifier.
+ *
+ * Opening the same room again in another tab/window yields the SAME peerId, so
+ * the server's duplicate check in `joinRoom` kicks the stale session instead of
+ * letting a "clone" occupy a second slot and fight over producers. Different
+ * rooms get different ids, so a delayed disconnect in room A can never evict
+ * the same device from room B.
+ */
+export function getOrCreatePeerId(roomId: string): string {
+  // Match the server's room canonicalisation (case-insensitive, separators
+  // ignored) so "abc-defg" and "ABCDEFG" resolve to the same peer identity.
+  const room = (roomId ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+  const scope = `${getOrCreateDeviceId()}|${room}`
+  return `${fnv1a(scope, 0x811c9dc5)}${fnv1a(scope, 0x9e3779b9)}`
 }
