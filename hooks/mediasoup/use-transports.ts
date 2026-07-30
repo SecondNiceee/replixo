@@ -6,6 +6,13 @@ import type { DeviceType, Transport, Consumer, Producer, MediaSource } from "./t
 import { normalizeSource } from "./types"
 import type { Action } from "./reducer"
 
+// How long we wait for a restarted ICE session to actually reach "connected"
+// before treating the attempt as failed, and how many attempts we make before
+// falling back to a full media-session rebuild. Together they give roughly
+// 40 s of real recovery time instead of the previous ~3 s.
+const ICE_VERIFY_TIMEOUT_MS = 12000
+const ICE_MAX_ATTEMPTS = 3
+
 interface UseTransportsParams {
   roomId: string
   peerIdRef: React.MutableRefObject<string>
@@ -103,6 +110,10 @@ export function useTransports({
     (transport: Transport | null, attempt = 0) => {
       const socket = socketRef.current
       if (!socket || !transport || transport.closed) return
+      // One restart at a time per transport. The flag is now held until the ICE
+      // result is actually verified (below), so the storm of `connectionstatechange`
+      // events plus the visibility/online/pageshow recovery hooks can no longer
+      // fire a dozen parallel restarts for the same transport.
       if (attempt === 0 && iceRestartingRef.current.has(transport.id)) return
 
       const direction = transport === sendTransportRef.current ? "send" : "recv"
@@ -112,17 +123,20 @@ export function useTransports({
         console.error(`[media] ICE recovery exhausted room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} reason=${reason}`)
         onRecoveryExhausted(`${direction}:${reason}`)
       }
+      const finish = () => {
+        clearIceRetry(transport.id)
+        iceRestartingRef.current.delete(transport.id)
+      }
       const scheduleRetry = () => {
         if (transport.closed || transport.connectionState === "connected") {
-          clearIceRetry(transport.id)
-          iceRestartingRef.current.delete(transport.id)
+          finish()
           return
         }
-        if (attempt >= 2) {
+        if (attempt >= ICE_MAX_ATTEMPTS - 1) {
           failToRebuild("transport-still-disconnected")
           return
         }
-        const delay = 1000 * 2 ** attempt
+        const delay = 1500 * 2 ** attempt
         clearIceRetry(transport.id)
         const timer = setTimeout(() => restartIceForTransport(transport, attempt + 1), delay)
         iceRetryTimersRef.current.set(transport.id, timer)
@@ -145,9 +159,14 @@ export function useTransports({
           if (acknowledged) return
           acknowledged = true
           clearTimeout(ackTimer)
-          iceRestartingRef.current.delete(transport.id)
           if (error || !iceParameters) {
             console.warn(`[media] ICE restart rejected room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} error=${error ?? "missing-parameters"}`)
+            // The server told us this transport no longer exists. Retrying ICE on
+            // it can never succeed, so go straight to a single rebuild.
+            if (error && /transport-gone|not found/i.test(error)) {
+              failToRebuild("transport-gone")
+              return
+            }
             scheduleRetry()
             return
           }
@@ -163,6 +182,12 @@ export function useTransports({
                 }
               }
             }
+            // Give the fresh ICE credentials time to actually produce a working
+            // path. Checking `connectionState` synchronously here is what made
+            // the old code burn through all attempts in ~3 s (ICE, especially
+            // over TURN, needs much longer) and tear down a session that was
+            // about to recover.
+            await waitForTransportConnected(transport, ICE_VERIFY_TIMEOUT_MS)
             scheduleRetry()
           } catch (error) {
             console.error(`[media] ICE restart apply failed room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction}`, error)
@@ -172,7 +197,8 @@ export function useTransports({
       )
     },
     [roomId, peerIdRef, socketRef, sendTransportRef, audioProducerRef, videoProducerRef,
-     screenVideoProducerRef, screenAudioProducerRef, iceRestartingRef, iceRetryTimersRef, clearIceRetry, onRecoveryExhausted],
+     screenVideoProducerRef, screenAudioProducerRef, iceRestartingRef, iceRetryTimersRef, clearIceRetry,
+     onRecoveryExhausted, waitForTransportConnected],
   )
 
   // ---------------------------------------------------------------------------

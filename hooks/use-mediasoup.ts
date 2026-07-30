@@ -21,6 +21,11 @@ import { registerRoomSocketListeners } from "./mediasoup/register-socket-listene
 export type { RemotePeer, RoomStatus, ScreenQuality, ChatAttachment, ChatMessage } from "./mediasoup/types"
 export { SCREEN_QUALITY_PRESETS } from "./mediasoup/types"
 
+// Minimum gap between two full media-session rebuilds. A rebuild is visible to
+// every other participant (producers close and re-open), so it must never turn
+// into a loop on a flaky network.
+const REBUILD_COOLDOWN_MS = 30000
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -73,6 +78,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const joinInFlightRef = useRef(false)
   const connectionGenerationRef = useRef(0)
   const recoveryInFlightRef = useRef(false)
+  const lastRebuildAtRef = useRef(0)
   const rebuildConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
 
   // Keep refs in sync with state (readable inside async callbacks without stale closures)
@@ -392,6 +398,21 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     const rebuildMediaSession = async (reason: string) => {
       if (recoveryInFlightRef.current || socketRef.current !== socket || !socket.connected) return
+      // A rebuild closes every producer/transport and re-joins, which the other
+      // participants see as this person dropping out and coming back. When the
+      // network is genuinely bad the ICE watchdogs used to trigger it every few
+      // seconds, producing an endless leave/join flicker for everyone. Enforce a
+      // cooldown so at most one rebuild happens per window and the transports
+      // get a real chance to settle in between.
+      // A rejected rejoin probe means the server no longer knows this peer, so a
+      // rebuild is the only way back in and must not be throttled.
+      const force = reason.startsWith("rejoin-") || reason.startsWith("manual-probe-")
+      const now = Date.now()
+      if (!force && now - lastRebuildAtRef.current < REBUILD_COOLDOWN_MS) {
+        console.warn(`[media] Rebuild throttled room=${roomId} peer=${peerIdRef.current} reason=${reason}`)
+        return
+      }
+      lastRebuildAtRef.current = now
       recoveryInFlightRef.current = true
       console.warn(`[media] Rebuild started room=${roomId} peer=${peerIdRef.current} socket=${socket.id} reason=${reason}`)
       try {
