@@ -18,8 +18,6 @@ import {
   clearPendingDisconnect,
   getPeerSocket,
   setPeerSocket,
-  getPeerClient,
-  setPeerClient,
   getOrCreateRoom,
   evictPeer,
 } from './room-registry'
@@ -37,7 +35,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'joinRoom',
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
-      const { peerId, displayName, rtpCapabilities, create, clientId } = payload ?? {}
+      const { peerId, displayName, rtpCapabilities, create } = payload ?? {}
       const roomId = canonicalRoomCode(payload?.roomId)
 
       try {
@@ -58,18 +56,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         const existingSocketId = getPeerSocket(roomId, peerId)
         if (existingSocketId && existingSocketId !== socket.id) {
           const oldSocket = io.sockets.sockets.get(existingSocketId)
-          // Same page instance reconnecting (network hand-off, sleep/wake) sends
-          // the same clientId — that must never be treated as a clone, otherwise
-          // the client kicks itself out of the room it is recovering into.
-          const sameClient = !!clientId && getPeerClient(roomId, peerId) === clientId
-          if (oldSocket?.connected && !sameClient) {
-            // Genuine duplicate: the same browser opened this room a second time.
-            // Kick the stale session so the person occupies exactly one slot.
-            console.warn(`[room] Duplicate session kicked room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`)
+          if (oldSocket?.connected) {
+            // A genuine duplicate session in this room. Independent tabs now
+            // have different peer IDs, so this only handles an actual clone.
             oldSocket.emit('kicked', { reason: 'duplicate' })
-            oldSocket.disconnect(true)
-          } else if (oldSocket?.connected) {
-            console.info(`[room] Reconnect takeover room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`)
             oldSocket.disconnect(true)
           }
           evictPeer(io, roomId, peerId, existingSocketId)
@@ -95,7 +85,6 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         session.roomId = roomId
         session.peerId = peerId
         setPeerSocket(roomId, peerId, socket.id)
-        setPeerClient(roomId, peerId, typeof clientId === 'string' ? clientId : undefined)
         socket.join(roomId)
 
         const existingPeers = room.getExistingPeersFor(peerId)

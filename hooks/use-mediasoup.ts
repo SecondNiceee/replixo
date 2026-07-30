@@ -54,10 +54,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const deviceRef = useRef<DeviceType | null>(null)
   const sendTransportRef = useRef<Transport | null>(null)
   const recvTransportRef = useRef<Transport | null>(null)
-  // Per-browser, per-room identity: a second open of the same room from this
-  // browser reuses this ID, so the server kicks the stale session instead of
-  // seating a duplicate of the same person.
-  const peerIdRef = useRef<string>(getOrCreatePeerId(roomId))
+  const peerIdRef = useRef<string>(getOrCreatePeerId())
   const localStreamRef = useRef<MediaStream | null>(null)
   const audioProducerRef = useRef<Producer | null>(null)
   const videoProducerRef = useRef<Producer | null>(null)
