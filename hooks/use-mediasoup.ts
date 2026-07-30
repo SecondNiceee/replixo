@@ -54,7 +54,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const deviceRef = useRef<DeviceType | null>(null)
   const sendTransportRef = useRef<Transport | null>(null)
   const recvTransportRef = useRef<Transport | null>(null)
-  const peerIdRef = useRef<string>(getOrCreatePeerId())
+  // Derived from a persistent device id + the room, so reopening the room in
+  // another tab reuses this identity (the server then kicks the stale session)
+  // instead of creating a second "clone" participant.
+  const peerIdRef = useRef<string>(getOrCreatePeerId(roomId))
+  const peerIdRoomRef = useRef<string>(roomId)
+  if (peerIdRoomRef.current !== roomId) {
+    peerIdRoomRef.current = roomId
+    peerIdRef.current = getOrCreatePeerId(roomId)
+  }
   const localStreamRef = useRef<MediaStream | null>(null)
   const audioProducerRef = useRef<Producer | null>(null)
   const videoProducerRef = useRef<Producer | null>(null)
