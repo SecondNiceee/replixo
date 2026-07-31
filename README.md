@@ -35,10 +35,13 @@
 
 ### Фронтенд — `.env.local` (корень проекта)
 
-Создать: `cp .env.local .env.local` — файл уже есть, заполни своими значениями.
+Создать: `cp .env.example .env.local`, затем заполнить.
 
 | Переменная | Описание | Пример |
 |---|---|---|
+| `DATABASE_URL` | Postgres (тот же, что у сервера) | `postgres://user:pass@host:5432/db` |
+| `INTERNAL_HOOK_SECRET` | Секрет для хука дружбы. **Должен совпадать с `server/.env`** | `openssl rand -hex 32` |
+| `MEDIASOUP_URL` | Приватный адрес сервера для запросов сервер→сервер | `http://localhost:3001` |
 | `NEXT_PUBLIC_MEDIASOUP_URL` | URL Mediasoup сервера | `http://YOUR_SERVER_IP:3001` |
 | `NEXT_PUBLIC_STUN_URL` | STUN сервер | `stun:stun.example.com:3478` |
 | `NEXT_PUBLIC_TURN_URL` | TURN сервер | `turn:turn.example.com:3478` |
@@ -54,12 +57,21 @@
 | `PORT` | Порт Mediasoup сервера | `3001` |
 | `ANNOUNCED_IP` | **Публичный IP сервера** (обязательно!) | `1.2.3.4` |
 | `CLIENT_ORIGIN` | URL фронтенда для CORS | `http://localhost:3000` |
+| `DATABASE_URL` | Postgres для истории чата | `postgres://user:pass@host:5432/db` |
+| `INTERNAL_HOOK_SECRET` | Секрет для `/internal/*`. **Должен совпадать с корневым `.env.local`** | `openssl rand -hex 32` |
 | `TURN_URL` | TURN сервер | `turn:turn.example.com:3478` |
 | `TURN_USERNAME` | Логин TURN | `your_username` |
 | `TURN_CREDENTIAL` | Пароль TURN | `your_password` |
 | `STUN_URL` | STUN сервер | `stun:stun.l.google.com:19302` |
 
 > `ANNOUNCED_IP` — самое важное поле. Укажи публичный IP VPS, иначе WebRTC не установит соединение между участниками.
+
+> `INTERNAL_HOOK_SECRET` задаётся **в обоих файлах одним и тем же значением**.
+> Если значения различаются — хук вернёт 401; если переменной нет — 503. В обоих
+> случаях realtime дружбы деградирует до фолбэка через websocket инициатора:
+> второй участник увидит заявку или удаление только после перезагрузки страницы,
+> если у первого не было живого соединения. Секрет не имеет префикса
+> `NEXT_PUBLIC_` и в браузер не попадает.
 
 ---
 
@@ -69,7 +81,12 @@
 
 ```bash
 # Заполни переменные окружения
+cp .env.example .env.local
 cp server/.env.example server/.env
+
+# Один секрет для внутреннего хука — в оба файла одно и то же значение
+openssl rand -hex 32
+
 # Отредактируй server/.env — обязательно ANNOUNCED_IP и TURN-данные
 ```
 

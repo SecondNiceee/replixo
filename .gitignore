@@ -6,8 +6,14 @@ __v0_jsx-dev-runtime.ts
 .v0-trash/
 .vercel/
 
-# Environment variables
-.env*.local
+# Environment variables.
+# Правило `.env*.local` не покрывало ни корневой `.env`, ни `server/.env` — а в
+# них лежит INTERNAL_HOOK_SECRET и DATABASE_URL. Игнорируем всё, кроме шаблонов
+# `*.example`, которые в git нужны.
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # Common ignores
 node_modules
