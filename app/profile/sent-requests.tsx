@@ -24,11 +24,12 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    const data = await res.json().catch(() => null)
     setCancellingId(null)
     if (res.ok) {
       setCancelledIds((prev) => new Set(prev).add(friendshipId))
       // У адресата заявка должна пропасть из входящих сразу.
-      notifyFriendsChanged(socket, addresseeId)
+      notifyFriendsChanged(socket, addresseeId, 'cancelled', data?.notified === true)
     }
   }
 

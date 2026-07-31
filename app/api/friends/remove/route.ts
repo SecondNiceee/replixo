@@ -36,7 +36,7 @@ export async function DELETE(req: NextRequest) {
 
   // Удалить мог любой из двоих — второй участник это тот id, который не наш.
   const peerId = deleted.requesterId === userId ? deleted.addresseeId : deleted.requesterId
-  await notifyFriendsChanged(userId, peerId, 'removed')
+  const notified = await notifyFriendsChanged(userId, peerId, 'removed')
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, peerId, notified })
 }

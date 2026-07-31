@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Отправитель заявки должен увидеть, что она больше не в исходящих.
-  await notifyFriendsChanged(userId, updated.requesterId, 'declined')
+  // notified: false — хук не подтвердил рассылку, клиент включит фолбэк-emit.
+  const notified = await notifyFriendsChanged(userId, updated.requesterId, 'declined')
 
-  return NextResponse.json({ friendship: updated })
+  return NextResponse.json({ friendship: updated, notified })
 }

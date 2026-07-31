@@ -36,7 +36,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Строка удалена, поэтому статуса в БД уже нет — причину сообщаем явно.
-  await notifyFriendsChanged(userId, deleted.addresseeId, 'cancelled')
+  const notified = await notifyFriendsChanged(userId, deleted.addresseeId, 'cancelled')
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, peerId: deleted.addresseeId, notified })
 }
