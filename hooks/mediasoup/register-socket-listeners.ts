@@ -112,9 +112,18 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
     for (const c of consumersRef.current.values()) {
       if (c.producerId === producerId) { target = c; break }
     }
-    if (!target || target.kind !== "audio") return
+    if (!target) return
+    // Screen-share producers are never paused by the mute / weak-network paths,
+    // so a pause there carries no UI meaning.
     if ((target.appData as Record<string, unknown>)?.source === "screen") return
-    dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: !!paused })
+    if (target.kind === "audio") {
+      dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: !!paused })
+      return
+    }
+    // Video: the sender's weak-network guard dropped their camera to protect
+    // their voice. Surface it, otherwise this tile just freezes on its last
+    // decoded frame and looks like a bug.
+    dispatch({ type: "PEER_VIDEO_PAUSED", peerId: remotePeerId, paused: !!paused })
   })
 
   socket.on("chatMessage", (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }) => {
