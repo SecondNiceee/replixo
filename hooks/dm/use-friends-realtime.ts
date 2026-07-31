@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react'
 import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
+import { pushNotification } from '@/stores/notifications-store'
+import { playFriendEvent } from '@/lib/sounds'
 
 // ---------------------------------------------------------------------------
 // Realtime-синхронизация дружбы.
@@ -88,6 +90,65 @@ export function notifyFriendsChanged(
 }
 
 /**
+ * Показать тост о событии дружбы.
+ *
+ * Уведомляем только о том, что требует внимания получателя:
+ *   requested — вас позвали в друзья;
+ *   accepted  — вашу заявку приняли;
+ *   declined  — вашу заявку отклонили.
+ *
+ * cancelled (заявку отозвали) и removed (удалили из друзей) намеренно молчат:
+ * это события «минус», о которых сообщать неприятно и незачем — списки и так
+ * обновятся сами. Ревалидация для них при этом работает как раньше.
+ */
+function notifyAboutChange(reason: FriendsChangeReason | undefined, actorId: string, actorName?: string | null): void {
+  // Имя приходит из БД сокет-сервером. Если аккаунт без имени и логина —
+  // обходимся нейтральной подписью, но тост не проглатываем.
+  const who = actorName?.trim() || 'Пользователь'
+
+  if (reason === 'requested') {
+    pushNotification({
+      kind: 'friend-request',
+      title: who,
+      body: 'хочет добавить вас в друзья',
+      href: '/profile',
+      actionLabel: 'Открыть заявки',
+      // Заявка требует действия — держим на экране дольше остальных.
+      duration: 9000,
+      // Повторная заявка от того же человека заменяет прежний тост.
+      dedupeKey: `friend:${actorId}`,
+    })
+    playFriendEvent()
+    return
+  }
+
+  if (reason === 'accepted') {
+    pushNotification({
+      kind: 'friend-accepted',
+      title: who,
+      body: 'принял вашу заявку в друзья',
+      // Сразу даём написать: диалог создастся по ?u=<id>, если его ещё нет.
+      href: `/chat?u=${encodeURIComponent(actorId)}`,
+      actionLabel: 'Написать',
+      dedupeKey: `friend:${actorId}`,
+    })
+    playFriendEvent()
+    return
+  }
+
+  if (reason === 'declined') {
+    // Без действия и без звука: сообщать нужно, привлекать внимание — нет.
+    pushNotification({
+      kind: 'friend-declined',
+      title: who,
+      body: 'отклонил вашу заявку в друзья',
+      duration: 5000,
+      dedupeKey: `friend:${actorId}`,
+    })
+  }
+}
+
+/**
  * Приём событий об изменении дружбы. Монтируется один раз на приложение.
  *
  * `selfId` нужен для дедупликации: инициатор действия получает своё же событие
@@ -104,15 +165,21 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
     if (!socket) return
 
     const onChanged = (payload: unknown) => {
-      const { peerId, userId, reason } = (payload ?? {}) as {
+      const { peerId, userId, reason, actorName } = (payload ?? {}) as {
         peerId?: string
         userId?: string
         reason?: FriendsChangeReason
+        actorName?: string | null
       }
       if (!peerId) return
       // Эхо собственного действия — уже обработано локально.
       if (userId === selfId) return
       revalidateFriends(reason)
+
+      // Тост показываем только адресату события. Сервер рассылает его обоим
+      // участникам, но инициатор отсеян проверкой выше: он и так видел
+      // результат своего клика.
+      if (userId) notifyAboutChange(reason, userId, actorName)
     }
 
     // Пока соединения не было, события могли пройти мимо: после РЕКОННЕКТА

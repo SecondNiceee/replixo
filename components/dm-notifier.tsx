@@ -6,6 +6,8 @@ import { useUnreadTotal } from '@/hooks/dm/use-unread-total'
 import { useFriendsRealtime } from '@/hooks/dm/use-friends-realtime'
 import { useDmStore } from '@/stores/dm-store'
 import { playIncomingMessage } from '@/lib/sounds'
+import { pushNotification } from '@/stores/notifications-store'
+import { AppToasts } from '@/components/app-toasts'
 
 // ---------------------------------------------------------------------------
 // Глобальный уведомитель о личных сообщениях: звук и счётчик в заголовке
@@ -41,7 +43,12 @@ export function DmNotifier({ selfId }: { selfId: string }) {
     const onMessage = (payload: unknown) => {
       const { conversationId, message } = (payload ?? {}) as {
         conversationId?: string
-        message?: { senderId?: string }
+        message?: {
+          senderId?: string
+          senderName?: string
+          text?: string
+          attachment?: { name?: string } | null
+        }
       }
       // Своё же сообщение (эхо с другого устройства) не озвучиваем.
       if (!message?.senderId || message.senderId === selfId) return
@@ -56,6 +63,23 @@ export function DmNotifier({ selfId }: { selfId: string }) {
       if (visible && conversationId && conversationId === active) return
 
       playIncomingMessage()
+
+      // Текст письма может быть пустым — тогда это вложение, и показать нужно
+      // хотя бы его имя, иначе тост выйдет без содержания.
+      const text = message.text?.trim()
+      const body = text || (message.attachment?.name ? `Вложение: ${message.attachment.name}` : 'Новое сообщение')
+
+      pushNotification({
+        kind: 'message',
+        title: message.senderName?.trim() || 'Новое сообщение',
+        body,
+        href: conversationId ? `/chat?c=${encodeURIComponent(conversationId)}` : undefined,
+        actionLabel: conversationId ? 'Открыть чат' : undefined,
+        duration: 5000,
+        // Поток сообщений из одного диалога сворачиваем в один тост, иначе три
+        // реплики подряд вытеснят с экрана всё остальное.
+        dedupeKey: conversationId ? `dm:${conversationId}` : undefined,
+      })
     }
 
     socket.on('dm:message', onMessage)
@@ -94,5 +118,8 @@ export function DmNotifier({ selfId }: { selfId: string }) {
     }
   }, [totalUnread])
 
-  return null
+  // Стопка тостов живёт здесь же: компонент уже смонтирован ровно один раз на
+  // приложение и только для авторизованного пользователя — именно те условия,
+  // которые нужны уведомлениям.
+  return <AppToasts />
 }

@@ -1,5 +1,5 @@
 import type { Namespace } from 'socket.io'
-import { friendLinkState } from './db'
+import { friendLinkState, userDisplayName } from './db'
 import { announceMutualPresence, invalidateFriendsCache } from './presence'
 import { userRoom } from './namespace-types'
 
@@ -39,7 +39,12 @@ export async function broadcastFriendsChanged(
   peerId: string,
   reason: FriendsChangeReason,
 ): Promise<{ status: string; requesterId: string | null }> {
-  const link = await friendLinkState(userId, peerId)
+  // Имя инициатора нужно принимающей стороне для текста уведомления. Запрос
+  // независим от статуса связи, поэтому идёт параллельно и не добавляет задержки.
+  const [link, actorName] = await Promise.all([
+    friendLinkState(userId, peerId),
+    userDisplayName(userId),
+  ])
 
   // Кэш друзей presence живёт 30 с. Без сброса новый друг всё это время не
   // получал бы online/offline, а удалённый продолжал бы получать.
@@ -53,6 +58,7 @@ export async function broadcastFriendsChanged(
       reason,
       status: link.status,
       requesterId: link.requesterId,
+      actorName,
     })
   }
 
