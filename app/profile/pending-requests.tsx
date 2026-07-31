@@ -1,8 +1,10 @@
 'use client'
 
-import { mutate } from 'swr'
+import { useState } from 'react'
 import { UserCircle, Check, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { PendingRequest } from './types'
 
 interface PendingRequestsProps {
@@ -11,26 +13,33 @@ interface PendingRequestsProps {
 }
 
 export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
-  const handleAccept = async (friendshipId: string) => {
+  const { socket } = useDmSocket()
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const handleAccept = async (friendshipId: string, requesterId: string) => {
+    setBusyId(friendshipId)
     const res = await fetch('/api/friends/accept', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    setBusyId(null)
     if (res.ok) {
-      mutate('/api/friends')
-      mutate('/api/friends/pending')
+      // Обновляет и свои списки, и списки отправителя заявки.
+      notifyFriendsChanged(socket, requesterId)
     }
   }
 
-  const handleDecline = async (friendshipId: string) => {
+  const handleDecline = async (friendshipId: string, requesterId: string) => {
+    setBusyId(friendshipId)
     const res = await fetch('/api/friends/decline', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    setBusyId(null)
     if (res.ok) {
-      mutate('/api/friends/pending')
+      notifyFriendsChanged(socket, requesterId)
     }
   }
 
@@ -73,16 +82,22 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleAccept(p.id)}
+                  onClick={() => handleAccept(p.id, p.requesterId)}
+                  disabled={busyId === p.id}
                   className="h-8 gap-1 px-2.5 text-xs"
                 >
-                  <Check className="size-3.5" />
+                  {busyId === p.id ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Check className="size-3.5" />
+                  )}
                   Принять
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => handleDecline(p.id)}
+                  onClick={() => handleDecline(p.id, p.requesterId)}
+                  disabled={busyId === p.id}
                   className="h-8 gap-1 px-2.5 text-xs text-muted-foreground hover:text-destructive"
                 >
                   <X className="size-3.5" />

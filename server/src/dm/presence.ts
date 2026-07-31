@@ -40,6 +40,25 @@ export function isOnline(userId: string): boolean {
 }
 
 /**
+ * Сбросить кэш друзей пользователя. Нужен, когда состав друзей изменился
+ * (приняли заявку, удалили из друзей): иначе до FRIENDS_TTL_MS новый друг не
+ * получал бы событий online/offline, а удалённый продолжал бы их получать.
+ */
+export function invalidateFriendsCache(userId: string): void {
+  friendsCache.delete(userId)
+}
+
+/**
+ * Взаимно объявить presence двум пользователям. Вызывается сразу после
+ * подтверждения дружбы: снапшот они получили при подключении, когда друзьями
+ * ещё не были, поэтому иначе точка «в сети» появилась бы только после reload.
+ */
+export function announceMutualPresence(nsp: Namespace, a: string, b: string): void {
+  if (isOnline(b)) nsp.to(userRoom(a)).emit('dm:presence', { userId: b, online: true })
+  if (isOnline(a)) nsp.to(userRoom(b)).emit('dm:presence', { userId: a, online: true })
+}
+
+/**
  * Регистрирует соединение. Если оно первое у пользователя — рассылает друзьям
  * `dm:presence {online:true}`. Затем отдаёт этому сокету снапшот: какие из его
  * друзей онлайн и когда остальных видели последний раз.

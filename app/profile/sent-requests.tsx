@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { mutate } from 'swr'
 import { Send, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { SentRequest } from './types'
 
 interface SentRequestsProps {
@@ -12,10 +13,11 @@ interface SentRequestsProps {
 }
 
 export function SentRequests({ sent, isLoading }: SentRequestsProps) {
+  const { socket } = useDmSocket()
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [cancelledIds, setCancelledIds] = useState<Set<string>>(new Set())
 
-  const handleCancel = async (friendshipId: string) => {
+  const handleCancel = async (friendshipId: string, addresseeId: string) => {
     setCancellingId(friendshipId)
     const res = await fetch('/api/friends/cancel', {
       method: 'DELETE',
@@ -25,7 +27,8 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
     setCancellingId(null)
     if (res.ok) {
       setCancelledIds((prev) => new Set(prev).add(friendshipId))
-      mutate('/api/friends/sent')
+      // У адресата заявка должна пропасть из входящих сразу.
+      notifyFriendsChanged(socket, addresseeId)
     }
   }
 
@@ -79,7 +82,7 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => handleCancel(s.id)}
+                    onClick={() => handleCancel(s.id, s.addresseeId)}
                     disabled={isCancelling}
                     className="h-8 gap-1 px-2.5 text-xs text-muted-foreground hover:text-destructive"
                   >

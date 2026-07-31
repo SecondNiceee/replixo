@@ -79,6 +79,54 @@ export async function areFriends(a: string, b: string): Promise<boolean> {
   }
 }
 
+/**
+ * Фактическое состояние связи между двумя пользователями.
+ *
+ *   'none'     — записи нет (заявку отменили/отклонили, друга удалили);
+ *   'pending'  — заявка висит, направление в requesterId;
+ *   'accepted' — друзья.
+ *
+ * Нужно, чтобы realtime-уведомление о смене дружбы несло проверенный статус из
+ * БД, а не то, что сообщил клиент.
+ */
+export interface FriendLinkState {
+  status: 'none' | 'pending' | 'accepted' | 'declined'
+  requesterId: string | null
+}
+
+export async function friendLinkState(a: string, b: string): Promise<FriendLinkState> {
+  if (!dbPool) return { status: 'none', requesterId: null }
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT "status", "requesterId" FROM "friendship"
+       WHERE ("requesterId" = $1 AND "addresseeId" = $2)
+          OR ("requesterId" = $2 AND "addresseeId" = $1)
+       LIMIT 1`,
+      [a, b],
+    )
+    if (rows.length === 0) return { status: 'none', requesterId: null }
+    return {
+      status: rows[0].status as FriendLinkState['status'],
+      requesterId: rows[0].requesterId as string,
+    }
+  } catch (e) {
+    console.error('[dm] friendLinkState failed:', (e as Error).message)
+    return { status: 'none', requesterId: null }
+  }
+}
+
+/** Существует ли пользователь с таким id. */
+export async function userExists(userId: string): Promise<boolean> {
+  if (!dbPool) return false
+  try {
+    const { rows } = await dbPool.query(`SELECT 1 FROM "user" WHERE "id" = $1 LIMIT 1`, [userId])
+    return rows.length > 0
+  } catch (e) {
+    console.error('[dm] userExists failed:', (e as Error).message)
+    return false
+  }
+}
+
 /** Все участники диалога (для адресации broadcast'ов). */
 export async function listMemberIds(conversationId: string): Promise<string[]> {
   if (!dbPool) return []
