@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { Socket } from "socket.io-client"
-import { NETWORK_GUARD } from "./types"
+import { CAMERA_ENCODINGS, NETWORK_GUARD } from "./types"
 import type { Consumer, Producer, Transport } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -105,10 +105,22 @@ function transportStalled(transport: Transport | null): boolean {
   return state === "disconnected" || state === "failed"
 }
 
-function classify(sample: Sample, badBps: number, weakBps: number): NetworkQuality {
+function classify(
+  sample: Sample,
+  badBps: number,
+  weakBps: number,
+  stalledStreak: number,
+): NetworkQuality {
   // A dead ICE path used to be reported as "good" simply because no stats could
-  // be read. It is the worst possible state, so say so.
-  if (sample.stalled) return "bad"
+  // be read. It is the worst possible state, so say so — but not instantly:
+  // ICE briefly reports "disconnected" on every ordinary network change (Wi-Fi
+  // → LTE, VPN toggle, laptop waking up) and recovers on its own a second
+  // later. Reacting to the first sample would kill the camera every time that
+  // happens, so a single stalled sample only counts as "weak" and it takes
+  // STALLED_SAMPLES_TO_BAD consecutive ones to declare the path dead.
+  if (sample.stalled) {
+    return stalledStreak >= NETWORK_GUARD.STALLED_SAMPLES_TO_BAD ? "bad" : "weak"
+  }
   if (!sample.measured) return "good"
 
   const starved = badBps > 0 && sample.availableBps > 0 && sample.availableBps < badBps
@@ -233,6 +245,12 @@ export function useNetworkGuard({
   const uplinkGoodStreakRef = useRef(0)
   const downlinkBadStreakRef = useRef(0)
   const downlinkGoodStreakRef = useRef(0)
+
+  // Consecutive samples where ICE reported the path as down. Short blips are
+  // normal on roaming networks, so we require a streak before treating the
+  // transport as genuinely dead (see `classify`).
+  const uplinkStalledStreakRef = useRef(0)
+  const downlinkStalledStreakRef = useRef(0)
 
   const uplinkStageRef = useRef<DegradeStage>(0)
   const uplinkChangedAtRef = useRef(0)
@@ -500,8 +518,13 @@ export function useNetworkGuard({
           })
         }
         // Stage 1: keep sending, but only the smallest layer, slowly.
+        // The "no cap" value has to track CAMERA_ENCODINGS, not be a literal 2:
+        // adding a fourth simulcast layer would otherwise silently leave the
+        // camera one rung below its own top quality forever.
         void producer
-          .setMaxSpatialLayer(stage >= 1 ? NETWORK_GUARD.LOW_SPATIAL_LAYER : 2)
+          .setMaxSpatialLayer(
+            stage >= 1 ? NETWORK_GUARD.LOW_SPATIAL_LAYER : CAMERA_ENCODINGS.length - 1,
+          )
           .catch(() => {})
         void capProducer(
           producer,
@@ -693,6 +716,8 @@ export function useNetworkGuard({
         uplinkGoodStreakRef.current = 0
         downlinkBadStreakRef.current = 0
         downlinkGoodStreakRef.current = 0
+        uplinkStalledStreakRef.current = 0
+        downlinkStalledStreakRef.current = 0
       }
       const mode = videoModeRef.current
 
@@ -704,11 +729,22 @@ export function useNetworkGuard({
       const [uplink, downlink] = await Promise.all([sampleUplink(), sampleDownlink()])
       if (cancelled) return
 
-      const uplinkClass = classify(uplink, NETWORK_GUARD.BAD_UPLINK_BPS, NETWORK_GUARD.WEAK_UPLINK_BPS)
+      // Advance (or reset) the ICE-down streaks before classifying, so the very
+      // first stalled sample is counted as 1 rather than 0.
+      uplinkStalledStreakRef.current = uplink.stalled ? uplinkStalledStreakRef.current + 1 : 0
+      downlinkStalledStreakRef.current = downlink.stalled ? downlinkStalledStreakRef.current + 1 : 0
+
+      const uplinkClass = classify(
+        uplink,
+        NETWORK_GUARD.BAD_UPLINK_BPS,
+        NETWORK_GUARD.WEAK_UPLINK_BPS,
+        uplinkStalledStreakRef.current,
+      )
       const downlinkClass = classify(
         downlink,
         NETWORK_GUARD.BAD_DOWNLINK_BPS,
         NETWORK_GUARD.WEAK_DOWNLINK_BPS,
+        downlinkStalledStreakRef.current,
       )
       setUplinkQuality(uplinkClass)
       setDownlinkQuality(downlinkClass)

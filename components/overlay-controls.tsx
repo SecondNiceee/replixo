@@ -8,6 +8,10 @@ import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 interface OverlayControlsProps {
   isMicMuted: boolean
   isCamOff: boolean
+  // Камеру погасил guard слабой сети, а не пользователь. В overlay-режиме
+  // баннера нет и своего видео на экране тоже, поэтому кнопка — единственное
+  // место, где об этом вообще можно узнать.
+  cameraSuppressed: boolean
   // Рисование поверх демонстрации экрана (в overlay-режиме). Когда активно —
   // показывается тулбар, а полноэкранный холст перехватывает клики мыши.
   annotationActive: boolean
@@ -32,6 +36,7 @@ interface OverlayControlsProps {
 export function OverlayControls({
   isMicMuted,
   isCamOff,
+  cameraSuppressed,
   annotationActive,
   onToggleAnnotation,
   whiteboardOpen,
@@ -106,18 +111,35 @@ export function OverlayControls({
             {isMicMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
           </button>
 
-          {/* Camera */}
+          {/* Camera. Красная и перечёркнутая и когда камеру выключил
+              пользователь, и когда её погасила слабая сеть — снаружи это одно и
+              то же состояние: видео не уходит. */}
           <button
             onClick={onToggleCam}
-            aria-label={isCamOff ? "Включить камеру" : "Выключить камеру"}
+            aria-label={
+              cameraSuppressed && !isCamOff
+                ? "Камера отключена из-за слабой сети. Включить принудительно"
+                : isCamOff
+                  ? "Включить камеру"
+                  : "Выключить камеру"
+            }
+            title={
+              cameraSuppressed && !isCamOff
+                ? "Камера отключена из-за слабой сети, чтобы не пропадал звук"
+                : undefined
+            }
             className={cn(
               "flex size-11 items-center justify-center rounded-full border transition-colors",
-              isCamOff
+              isCamOff || cameraSuppressed
                 ? "border-red-500/60 bg-red-500/20 text-red-400 hover:bg-red-500/30"
                 : "border-white/10 bg-white/5 text-white hover:bg-white/10",
             )}
           >
-            {isCamOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+            {isCamOff || cameraSuppressed ? (
+              <VideoOff className="size-5" />
+            ) : (
+              <Video className="size-5" />
+            )}
           </button>
 
           {/* Annotation (рисование поверх экрана) */}

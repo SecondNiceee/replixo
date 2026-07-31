@@ -23,6 +23,8 @@ interface RoomOverlayLayerProps {
   subscribeAnnotationClear: (fn: () => void) => () => void
   isMicMuted: boolean
   isCamOff: boolean
+  /** Camera held down by the weak-network guard rather than by the user. */
+  cameraSuppressed: boolean
   whiteboardOpen: boolean
   onToggleWhiteboard: () => void
   onToggleMic: () => void
@@ -58,6 +60,7 @@ export function RoomOverlayLayer({
   subscribeAnnotationClear,
   isMicMuted,
   isCamOff,
+  cameraSuppressed,
   whiteboardOpen,
   onToggleWhiteboard,
   onToggleMic,
@@ -106,6 +109,7 @@ export function RoomOverlayLayer({
       <OverlayControls
         isMicMuted={isMicMuted}
         isCamOff={isCamOff}
+        cameraSuppressed={cameraSuppressed}
         annotationActive={annotationActive}
         onToggleAnnotation={onToggleAnnotation}
         whiteboardOpen={whiteboardOpen}

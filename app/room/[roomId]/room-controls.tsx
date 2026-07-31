@@ -42,6 +42,11 @@ interface RoomControlsProps {
   isCamOff: boolean
   // True while the camera is turning on — the camera button shows a loader.
   isCamStarting: boolean
+  // The weak-network guard turned our camera off. The button has to look exactly
+  // as off as it really is: a black self-view under an "on" icon reads as a bug,
+  // and a user who presses it expecting to re-enable video would otherwise turn
+  // the camera off for good.
+  cameraSuppressed: boolean
   isScreenSharing: boolean
   screenQuality: ScreenQuality
   micDevices: AudioDevice[]
@@ -69,6 +74,7 @@ export function RoomControls({
   localStream,
   isCamOff,
   isCamStarting,
+  cameraSuppressed,
   isScreenSharing,
   screenQuality,
   micDevices,
@@ -236,7 +242,8 @@ export function RoomControls({
         </DialogContent>
       </Dialog>
 
-      {/* Camera */}
+      {/* Camera. Reads as "off" whether the user or the network turned it off,
+          since in both cases no video is leaving this machine. */}
       <Button
         variant="outline"
         size="icon"
@@ -244,14 +251,29 @@ export function RoomControls({
         disabled={isCamStarting}
         className={cn(
           "size-12 rounded-full",
-          isCamOff && !isCamStarting && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+          (isCamOff || cameraSuppressed) &&
+            !isCamStarting &&
+            "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
         )}
-        aria-label={isCamStarting ? "Включение камеры…" : isCamOff ? "Включить камеру" : "Выключить камеру"}
+        aria-label={
+          isCamStarting
+            ? "Включение камеры…"
+            : cameraSuppressed && !isCamOff
+              ? "Камера отключена из-за слабой сети. Включить принудительно"
+              : isCamOff
+                ? "Включить камеру"
+                : "Выключить камеру"
+        }
+        title={
+          cameraSuppressed && !isCamOff
+            ? "Камера отключена из-за слабой сети, чтобы не пропадал звук"
+            : undefined
+        }
         aria-busy={isCamStarting}
       >
         {isCamStarting ? (
           <Loader2 className="size-5 animate-spin" />
-        ) : isCamOff ? (
+        ) : isCamOff || cameraSuppressed ? (
           <VideoOff className="size-5" />
         ) : (
           <Video className="size-5" />

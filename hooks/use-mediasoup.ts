@@ -647,6 +647,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     videoDegraded: networkGuard.videoDegraded,
     uplinkVideoSuppressed: networkGuard.uplinkVideoSuppressed,
     downlinkVideoSuppressed: networkGuard.downlinkVideoSuppressed,
+    // Lets the camera button override a guard-imposed blackout. The UI needs it
+    // directly: pressing the button while the guard holds the camera down must
+    // restore video, not toggle `isCamOff` and strand the user off-camera.
+    noteUserWantsVideo: networkGuard.noteUserWantsVideo,
     // Chat
     messages: state.messages,
     sendChatMessage: chat.sendChatMessage,
