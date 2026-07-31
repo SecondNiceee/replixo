@@ -28,6 +28,7 @@ import {
   sweepOrphanUploads,
 } from './uploads'
 import { isDmEnabled, isMember, validateSessionToken } from './dm/db'
+import { registerInternalRoutes } from './dm/internal-routes'
 import {
   allowDmUpload,
   dmUrlPrefix,
@@ -280,6 +281,10 @@ async function main(): Promise<void> {
   // Socket.io
   // ---------------------------------------------------------------------------
   const io = setupSocketIO(httpServer, worker)
+
+  // Маршруты «Next-сервер → сокет-сервер». Регистрируются после io, потому что
+  // им нужен namespace /dm для рассылки. Защищены общим секретом.
+  registerInternalRoutes(app, io)
 
   // ---------------------------------------------------------------------------
   // "Я закрываю вкладку" — beacon от клиента (navigator.sendBeacon на

@@ -7,10 +7,10 @@ import {
   isMember,
   listMemberIds,
   markRead,
-  userExists,
   type DmAttachment,
 } from './db'
-import { announceMutualPresence, invalidateFriendsCache } from './presence'
+import { invalidateFriendsCache } from './presence'
+import { broadcastFriendsChanged, type FriendsChangeReason } from './friends-events'
 import { userRoom, otherUserIdFrom, type DmSocketData } from './namespace-types'
 import { isDmAttachmentUrl } from './uploads'
 
@@ -35,6 +35,17 @@ const MAX_MIME_LENGTH = 128
 
 function isConversationId(value: unknown): value is string {
   return typeof value === 'string' && !!value && value.length <= MAX_CONVERSATION_ID_LENGTH
+}
+
+/**
+ * Причина изменения для фолбэк-пути. Клиент её не присылает (доверять ему тут
+ * нечему), поэтому выводим из фактического статуса связи в БД. На основном пути
+ * причину передаёт Next-роут — он точно знает, какое действие выполнил.
+ */
+function reasonFromStatus(status: string): FriendsChangeReason {
+  if (status === 'accepted') return 'accepted'
+  if (status === 'declined') return 'declined'
+  return 'requested'
 }
 
 /**
@@ -204,18 +215,17 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     }
   })
 
-  // --- Изменилась дружба -------------------------------------------------
-  // Заявки живут в Next-API (Postgres), а сокет-сервер — отдельный процесс, у
-  // которого нет способа узнать про UPDATE в таблице. Поэтому инициатор
-  // действия (отправил/принял/отклонил/отменил/удалил) после успешного ответа
-  // API дёргает это событие, а сервер:
-  //   1) сам перечитывает фактический статус связи из БД — payload несёт
-  //      только id собеседника, статусу от клиента мы не верим;
-  //   2) рассылает `dm:friends:changed` обоим участникам, чтобы их SWR-кэши
-  //      (/api/friends, /api/friends/pending, /api/friends/sent) перечитались;
-  //   3) сбрасывает кэш друзей presence и, если дружба только что принята,
-  //      сразу объявляет обоим онлайн-статус друг друга — снапшот они получили
-  //      ещё когда друзьями не были.
+  // --- Изменилась дружба (ФОЛБЭК) ---------------------------------------
+  // Основной путь рассылки — POST /internal/friends/changed: его дёргает
+  // Next-роут сразу после записи в БД, поэтому realtime не зависит от того,
+  // есть ли у инициатора живой websocket. Это событие остаётся страховкой на
+  // случай, когда внутренний хук не настроен (нет INTERNAL_HOOK_SECRET) или
+  // недоступен, и клиент сообщает об изменении сам.
+  //
+  // Ключевая защита: рассылать ЧУЖОМУ пользователю можно только при
+  // существующей связи. Иначе любой клиент, подставив произвольный peerId,
+  // заставлял бы чужой браузер перечитывать четыре эндпоинта — дешёвая
+  // амплификация. Если связи нет (status === 'none'), обновляем только себя.
   socket.on('dm:friends:changed', async (payload: unknown, cb?: unknown) => {
     const userId = data.userId
     if (!userId) return
@@ -225,25 +235,29 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     const { peerId } = (payload ?? {}) as Record<string, unknown>
     if (typeof peerId !== 'string' || !peerId || peerId.length > MAX_ID_LENGTH) return
     if (peerId === userId) return
-    // Разбудить произвольного пользователя лишней ревалидацией не выйдет:
-    // адресат должен существовать, а больше это событие ничего не несёт.
-    if (!(await userExists(peerId))) return
 
     const link = await friendLinkState(userId, peerId)
 
-    invalidateFriendsCache(userId)
-    invalidateFriendsCache(peerId)
-
-    for (const memberId of [userId, peerId]) {
-      nsp.to(userRoom(memberId)).emit('dm:friends:changed', {
+    // Связи нет — значит и адресату сообщать не о чем. Отмена собственной
+    // заявки и удаление из друзей удаляют строку, поэтому такой ответ здесь
+    // законен: свои списки клиент уже обновил локально до вызова, а тратить
+    // чужой трафик на «ничего не изменилось» незачем.
+    if (link.status === 'none') {
+      invalidateFriendsCache(userId)
+      nsp.to(userRoom(userId)).emit('dm:friends:changed', {
         userId,
         peerId,
+        reason: 'removed',
         status: link.status,
         requesterId: link.requesterId,
       })
+      respond(cb, { ok: true, id: peerId, createdAt: Date.now() })
+      return
     }
 
-    if (link.status === 'accepted') announceMutualPresence(nsp, userId, peerId)
+    // Статус читаем из БД повторно внутри broadcast — расхождение невозможно,
+    // а лишний запрос стоит дешевле дублирования логики рассылки.
+    await broadcastFriendsChanged(nsp, userId, peerId, reasonFromStatus(link.status))
 
     respond(cb, { ok: true, id: peerId, createdAt: Date.now() })
   })

@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
+import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 
 // POST /api/friends/accept — accept incoming request
 export async function POST(req: NextRequest) {
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
   if (!updated) {
     return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
   }
+
+  // Отправитель заявки должен сразу увидеть нового друга и его presence.
+  await notifyFriendsChanged(userId, updated.requesterId, 'accepted')
 
   return NextResponse.json({ friendship: updated })
 }
