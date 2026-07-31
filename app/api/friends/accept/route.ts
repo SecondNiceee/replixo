@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Отправитель заявки должен сразу увидеть нового друга и его presence.
-  await notifyFriendsChanged(userId, updated.requesterId, 'accepted')
+  // notified: false — хук не подтвердил рассылку, клиент включит фолбэк-emit.
+  const notified = await notifyFriendsChanged(userId, updated.requesterId, 'accepted')
 
-  return NextResponse.json({ friendship: updated })
+  return NextResponse.json({ friendship: updated, notified })
 }

@@ -23,10 +23,12 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    const data = await res.json().catch(() => null)
     setBusyId(null)
     if (res.ok) {
-      // Обновляет и свои списки, и списки отправителя заявки.
-      notifyFriendsChanged(socket, requesterId)
+      // Свои списки обновляются всегда; фолбэк-emit — только если серверный
+      // хук не подтвердил рассылку (notified: false).
+      notifyFriendsChanged(socket, requesterId, 'accepted', data?.notified === true)
     }
   }
 
@@ -37,9 +39,10 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    const data = await res.json().catch(() => null)
     setBusyId(null)
     if (res.ok) {
-      notifyFriendsChanged(socket, requesterId)
+      notifyFriendsChanged(socket, requesterId, 'declined', data?.notified === true)
     }
   }
 

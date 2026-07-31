@@ -25,9 +25,10 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
+    const data = await res.json().catch(() => null)
     if (res.ok) {
       // Второй участник тоже должен увидеть, что дружбы больше нет.
-      notifyFriendsChanged(socket, friendId)
+      notifyFriendsChanged(socket, friendId, 'removed', data?.notified === true)
     }
   }
 

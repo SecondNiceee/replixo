@@ -67,7 +67,8 @@ export function revalidateFriends(reason?: FriendsChangeReason): void {
  * сработал, сообщить об изменении через сокет.
  *
  * `notified` — поле из ответа роута: `true` значит сокет-сервер уже разослал
- * событие обоим, и второй emit только удвоил бы работу.
+ * событие обоим, и второй emit только удвоил бы работу. `false` приходит, когда
+ * INTERNAL_HOOK_SECRET не задан или хук ответил ошибкой/таймаутом.
  */
 export function notifyFriendsChanged(
   socket: Socket | null,

@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   // Адресат должен увидеть заявку сразу. Уведомляем сокет-сервер сами, а не
   // руками клиента: иначе realtime зависел бы от наличия у отправителя живого
   // websocket.
-  await notifyFriendsChanged(requesterId, addressee.id, 'requested')
+  const notified = await notifyFriendsChanged(requesterId, addressee.id, 'requested')
 
-  return NextResponse.json({ friendship: created }, { status: 201 })
+  return NextResponse.json({ friendship: created, notified }, { status: 201 })
 }

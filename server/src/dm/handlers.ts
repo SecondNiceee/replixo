@@ -7,9 +7,9 @@ import {
   isMember,
   listMemberIds,
   markRead,
+  userExists,
   type DmAttachment,
 } from './db'
-import { invalidateFriendsCache } from './presence'
 import { broadcastFriendsChanged, type FriendsChangeReason } from './friends-events'
 import { userRoom, otherUserIdFrom, type DmSocketData } from './namespace-types'
 import { isDmAttachmentUrl } from './uploads'
@@ -45,6 +45,9 @@ function isConversationId(value: unknown): value is string {
 function reasonFromStatus(status: string): FriendsChangeReason {
   if (status === 'accepted') return 'accepted'
   if (status === 'declined') return 'declined'
+  // Строки нет — заявку отменили или друга удалили. Обе причины перечитывают
+  // один и тот же набор ключей, поэтому различать их здесь незачем.
+  if (status === 'none') return 'removed'
   return 'requested'
 }
 
@@ -222,10 +225,11 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
   // случай, когда внутренний хук не настроен (нет INTERNAL_HOOK_SECRET) или
   // недоступен, и клиент сообщает об изменении сам.
   //
-  // Ключевая защита: рассылать ЧУЖОМУ пользователю можно только при
-  // существующей связи. Иначе любой клиент, подставив произвольный peerId,
-  // заставлял бы чужой браузер перечитывать четыре эндпоинта — дешёвая
-  // амплификация. Если связи нет (status === 'none'), обновляем только себя.
+  // Защита от амплификации: событие несёт только «перечитай списки», поэтому
+  // достаточно, чтобы адресат существовал, а частота была ограничена
+  // `allowMeta` (40 за 2 с на соединение). Требовать существующую связь нельзя:
+  // отмена заявки и удаление из друзей УДАЛЯЮТ строку, и к моменту события
+  // статус уже 'none' — а именно тогда второму участнику и нужно сообщить.
   socket.on('dm:friends:changed', async (payload: unknown, cb?: unknown) => {
     const userId = data.userId
     if (!userId) return
@@ -235,28 +239,13 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     const { peerId } = (payload ?? {}) as Record<string, unknown>
     if (typeof peerId !== 'string' || !peerId || peerId.length > MAX_ID_LENGTH) return
     if (peerId === userId) return
+    if (!(await userExists(peerId))) return
 
     const link = await friendLinkState(userId, peerId)
 
-    // Связи нет — значит и адресату сообщать не о чем. Отмена собственной
-    // заявки и удаление из друзей удаляют строку, поэтому такой ответ здесь
-    // законен: свои списки клиент уже обновил локально до вызова, а тратить
-    // чужой трафик на «ничего не изменилось» незачем.
-    if (link.status === 'none') {
-      invalidateFriendsCache(userId)
-      nsp.to(userRoom(userId)).emit('dm:friends:changed', {
-        userId,
-        peerId,
-        reason: 'removed',
-        status: link.status,
-        requesterId: link.requesterId,
-      })
-      respond(cb, { ok: true, id: peerId, createdAt: Date.now() })
-      return
-    }
-
-    // Статус читаем из БД повторно внутри broadcast — расхождение невозможно,
-    // а лишний запрос стоит дешевле дублирования логики рассылки.
+    // Причину выводим из фактического статуса: клиент её не присылает.
+    // status === 'none' здесь означает удалённую строку, то есть
+    // отмену заявки или удаление из друзей.
     await broadcastFriendsChanged(nsp, userId, peerId, reasonFromStatus(link.status))
 
     respond(cb, { ok: true, id: peerId, createdAt: Date.now() })

@@ -47,19 +47,23 @@ const TIMEOUT_MS = 3000
  * Сообщить сокет-серверу, что связь между `userId` и `peerId` изменилась.
  * Сервер сам перечитает статус из БД и разошлёт `dm:friends:changed` обоим.
  *
- * Await-ить результат не обязательно, но и «повесить» промис без await нельзя:
- * в serverless-окружении процесс может завершиться до отправки. Поэтому роуты
- * ждут — запрос локальный и укладывается в миллисекунды.
+ * Await-ить результат обязательно: «повесить» промис без await нельзя — в
+ * serverless-окружении процесс может завершиться до отправки. Запрос локальный
+ * и укладывается в миллисекунды.
+ *
+ * Возвращает `true`, если сокет-сервер принял уведомление и уже разослал
+ * событие обоим участникам. При `false` роут отдаёт клиенту `notified: false`,
+ * и тот включает фолбэк — emit `dm:friends:changed` со своего websocket.
  */
 export async function notifyFriendsChanged(
   userId: string,
   peerId: string,
   reason: FriendsChangeReason,
-): Promise<void> {
+): Promise<boolean> {
   const secret = process.env.INTERNAL_HOOK_SECRET
   // Без секрета внутренний хук выключен на обеих сторонах: работает фолбэк на
   // socket-событии, поэтому это не ошибка и шуметь в логах не нужно.
-  if (!secret) return
+  if (!secret) return false
 
   try {
     const res = await fetch(`${serverBaseUrl()}/internal/friends/changed`, {
@@ -74,8 +78,11 @@ export async function notifyFriendsChanged(
     })
     if (!res.ok) {
       console.error(`[friends] хук вернул ${res.status} (reason=${reason})`)
+      return false
     }
+    return true
   } catch (e) {
     console.error('[friends] хук недоступен:', (e as Error).message)
+    return false
   }
 }

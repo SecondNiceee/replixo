@@ -41,7 +41,12 @@ export function AddFriendForm() {
     setAddUsername('')
     setAddSuccess(`Заявка отправлена пользователю ${trimmed}`)
     // Адресат должен увидеть заявку сразу, без перезагрузки страницы.
-    notifyFriendsChanged(socket, data?.friendship?.addresseeId)
+    notifyFriendsChanged(
+      socket,
+      data?.friendship?.addresseeId,
+      'requested',
+      data?.notified === true,
+    )
   }
 
   return (
