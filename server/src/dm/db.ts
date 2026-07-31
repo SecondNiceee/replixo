@@ -154,6 +154,61 @@ export async function userDisplayName(userId: string): Promise<string | null> {
   }
 }
 
+/**
+ * Сохранённое уведомление для пуша. Содержимое читается из БД по id, а не
+ * берётся из payload вызывающей стороны: сокет-сервер рассылает уведомление
+ * получателю, и текст в нём не должен зависеть от того, что пришло по HTTP.
+ */
+export interface StoredNotification {
+  id: string
+  kind: string
+  actorId: string
+  actorName: string
+  createdAt: number
+  /** Сколько непрочитанных осталось у получателя — для бейджа. */
+  unread: number
+}
+
+/**
+ * Прочитать уведомление вместе с именем актора и счётчиком непрочитанных.
+ *
+ * `recipientId` в условии обязателен: id уведомления приходит от Next-роута, и
+ * привязка к получателю гарантирует, что чужая запись не уйдёт в чужую комнату
+ * даже при ошибке на стороне вызывающего.
+ */
+export async function notificationForPush(
+  id: string,
+  recipientId: string,
+): Promise<StoredNotification | null> {
+  if (!dbPool) return null
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT n."id", n."kind", n."actorId",
+              COALESCE(NULLIF(TRIM(u."username"), ''), NULLIF(TRIM(u."name"), '')) AS "actorName",
+              (EXTRACT(EPOCH FROM n."createdAt") * 1000)::bigint AS "createdAt",
+              (SELECT count(*) FROM "notification" c
+                WHERE c."userId" = n."userId" AND c."readAt" IS NULL)::int AS "unread"
+       FROM "notification" n
+       JOIN "user" u ON u."id" = n."actorId"
+       WHERE n."id" = $1 AND n."userId" = $2
+       LIMIT 1`,
+      [id, recipientId],
+    )
+    if (rows.length === 0) return null
+    return {
+      id: rows[0].id as string,
+      kind: rows[0].kind as string,
+      actorId: rows[0].actorId as string,
+      actorName: (rows[0].actorName as string | null) ?? 'Пользователь',
+      createdAt: Number(rows[0].createdAt),
+      unread: Number(rows[0].unread),
+    }
+  } catch (e) {
+    console.error('[dm] notificationForPush failed:', (e as Error).message)
+    return null
+  }
+}
+
 /** Все участники диалога (для адресации broadcast'ов). */
 export async function listMemberIds(conversationId: string): Promise<string[]> {
   if (!dbPool) return []

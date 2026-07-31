@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship, user } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { createFriendNotification } from '@/lib/chat/notifications'
 import { randomUUID } from 'crypto'
 
 // POST /api/friends/request — send friend request by username
@@ -68,10 +69,23 @@ export async function POST(req: NextRequest) {
     })
     .returning()
 
+  // Сначала запись в БД, потом пуш: адресат может быть офлайн, и тогда узнает о
+  // заявке в центре уведомлений при следующем входе.
+  const notificationId = await createFriendNotification(
+    addressee.id,
+    requesterId,
+    'friend-request',
+  )
+
   // Адресат должен увидеть заявку сразу. Уведомляем сокет-сервер сами, а не
   // руками клиента: иначе realtime зависел бы от наличия у отправителя живого
   // websocket.
-  const notified = await notifyFriendsChanged(requesterId, addressee.id, 'requested')
+  const notified = await notifyFriendsChanged(
+    requesterId,
+    addressee.id,
+    'requested',
+    notificationId,
+  )
 
   return NextResponse.json({ friendship: created, notified }, { status: 201 })
 }
