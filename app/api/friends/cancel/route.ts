@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
+import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 
 // DELETE /api/friends/cancel — cancel an outgoing pending request
 export async function DELETE(req: NextRequest) {
@@ -33,6 +34,9 @@ export async function DELETE(req: NextRequest) {
   if (!deleted) {
     return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
   }
+
+  // Строка удалена, поэтому статуса в БД уже нет — причину сообщаем явно.
+  await notifyFriendsChanged(userId, deleted.addresseeId, 'cancelled')
 
   return NextResponse.json({ ok: true })
 }
