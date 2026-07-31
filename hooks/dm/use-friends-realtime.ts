@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
@@ -95,6 +95,11 @@ export function notifyFriendsChanged(
  * API. Без этой проверки каждое действие давало бы две волны ревалидации.
  */
 export function useFriendsRealtime(socket: Socket | null, selfId: string): void {
+  // Первое подключение — не реконнект: SWR уже загрузил списки при монтировании,
+  // и ревалидация здесь просто дублировала бы 4 запроса на каждый визит. Ref, а
+  // не state: значение читается внутри обработчика и ререндер ему не нужен.
+  const hasConnected = useRef(false)
+
   useEffect(() => {
     if (!socket) return
 
@@ -110,9 +115,21 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
       revalidateFriends(reason)
     }
 
-    // Пока соединения не было, события могли пройти мимо: после реконнекта
-    // перечитываем всё, без сужения по причине.
-    const onConnect = () => revalidateFriends()
+    // Пока соединения не было, события могли пройти мимо: после РЕКОННЕКТА
+    // перечитываем всё, без сужения по причине. Самое первое подключение
+    // пропускаем — данные только что пришли начальной загрузкой SWR.
+    const onConnect = () => {
+      if (!hasConnected.current) {
+        hasConnected.current = true
+        return
+      }
+      revalidateFriends()
+    }
+
+    // Сокет мог подключиться до того, как эффект успел навесить обработчик:
+    // тогда 'connect' уже не придёт, и первый реальный реконнект был бы принят
+    // за первое подключение и пропущен.
+    if (socket.connected) hasConnected.current = true
 
     socket.on('dm:friends:changed', onChanged)
     socket.on('connect', onConnect)
