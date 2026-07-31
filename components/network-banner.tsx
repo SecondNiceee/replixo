@@ -45,6 +45,20 @@ export function NetworkBanner({
     wasActiveRef.current = active
   }, [active])
 
+  // Escalation re-arms the banner too. Otherwise the mild "quality reduced" notice
+  // auto-hides, and the camera going dark a few seconds later — a different, louder
+  // event that also carries the "turn it back on" action — would stay silent because
+  // `active` never dipped back to false in between.
+  const prevUplinkRef = useRef(uplinkVideoSuppressed)
+  const prevDownlinkRef = useRef(downlinkVideoSuppressed)
+  useEffect(() => {
+    const escalated =
+      (uplinkVideoSuppressed && !prevUplinkRef.current) || (downlinkVideoSuppressed && !prevDownlinkRef.current)
+    prevUplinkRef.current = uplinkVideoSuppressed
+    prevDownlinkRef.current = downlinkVideoSuppressed
+    if (escalated) setDismissed(false)
+  }, [uplinkVideoSuppressed, downlinkVideoSuppressed])
+
   // The "quality reduced" notice is informational, so it retreats on its own.
   // The "video is off" notice stays put, because it comes with an action.
   useEffect(() => {
