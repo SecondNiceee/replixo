@@ -23,6 +23,14 @@ export interface RemotePeer {
   screenAudioStream?: MediaStream
   /** Whether this peer's microphone producer is currently paused (muted). */
   audioMuted?: boolean
+  /**
+   * Whether this peer's camera producer is currently paused. Distinct from
+   * "no videoStream at all" (camera off): the track still exists, the sender
+   * simply stopped it — typically their weak-network guard sacrificing video to
+   * keep voice alive. Without this the tile would freeze on the last decoded
+   * frame with no explanation.
+   */
+  videoPaused?: boolean
 }
 
 export type MediaSource = "media" | "screen"
@@ -102,6 +110,85 @@ export const CAMERA_ENCODINGS = [
 export const CAMERA_PRODUCE_OPTIONS = {
   encodings: CAMERA_ENCODINGS,
   codecOptions: { videoGoogleStartBitrate: 1000 },
+}
+
+// ---------------------------------------------------------------------------
+// Voice codec options
+//
+// Single source of truth for how the microphone is published, so the initial
+// publish, a mic switch and the post-reconnect catch-up publish can never drift
+// apart (they used to carry three separate copies of this object).
+//
+// Opus is configured to survive a bad network rather than to sound pristine:
+//  - `opusFec` adds in-band forward error correction, so isolated lost packets
+//    are reconstructed instead of producing an audible gap.
+//  - `opusDtx` stops sending during silence, which frees the uplink for the
+//    people who are actually talking.
+//  - `opusPtime: 40` packs 40 ms of audio per packet instead of the default
+//    20 ms. That halves the packet rate and the per-packet IP/UDP/RTP overhead
+//    (~40 % of the payload at 20 ms), which matters a lot more than the extra
+//    20 ms of latency once the link is congested. Also fewer packets means
+//    fewer chances to be dropped by an overloaded queue.
+// ---------------------------------------------------------------------------
+export const VOICE_CODEC_OPTIONS = {
+  opusFec: true,
+  opusDtx: true,
+  opusPtime: 40,
+  opusMaxAverageBitrate: 64_000,
+}
+
+export const VOICE_PRODUCE_OPTIONS = {
+  codecOptions: VOICE_CODEC_OPTIONS,
+}
+
+// ---------------------------------------------------------------------------
+// Weak-network guard tuning
+//
+// Aggregated here so the thresholds can be reasoned about in one place instead
+// of being scattered as magic numbers across the monitoring loop.
+// ---------------------------------------------------------------------------
+export const NETWORK_GUARD = {
+  /** How often uplink/downlink stats are sampled. */
+  SAMPLE_INTERVAL_MS: 2000,
+  /**
+   * Consecutive "bad" samples required before video is dropped. 3 × 2 s means a
+   * momentary spike (a single lost burst, a passing tunnel) never kills video —
+   * only a sustained problem does.
+   */
+  BAD_SAMPLES_TO_SUPPRESS: 3,
+  /**
+   * Consecutive fully-"good" samples required before video comes back. Longer
+   * than the suppression window on purpose: restoring too eagerly is what makes
+   * video flap on and off, which is far worse UX than staying audio-only.
+   */
+  GOOD_SAMPLES_TO_RESTORE: 5,
+  /** Minimum time video stays suppressed, regardless of how good stats look. */
+  MIN_SUPPRESSION_MS: 15_000,
+  /**
+   * If video has to be suppressed again shortly after being restored, the
+   * minimum suppression window doubles (capped here). Prevents a "restore →
+   * congest → suppress" loop on a link that simply cannot carry video.
+   */
+  MAX_SUPPRESSION_MS: 120_000,
+  /** A re-suppression within this window after a restore counts as a failure. */
+  FLAP_WINDOW_MS: 60_000,
+
+  /** Audio loss ratio (0..1) that counts as a degraded link. */
+  WEAK_LOSS: 0.04,
+  /** Audio loss ratio (0..1) at which video must go. */
+  BAD_LOSS: 0.12,
+  /**
+   * Available outgoing bitrate below which video cannot coexist with voice.
+   * The lowest camera simulcast layer alone asks for 100 kbps and mediasoup
+   * will not go below it, so under ~180 kbps video simply starves the mic.
+   */
+  BAD_UPLINK_BPS: 180_000,
+  WEAK_UPLINK_BPS: 400_000,
+  /** Round-trip time (seconds) that indicates a badly congested path. */
+  BAD_RTT_S: 1.0,
+
+  /** Opus target bitrate per quality level. */
+  VOICE_BITRATE: { good: 64_000, weak: 40_000, bad: 24_000 },
 }
 
 // ---------------------------------------------------------------------------

@@ -311,6 +311,26 @@ export class Room {
     await producer.resume()
   }
 
+  /**
+   * Pause a single consumer on the SFU side.
+   *
+   * Used by the client's weak-network guard: when a viewer's downlink can no
+   * longer carry video without shredding the Opus stream, it asks us to stop
+   * forwarding that video entirely. A client-only `consumer.pause()` would keep
+   * the RTP flowing and free nothing, so the pause must be applied here.
+   * Resuming goes through `resumeConsumer`, which also re-requests a keyframe.
+   */
+  async pauseConsumer(peerId: string, consumerId: string): Promise<void> {
+    const peer = this.peers.get(peerId)
+    if (!peer) throw new Error(`Peer ${peerId} not found`)
+
+    const consumer = peer.getConsumer(consumerId)
+    if (!consumer) throw new Error(`Consumer ${consumerId} not found`)
+    if (consumer.closed || consumer.paused) return
+
+    await consumer.pause()
+  }
+
   async resumeConsumer(peerId: string, consumerId: string): Promise<void> {
     const peer = this.peers.get(peerId)
     if (!peer) throw new Error(`Peer ${peerId} not found`)

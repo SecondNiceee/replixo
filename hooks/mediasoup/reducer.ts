@@ -35,6 +35,7 @@ export type Action =
   | { type: "PEER_LEFT"; peerId: string }
   | { type: "PEER_PRODUCER_CLOSED"; peerId: string; source: MediaSource; kind: "video" | "audio" }
   | { type: "PEER_AUDIO_MUTED"; peerId: string; muted: boolean }
+  | { type: "PEER_VIDEO_PAUSED"; peerId: string; paused: boolean }
   | { type: "TOGGLE_MIC"; isMuted: boolean; hasMic?: boolean }
   | { type: "TOGGLE_CAM"; isOff: boolean; hasCam?: boolean }
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
@@ -91,6 +92,15 @@ export function reducer(state: State, action: Action): State {
       return { ...state, peers }
     }
 
+    case "PEER_VIDEO_PAUSED": {
+      const peers = new Map(state.peers)
+      const existing = peers.get(action.peerId)
+      if (!existing) return state
+      if (existing.videoPaused === action.paused) return state
+      peers.set(action.peerId, { ...existing, videoPaused: action.paused })
+      return { ...state, peers }
+    }
+
     case "PEER_PRODUCER_CLOSED": {
       const peers = new Map(state.peers)
       const existing = peers.get(action.peerId)
@@ -99,6 +109,10 @@ export function reducer(state: State, action: Action): State {
       const updated = { ...existing }
       delete updated[key as keyof RemotePeer]
       if (action.source === "media" && action.kind === "audio") updated.audioMuted = false
+      // A closed camera producer supersedes "paused": leaving the flag set would
+      // keep showing "video paused" after the sender actually turned the camera
+      // off, and would stick to the next producer they open.
+      if (action.source === "media" && action.kind === "video") updated.videoPaused = false
       peers.set(action.peerId, updated)
       return { ...state, peers }
     }

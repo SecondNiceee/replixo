@@ -8,6 +8,7 @@ import type {
   ProducePayload,
   ConsumePayload,
   ResumeConsumerPayload,
+  PauseConsumerPayload,
   CloseProducerPayload,
   PauseProducerPayload,
 } from '../types'
@@ -309,6 +310,38 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         ack(callback, undefined)
       } catch (e) {
         err(callback as Callback<never>, (e as Error).message)
+      }
+    },
+  )
+
+  // -----------------------------------------------------------------------
+  // pauseConsumer  (client-driven weak-downlink protection)
+  //
+  // The viewer's network guard decided that incoming video is drowning its
+  // audio and asked us to stop forwarding it. Unlike a mute, this is a purely
+  // local decision of ONE viewer — the producer keeps sending and everybody
+  // else keeps receiving, so we deliberately do NOT broadcast anything here.
+  // -----------------------------------------------------------------------
+  socket.on(
+    'pauseConsumer',
+    async (payload: PauseConsumerPayload, callback?: Callback<void>) => {
+      const { roomId, peerId, consumerId, paused } = payload ?? {}
+
+      try {
+        const room = rooms.get(roomId)
+        if (!room) {
+          if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
+          return
+        }
+
+        if (paused) {
+          await room.pauseConsumer(peerId, consumerId)
+        } else {
+          await room.resumeConsumer(peerId, consumerId)
+        }
+        if (callback) ack(callback, undefined)
+      } catch (e) {
+        if (callback) err(callback as Callback<never>, (e as Error).message)
       }
     },
   )

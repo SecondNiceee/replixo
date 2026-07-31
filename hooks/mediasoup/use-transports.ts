@@ -28,6 +28,14 @@ interface UseTransportsParams {
   videoProducerRef: React.MutableRefObject<Producer | null>
   screenVideoProducerRef: React.MutableRefObject<Producer | null>
   screenAudioProducerRef: React.MutableRefObject<Producer | null>
+  /**
+   * Set by the weak-network guard while incoming video is intentionally paused.
+   * Every place that would normally resume a video consumer has to respect it,
+   * otherwise a newly created consumer (or an ICE-recovery resume sweep) would
+   * immediately undo the guard's decision and flood a downlink that already
+   * can't carry the voice.
+   */
+  videoConsumersSuppressedRef: React.MutableRefObject<boolean>
   onRecoveryExhausted: (reason: string) => void
   dispatch: (action: Action) => void
 }
@@ -47,6 +55,7 @@ export function useTransports({
   videoProducerRef,
   screenVideoProducerRef,
   screenAudioProducerRef,
+  videoConsumersSuppressedRef,
   onRecoveryExhausted,
   dispatch,
 }: UseTransportsParams) {
@@ -68,6 +77,10 @@ export function useTransports({
     const socket = socketRef.current
     if (!socket) return
 
+    // Nothing to recover while video is deliberately off: resuming here would
+    // fight the weak-network guard and re-congest the link we just relieved.
+    if (videoConsumersSuppressedRef.current) return
+
     for (const [consumerId, consumer] of consumersRef.current) {
       if (consumer.closed || consumer.kind !== "video") continue
       const previous = consumerRecoveryTimersRef.current.get(consumerId) ?? []
@@ -75,6 +88,7 @@ export function useTransports({
 
       const retry = () => {
         if (consumer.closed || transport.closed || transport.connectionState !== "connected") return
+        if (videoConsumersSuppressedRef.current) return
         socket.emit("resumeConsumer", { roomId, peerId: peerIdRef.current, consumerId })
         socket.emit("requestConsumerKeyFrame", { roomId, peerId: peerIdRef.current, consumerId })
       }
@@ -82,7 +96,7 @@ export function useTransports({
       const timers = [setTimeout(retry, 750), setTimeout(retry, 2000)]
       consumerRecoveryTimersRef.current.set(consumerId, timers)
     }
-  }, [roomId, peerIdRef, socketRef, recvTransportRef, consumersRef])
+  }, [roomId, peerIdRef, socketRef, recvTransportRef, consumersRef, videoConsumersSuppressedRef])
 
   // Resolves once the transport's ICE/DTLS is actually connected (or it closes,
   // or we hit the timeout as a safety fallback). Used to avoid resuming a video

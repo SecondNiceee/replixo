@@ -58,6 +58,21 @@ export interface ResumeConsumerPayload {
   consumerId: string
 }
 
+/**
+ * Client-driven consumer pause (weak-downlink protection).
+ *
+ * Pausing a consumer only on the client stops local playout but the SFU keeps
+ * forwarding RTP, so it saves no bandwidth at all. To actually free the
+ * downlink — which is the whole point when we sacrifice video to keep audio
+ * intelligible — the pause has to happen server-side, here.
+ */
+export interface PauseConsumerPayload {
+  roomId: string
+  peerId: string
+  consumerId: string
+  paused: boolean
+}
+
 export interface CloseProducerPayload {
   roomId: string
   peerId: string
