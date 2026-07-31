@@ -7,6 +7,7 @@ import { io } from "socket.io-client"
 import type { Socket } from "socket.io-client"
 import {
   SERVER_URL,
+  CLIENT_ID,
   getOrCreatePeerId,
 } from "@/hooks/mediasoup/types"
 import type { ChatAttachment, ScreenQuality, Consumer, Transport, Producer, DeviceType } from "./mediasoup/types"
@@ -147,7 +148,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       recoveryInFlightRef.current = false
       void rebuildConnectionRef.current("manual-probe-timeout")
     }, 8000)
-    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
+    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID }, (error: string | null) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
@@ -232,7 +233,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
       socket.emit(
         "joinRoom",
-        { roomId, peerId: peerIdRef.current, displayName, rtpCapabilities: {}, create },
+        { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, displayName, rtpCapabilities: {}, create },
         async (error: string | null, data: {
           rtpCapabilities: object
           existingPeers: Array<{
@@ -479,7 +480,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         recoveryInFlightRef.current = false
         void rebuildMediaSession("rejoin-probe-timeout")
       }, 8000)
-      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
+      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID }, (error: string | null) => {
         if (settled) return
         settled = true
         clearTimeout(timeout)

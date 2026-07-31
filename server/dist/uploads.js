@@ -64,6 +64,10 @@ async function deleteRoomUploads(roomId) {
  * Защита от утечки места на диске, если штатная очистка не отработала
  * (например, сервер был убит во время звонка). Активные комнаты не трогаются —
  * у них свежие файлы, mtime обновляется при каждой загрузке.
+ *
+ * ВАЖНО: папка личных чатов (<UPLOAD_DIR>/dm) исключена. Её файлы привязаны к
+ * постоянной истории сообщений, и TTL удалил бы вложения из переписки, которую
+ * просто давно не открывали.
  */
 async function sweepOrphanUploads() {
     let entries;
@@ -76,6 +80,9 @@ async function sweepOrphanUploads() {
     const now = Date.now();
     for (const entry of entries) {
         if (!entry.isDirectory())
+            continue;
+        // Вложения ЛС живут вместе с историей сообщений — никогда не подчищаем.
+        if (entry.name === config_1.DM_UPLOAD_SUBDIR)
             continue;
         const dir = path_1.default.join(config_1.UPLOAD_DIR, entry.name);
         try {

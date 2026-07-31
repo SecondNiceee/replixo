@@ -15,6 +15,12 @@ export interface JoinRoomPayload {
   displayName: string
   rtpCapabilities: object
   create?: boolean
+  /**
+   * Nonce generated once per page load. Since `peerId` is stable per browser
+   * profile + room, this is what lets the server tell a reconnect of the same
+   * page apart from a genuine second tab.
+   */
+  clientId?: string
 }
 
 export interface CreateTransportPayload {

@@ -9,6 +9,7 @@ const whiteboard_handlers_1 = require("./socket/whiteboard-handlers");
 const presentation_handlers_1 = require("./socket/presentation-handlers");
 const annotation_handlers_1 = require("./socket/annotation-handlers");
 const lifecycle_handlers_1 = require("./socket/lifecycle-handlers");
+const namespace_1 = require("./dm/namespace");
 // ---------------------------------------------------------------------------
 // Socket.io setup — thin orchestrator.
 //
@@ -48,5 +49,8 @@ function setupSocketIO(httpServer, worker) {
         (0, annotation_handlers_1.registerAnnotationHandlers)(ctx);
         (0, lifecycle_handlers_1.registerLifecycleHandlers)(ctx);
     });
+    // Личные сообщения живут в отдельном namespace со своей аутентификацией
+    // по сессии Better Auth. Корневой namespace (звонки) не затрагивается.
+    (0, namespace_1.setupDmNamespace)(io);
     return io;
 }

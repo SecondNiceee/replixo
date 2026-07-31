@@ -108,6 +108,17 @@ class Room {
             if (dtlsState === 'closed')
                 transport.close();
         });
+        // A closed transport MUST leave the peer's map. Otherwise a later
+        // `restartIce` finds a JS object whose worker-side handler is already gone
+        // and mediasoup throws "Channel request handler with ID ... not found".
+        // The client then retries, exhausts its ICE ladder and rebuilds the whole
+        // media session — which other participants perceive as the person leaving
+        // and re-joining the room in a loop.
+        transport.observer.once('close', () => {
+            if (peer.transports.get(transport.id) === transport) {
+                peer.transports.delete(transport.id);
+            }
+        });
         peer.addTransport(transport);
         return {
             transportId: transport.id,
@@ -135,12 +146,31 @@ class Room {
         if (!peer)
             throw new Error(`Peer ${peerId} not found`);
         const transport = peer.getTransport(transportId);
-        if (!transport)
-            throw new Error(`Transport ${transportId} not found`);
+        // A missing or already closed transport can never come back. Report it with
+        // a stable marker so the client stops retrying ICE and rebuilds its media
+        // session once, instead of looping restart → reject → rebuild → restart.
+        if (!transport || transport.closed) {
+            if (transport)
+                peer.transports.delete(transportId);
+            throw new Error('transport-gone');
+        }
         // restartIce() generates fresh ICE credentials that the client uses to
         // kick-start a new connectivity check on the current DTLS session.
-        const iceParameters = await transport.restartIce();
-        return iceParameters;
+        try {
+            return await transport.restartIce();
+        }
+        catch {
+            // The worker-side transport is dead (router closed, channel handler gone).
+            // Drop it so subsequent requests fail fast with the same marker.
+            peer.transports.delete(transportId);
+            try {
+                transport.close();
+            }
+            catch {
+                // already closed — ignore
+            }
+            throw new Error('transport-gone');
+        }
     }
     // ---------------------------------------------------------------------------
     // Produce

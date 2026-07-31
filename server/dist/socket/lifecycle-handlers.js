@@ -26,7 +26,7 @@ function registerLifecycleHandlers(ctx) {
     // a socket.io reconnect. Returns null if the peer is still in the room,
     // or an error string if it was evicted (so the client can do a full rejoin).
     // -----------------------------------------------------------------------
-    socket.on('rejoinProbe', ({ roomId: rawRoomId, peerId }, callback) => {
+    socket.on('rejoinProbe', ({ roomId: rawRoomId, peerId, clientId }, callback) => {
         const roomId = (0, room_code_1.canonicalRoomCode)(rawRoomId);
         if (!roomId || typeof peerId !== 'string' || !peerId) {
             return (0, helpers_1.err)(callback, 'invalid rejoin payload');
@@ -34,6 +34,14 @@ function registerLifecycleHandlers(ctx) {
         const room = room_registry_1.rooms.get(roomId);
         if (!room || !room.hasPeer(peerId)) {
             return (0, helpers_1.err)(callback, 'peer evicted');
+        }
+        // A probe from a DIFFERENT page instance must not silently steal the peer:
+        // it owns no transports or producers, so the takeover would leave a mute,
+        // video-less ghost in the room. Push it through joinRoom instead, which
+        // handles the duplicate properly.
+        const ownerClientId = (0, room_registry_1.getPeerClient)(roomId, peerId);
+        if (ownerClientId && clientId && ownerClientId !== clientId) {
+            return (0, helpers_1.err)(callback, 'peer owned by another client');
         }
         const previousSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
         const previousSocket = previousSocketId
@@ -45,6 +53,8 @@ function registerLifecycleHandlers(ctx) {
         // Bind the new generation before cancelling eviction. Every delayed
         // callback checks this mapping and therefore cannot remove this session.
         (0, room_registry_1.setPeerSocket)(roomId, peerId, socket.id);
+        if (clientId)
+            (0, room_registry_1.setPeerClient)(roomId, peerId, clientId);
         (0, room_registry_1.clearPendingDisconnect)(roomId, peerId);
         socket.join(roomId);
         session.roomId = roomId;
@@ -101,9 +111,15 @@ function registerLifecycleHandlers(ctx) {
         // `transport close` is also emitted for Wi-Fi/VPN hand-offs, browser
         // process suspension and Electron network changes. Treat it as a network
         // interruption unless an explicit leave beacon marked the session closing.
+        // `client namespace disconnect` means the page itself called
+        // socket.disconnect() (our own leave/unload path) — a positive "I'm gone"
+        // signal, so it gets the short clean-close window instead of the full 45 s
+        // network grace. A bare `transport close` stays ambiguous (Wi-Fi hand-off,
+        // process suspension) and keeps the generous window.
         const closing = (0, room_registry_1.isClosing)(roomId, peerId);
-        const graceMs = closing ? room_registry_1.CLOSE_GRACE_MS : room_registry_1.DISCONNECT_GRACE_MS;
-        console.log(`[socket] Disconnect scheduled room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason} graceMs=${graceMs} closing=${closing}`);
+        const cleanClose = reason === 'client namespace disconnect' || reason === 'server namespace disconnect';
+        const graceMs = closing ? room_registry_1.CLOSE_GRACE_MS : cleanClose ? room_registry_1.CLEAN_CLOSE_GRACE_MS : room_registry_1.DISCONNECT_GRACE_MS;
+        console.log(`[socket] Disconnect scheduled room=${roomId} peer=${peerId} socket=${socket.id} reason=${reason} graceMs=${graceMs} closing=${closing} cleanClose=${cleanClose}`);
         const timer = setTimeout(() => {
             (0, room_registry_1.deletePendingDisconnect)(roomId, peerId);
             if ((0, room_registry_1.getPeerSocket)(roomId, peerId) !== socket.id)
