@@ -1,9 +1,10 @@
 'use client'
 
-import { mutate } from 'swr'
 import { useRouter } from 'next/navigation'
 import { Users, UserMinus, Loader2, MessageSquare } from 'lucide-react'
 import { useDmStore } from '@/stores/dm-store'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { Friend } from './types'
 
 interface FriendsListProps {
@@ -16,15 +17,17 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
   // Точки «в сети» живут ровно столько, сколько открыт сокет presence
   // (его держит ProfileClient). Без соединения набор пуст — и точек нет.
   const onlineIds = useDmStore((s) => s.onlineIds)
+  const { socket } = useDmSocket()
 
-  const handleRemove = async (friendshipId: string) => {
+  const handleRemove = async (friendshipId: string, friendId: string) => {
     const res = await fetch('/api/friends/remove', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ friendshipId }),
     })
     if (res.ok) {
-      mutate('/api/friends')
+      // Второй участник тоже должен увидеть, что дружбы больше нет.
+      notifyFriendsChanged(socket, friendId)
     }
   }
 
@@ -80,7 +83,7 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
                   <MessageSquare className="size-4" />
                 </button>
                 <button
-                  onClick={() => handleRemove(f.id)}
+                  onClick={() => handleRemove(f.id, f.friendId)}
                   className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
                   aria-label="Удалить из друзей"
                 >

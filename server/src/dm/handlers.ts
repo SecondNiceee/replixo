@@ -1,6 +1,16 @@
 import type { Namespace, Socket } from 'socket.io'
 import { createRateLimiter } from '../socket/helpers'
-import { areFriends, insertMessage, isMember, listMemberIds, markRead, type DmAttachment } from './db'
+import {
+  areFriends,
+  friendLinkState,
+  insertMessage,
+  isMember,
+  listMemberIds,
+  markRead,
+  userExists,
+  type DmAttachment,
+} from './db'
+import { announceMutualPresence, invalidateFriendsCache } from './presence'
 import { userRoom, otherUserIdFrom, type DmSocketData } from './namespace-types'
 import { isDmAttachmentUrl } from './uploads'
 
@@ -192,6 +202,50 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     for (const memberId of res.memberIds) {
       nsp.to(userRoom(memberId)).emit('dm:read', { conversationId, userId, ts: res.ts })
     }
+  })
+
+  // --- Изменилась дружба -------------------------------------------------
+  // Заявки живут в Next-API (Postgres), а сокет-сервер — отдельный процесс, у
+  // которого нет способа узнать про UPDATE в таблице. Поэтому инициатор
+  // действия (отправил/принял/отклонил/отменил/удалил) после успешного ответа
+  // API дёргает это событие, а сервер:
+  //   1) сам перечитывает фактический статус связи из БД — payload несёт
+  //      только id собеседника, статусу от клиента мы не верим;
+  //   2) рассылает `dm:friends:changed` обоим участникам, чтобы их SWR-кэши
+  //      (/api/friends, /api/friends/pending, /api/friends/sent) перечитались;
+  //   3) сбрасывает кэш друзей presence и, если дружба только что принята,
+  //      сразу объявляет обоим онлайн-статус друг друга — снапшот они получили
+  //      ещё когда друзьями не были.
+  socket.on('dm:friends:changed', async (payload: unknown, cb?: unknown) => {
+    const userId = data.userId
+    if (!userId) return
+    // Событие редкое: заявка/принятие/удаление. Спамить им нечего.
+    if (!allowMeta()) return
+
+    const { peerId } = (payload ?? {}) as Record<string, unknown>
+    if (typeof peerId !== 'string' || !peerId || peerId.length > MAX_ID_LENGTH) return
+    if (peerId === userId) return
+    // Разбудить произвольного пользователя лишней ревалидацией не выйдет:
+    // адресат должен существовать, а больше это событие ничего не несёт.
+    if (!(await userExists(peerId))) return
+
+    const link = await friendLinkState(userId, peerId)
+
+    invalidateFriendsCache(userId)
+    invalidateFriendsCache(peerId)
+
+    for (const memberId of [userId, peerId]) {
+      nsp.to(userRoom(memberId)).emit('dm:friends:changed', {
+        userId,
+        peerId,
+        status: link.status,
+        requesterId: link.requesterId,
+      })
+    }
+
+    if (link.status === 'accepted') announceMutualPresence(nsp, userId, peerId)
+
+    respond(cb, { ok: true, id: peerId, createdAt: Date.now() })
   })
 
   // --- «Печатает…» ------------------------------------------------------

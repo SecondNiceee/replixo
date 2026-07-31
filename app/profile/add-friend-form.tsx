@@ -1,12 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { mutate } from 'swr'
 import { UserPlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 
 export function AddFriendForm() {
+  // Соединение общее (refcount), поэтому лишнего websocket здесь не появляется.
+  const { socket } = useDmSocket()
   const [addUsername, setAddUsername] = useState('')
   const [addError, setAddError] = useState<string | null>(null)
   const [addLoading, setAddLoading] = useState(false)
@@ -37,7 +40,8 @@ export function AddFriendForm() {
 
     setAddUsername('')
     setAddSuccess(`Заявка отправлена пользователю ${trimmed}`)
-    mutate('/api/friends/sent')
+    // Адресат должен увидеть заявку сразу, без перезагрузки страницы.
+    notifyFriendsChanged(socket, data?.friendship?.addresseeId)
   }
 
   return (

@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useUnreadTotal } from '@/hooks/dm/use-unread-total'
+import { useFriendsRealtime } from '@/hooks/dm/use-friends-realtime'
 import { useDmStore } from '@/stores/dm-store'
 import { playIncomingMessage } from '@/lib/sounds'
 
@@ -25,6 +26,11 @@ import { playIncomingMessage } from '@/lib/sounds'
 export function DmNotifier({ selfId }: { selfId: string }) {
   const { socket } = useDmSocket()
   const totalUnread = useUnreadTotal()
+
+  // Заявки в друзья и их принятие должны быть видны без перезагрузки страницы.
+  // Подписка живёт здесь, а не в профиле: ключи SWR глобальные, поэтому списки
+  // обновятся на любой открытой странице, включая профиль.
+  useFriendsRealtime(socket)
 
   // Звук нового сообщения.
   useEffect(() => {
