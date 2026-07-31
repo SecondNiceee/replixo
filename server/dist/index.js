@@ -36,6 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+// Должен идти первым: патчит console, чтобы каждая строка логов имела дату/время.
+require("./logger");
 require("dotenv/config");
 const http_1 = __importDefault(require("http"));
 const path_1 = __importDefault(require("path"));
@@ -50,6 +52,8 @@ const socket_1 = require("./socket");
 const room_code_1 = require("./room-code");
 const room_registry_1 = require("./socket/room-registry");
 const uploads_1 = require("./uploads");
+const db_1 = require("./dm/db");
+const uploads_2 = require("./dm/uploads");
 async function main() {
     // ---------------------------------------------------------------------------
     // Express + HTTP server
@@ -139,6 +143,100 @@ async function main() {
         });
     });
     // ---------------------------------------------------------------------------
+    // Вложения личных чатов: POST /dm/:conversationId/upload
+    //
+    // В отличие от /rooms/:roomId/upload здесь авторизация ОБЯЗАТЕЛЬНА: комната —
+    // это одноразовый код, который знают только участники звонка, а диалог живёт
+    // постоянно и его id вычислим из пары userId. Проверяем в таком порядке:
+    //   формат id → сессия → membership → rate limit → и только затем пишем файл.
+    // Порядок важен: multer начинает писать на диск сразу, поэтому все отказы
+    // должны случиться до него, иначе неавторизованный запрос уже занял место.
+    // ---------------------------------------------------------------------------
+    const dmStorage = multer_1.default.diskStorage({
+        destination: (req, _file, cb) => {
+            const conversationId = req.params.conversationId;
+            if (!(0, uploads_2.isValidConversationId)(conversationId)) {
+                cb(new Error('invalid conversationId'), '');
+                return;
+            }
+            try {
+                cb(null, (0, uploads_2.ensureDmConversationDir)(conversationId));
+            }
+            catch (e) {
+                cb(e, '');
+            }
+        },
+        filename: (_req, file, cb) => {
+            const ext = path_1.default.extname(file.originalname).slice(0, 16);
+            cb(null, `${(0, crypto_1.randomUUID)()}${ext}`);
+        },
+    });
+    const dmUpload = (0, multer_1.default)({
+        storage: dmStorage,
+        limits: { fileSize: config_1.MAX_FILE_SIZE, files: 1 },
+    });
+    app.post('/dm/:conversationId/upload', (req, res) => {
+        void (async () => {
+            const conversationId = req.params.conversationId;
+            if (!(0, uploads_2.isValidConversationId)(conversationId)) {
+                res.status(400).json({ error: 'invalid conversationId' });
+                return;
+            }
+            if (!(0, db_1.isDmEnabled)()) {
+                res.status(503).json({ error: 'Чат недоступен' });
+                return;
+            }
+            // Токен сессии передаёт Next-прокси (/api/chat/upload): браузер не имеет
+            // доступа к httpOnly-cookie, а кросс-доменный cookie сюда не долетит.
+            const header = req.header('authorization') ?? '';
+            const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+            if (!token) {
+                res.status(401).json({ error: 'Unauthorized' });
+                return;
+            }
+            const identity = await (0, db_1.validateSessionToken)(token);
+            if (!identity) {
+                res.status(401).json({ error: 'Unauthorized' });
+                return;
+            }
+            if (!(await (0, db_1.isMember)(conversationId, identity.userId))) {
+                res.status(403).json({ error: 'Нет доступа к диалогу' });
+                return;
+            }
+            if (!(0, uploads_2.allowDmUpload)(identity.userId)) {
+                res.status(429).json({ error: 'Слишком много файлов, попробуйте позже' });
+                return;
+            }
+            dmUpload.single('file')(req, res, (uploadErr) => {
+                if (uploadErr) {
+                    const message = uploadErr.message ?? 'upload failed';
+                    const tooLarge = message.includes('File too large');
+                    res.status(tooLarge ? 413 : 400).json({
+                        error: tooLarge ? 'Файл слишком большой' : message,
+                    });
+                    return;
+                }
+                const file = req.file;
+                if (!file) {
+                    res.status(400).json({ error: 'no file' });
+                    return;
+                }
+                // Именно этот префикс потом проверяет dm:send — ссылка привязана к
+                // диалогу, так что подставить чужую не получится.
+                res.json({
+                    url: `${(0, uploads_2.dmUrlPrefix)(conversationId)}${file.filename}`,
+                    name: file.originalname.slice(0, 255),
+                    size: file.size,
+                    mime: file.mimetype || 'application/octet-stream',
+                });
+            });
+        })().catch((e) => {
+            console.error('[dm] upload failed:', e.message);
+            if (!res.headersSent)
+                res.status(500).json({ error: 'upload failed' });
+        });
+    });
+    // ---------------------------------------------------------------------------
     // Скачивание установщика приложения (Windows .exe, ~900 МБ).
     //
     // Файл лежит на диске VPS (WINDOWS_INSTALLER_PATH) и НЕ хранится в git.
@@ -185,7 +283,7 @@ async function main() {
     // rejoinProbe/joinRoom. Реальное закрытие вкладки/браузера — никто не
     // вернётся, и остальные увидят выход почти сразу (а не через полное
     // grace-окно, как при обычном обрыве сети). sendBeacon шлёт POST; мы читаем
-    // peerId из query, тела нет — парсер не нужен.
+    // peerId из query, те��а нет — парсер не нужен.
     // ---------------------------------------------------------------------------
     app.post('/rooms/:roomId/leave', (req, res) => {
         const roomId = (0, room_code_1.canonicalRoomCode)(req.params.roomId);

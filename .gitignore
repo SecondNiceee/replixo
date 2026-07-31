@@ -14,6 +14,9 @@ node_modules
 .next/
 .DS_Store
 
+# TypeScript incremental build cache (machine-local, never commit)
+*.tsbuildinfo
+
 # Electron build output
 release/
 

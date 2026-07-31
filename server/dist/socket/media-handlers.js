@@ -15,7 +15,7 @@ function registerMediaHandlers(ctx, worker) {
     // joinRoom
     // -----------------------------------------------------------------------
     socket.on('joinRoom', async (payload, callback) => {
-        const { peerId, displayName, rtpCapabilities, create } = payload ?? {};
+        const { peerId, displayName, rtpCapabilities, create, clientId } = payload ?? {};
         const roomId = (0, room_code_1.canonicalRoomCode)(payload?.roomId);
         try {
             if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
@@ -33,10 +33,24 @@ function registerMediaHandlers(ctx, worker) {
             const existingSocketId = (0, room_registry_1.getPeerSocket)(roomId, peerId);
             if (existingSocketId && existingSocketId !== socket.id) {
                 const oldSocket = io.sockets.sockets.get(existingSocketId);
-                if (oldSocket?.connected) {
-                    // A genuine duplicate session in this room. Independent tabs now
-                    // have different peer IDs, so this only handles an actual clone.
+                // The same page instance reconnecting (network hand-off, sleep/wake)
+                // sends the same clientId. That must never be treated as a clone,
+                // otherwise the client kicks itself out of the room it is recovering
+                // into — and `kicked` is terminal on the client.
+                const sameClient = !!clientId && (0, room_registry_1.getPeerClient)(roomId, peerId) === clientId;
+                if (oldSocket?.connected && !sameClient) {
+                    // Genuine duplicate: the same browser profile opened this room a
+                    // second time (extra tab/window). peerId is derived from a
+                    // persistent device id, so the stale session is kicked here instead
+                    // of becoming a second participant that takes a slot and fights
+                    // over producers.
+                    console.warn(`[room] Duplicate session kicked room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`);
                     oldSocket.emit('kicked', { reason: 'duplicate' });
+                    oldSocket.disconnect(true);
+                }
+                else if (oldSocket?.connected) {
+                    // Same page, new socket: drop the stale transport silently, no kick.
+                    console.info(`[room] Reconnect takeover room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`);
                     oldSocket.disconnect(true);
                 }
                 (0, room_registry_1.evictPeer)(io, roomId, peerId, existingSocketId);
@@ -59,6 +73,7 @@ function registerMediaHandlers(ctx, worker) {
             session.roomId = roomId;
             session.peerId = peerId;
             (0, room_registry_1.setPeerSocket)(roomId, peerId, socket.id);
+            (0, room_registry_1.setPeerClient)(roomId, peerId, typeof clientId === 'string' ? clientId : undefined);
             socket.join(roomId);
             const existingPeers = room.getExistingPeersFor(peerId);
             console.log(`[room] ${repeatedJoin ? 'Repeated join ignored for' : 'Peer joined'} room=${roomId} peer=${peerId} socket=${socket.id} peers=${room.getPeerIds().length}`);

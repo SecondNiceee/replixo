@@ -4,6 +4,8 @@ exports.CLEAN_CLOSE_GRACE_MS = exports.CLOSE_GRACE_MS = exports.DISCONNECT_GRACE
 exports.roomPeerKey = roomPeerKey;
 exports.getPeerSocket = getPeerSocket;
 exports.setPeerSocket = setPeerSocket;
+exports.getPeerClient = getPeerClient;
+exports.setPeerClient = setPeerClient;
 exports.markClosing = markClosing;
 exports.isClosing = isClosing;
 exports.clearPendingDisconnect = clearPendingDisconnect;
@@ -32,6 +34,22 @@ function getPeerSocket(roomId, peerId) {
 }
 function setPeerSocket(roomId, peerId, socketId) {
     exports.peerSockets.set(roomPeerKey(roomId, peerId), socketId);
+}
+// roomId + peerId → clientId: a nonce generated once per page load. Because the
+// peerId is stable per browser profile + room, a reconnect from the SAME page
+// arrives with the same peerId but a new socket id — indistinguishable from a
+// genuine second tab unless we also compare the page instance. Without it a
+// client recovering from a Wi-Fi/VPN hand-off can kick itself out of the room.
+const peerClients = new Map();
+function getPeerClient(roomId, peerId) {
+    return peerClients.get(roomPeerKey(roomId, peerId));
+}
+function setPeerClient(roomId, peerId, clientId) {
+    const key = roomPeerKey(roomId, peerId);
+    if (clientId)
+        peerClients.set(key, clientId);
+    else
+        peerClients.delete(key);
 }
 // roomId + peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
 // Wi-Fi hand-off, tunnel switch) we DON'T evict the peer immediately. Instead we
@@ -113,6 +131,7 @@ function evictPeer(io, roomId, peerId, expectedSocketId) {
     room.removePeer(peerId);
     io.to(roomId).emit('peerLeft', { peerId });
     exports.peerSockets.delete(roomPeerKey(roomId, peerId));
+    peerClients.delete(roomPeerKey(roomId, peerId));
     console.log(`[room] Peer ${peerId} evicted from room ${roomId}`);
     cleanupRoomIfEmpty(roomId);
 }

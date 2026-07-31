@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.webRtcTransportOptions = exports.mediaCodecs = exports.workerSettings = exports.iceServers = exports.listenIps = exports.UPLOAD_TTL_MS = exports.WINDOWS_INSTALLER_NAME = exports.WINDOWS_INSTALLER_PATH = exports.MAX_FILE_SIZE = exports.UPLOAD_DIR = exports.MAX_PEERS_PER_ROOM = exports.CLIENT_ORIGIN = exports.PORT = void 0;
+exports.webRtcTransportOptions = exports.mediaCodecs = exports.workerSettings = exports.iceServers = exports.listenIps = exports.UPLOAD_TTL_MS = exports.WINDOWS_INSTALLER_NAME = exports.WINDOWS_INSTALLER_PATH = exports.DM_UPLOAD_SUBDIR = exports.MAX_FILE_SIZE = exports.UPLOAD_DIR = exports.MAX_PEERS_PER_ROOM = exports.CLIENT_ORIGIN = exports.PORT = void 0;
 require("dotenv/config");
 const path_1 = __importDefault(require("path"));
 // ---------------------------------------------------------------------------
@@ -21,6 +21,14 @@ exports.MAX_PEERS_PER_ROOM = 5;
 exports.UPLOAD_DIR = process.env.UPLOAD_DIR ?? path_1.default.join(process.cwd(), 'uploads');
 // Максимальный размер одного файла (байты). По умолчанию 25 МБ.
 exports.MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE ?? String(25 * 1024 * 1024), 10);
+// Подпапка внутри UPLOAD_DIR для вложений личных чатов:
+// <UPLOAD_DIR>/dm/<conversationId>/<uuid>.<ext>.
+//
+// Принципиально отличается от папок комнат: история ЛС постоянна, поэтому эти
+// файлы НЕ удаляются ни по завершении чего-либо, ни фоновым TTL-сборщиком.
+// Имя вынесено в конфиг, чтобы sweepOrphanUploads мог исключить папку по той
+// же константе, а не по строковому литералу в двух местах.
+exports.DM_UPLOAD_SUBDIR = 'dm';
 // ---------------------------------------------------------------------------
 // Установщик приложения (большой файл ~900 МБ, лежит на диске VPS, НЕ в git)
 // ---------------------------------------------------------------------------

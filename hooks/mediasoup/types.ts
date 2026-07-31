@@ -146,16 +146,17 @@ function resolveServerUrl(): string {
 
 export const SERVER_URL = resolveServerUrl()
 
-// A device identity that survives reloads, tab duplication and new windows.
-// It lives in localStorage (shared by every tab of the same origin/profile) so
-// one human always maps to ONE participant, no matter how many tabs they open.
-export const DEVICE_ID_KEY = "replixo_device_id"
+// Peer identity is stored per room in localStorage, which is shared by every
+// tab of the same browser profile. So one human always maps to ONE participant,
+// no matter how many tabs they open, while different rooms get independent ids
+// (a delayed disconnect in room A can never evict this browser from room B).
+const PEER_ID_PREFIX = "replixo_peer_id:"
 
 // Legacy per-tab key. Removed on first read so old sessions don't keep a
 // tab-scoped identity that would still produce duplicate participants.
 const LEGACY_PEER_ID_KEY = "replixo_peer_session_id"
 
-let memoryDeviceId: string | null = null
+const memoryPeerIds = new Map<string, string>()
 
 function createRandomId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -164,10 +165,36 @@ function createRandomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-function getOrCreateDeviceId(): string {
-  if (memoryDeviceId) return memoryDeviceId
+/**
+ * Nonce identifying THIS page instance, generated once per page load and never
+ * persisted. `peerId` alone cannot tell a reconnect of this very page apart
+ * from a second tab (both send the same peerId with a fresh socket id), so the
+ * server compares `clientId` too — otherwise a Wi-Fi/VPN hand-off would look
+ * like a duplicate and the page would kick itself out of the room.
+ */
+export const CLIENT_ID = createRandomId()
+
+function peerIdKey(roomId: string): string {
+  // Match the server's room canonicalisation (case-insensitive, separators
+  // ignored) so "abc-defg" and "ABCDEFG" resolve to the same peer identity.
+  const room = (roomId ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+  return `${PEER_ID_PREFIX}${room || "default"}`
+}
+
+/**
+ * Stable per-(browser profile, room) peer identifier.
+ *
+ * Opening the same room again in another tab/window yields the SAME peerId, so
+ * the server's duplicate check in `joinRoom` kicks the stale session instead of
+ * letting a "clone" occupy a second slot and fight over producers.
+ */
+export function getOrCreatePeerId(roomId: string): string {
+  const key = peerIdKey(roomId)
+  const cached = memoryPeerIds.get(key)
+  if (cached) return cached
   if (typeof window === "undefined") return createRandomId()
 
+  let peerId: string | null = null
   try {
     window.sessionStorage.removeItem(LEGACY_PEER_ID_KEY)
   } catch {
@@ -175,46 +202,17 @@ function getOrCreateDeviceId(): string {
   }
 
   try {
-    const stored = window.localStorage.getItem(DEVICE_ID_KEY)
-    if (stored) {
-      memoryDeviceId = stored
-      return stored
+    peerId = window.localStorage.getItem(key)
+    if (!peerId) {
+      peerId = createRandomId()
+      window.localStorage.setItem(key, peerId)
     }
-    memoryDeviceId = createRandomId()
-    window.localStorage.setItem(DEVICE_ID_KEY, memoryDeviceId)
   } catch {
     // Storage can be blocked in private/embedded contexts. The in-memory ID
     // still remains stable for the lifetime of this page.
-    memoryDeviceId = createRandomId()
+    peerId = peerId ?? createRandomId()
   }
 
-  return memoryDeviceId
-}
-
-// FNV-1a. Two passes with different offset bases give a 64-bit digest, which
-// keeps accidental collisions between two devices in one room negligible.
-function fnv1a(input: string, seed: number): string {
-  let hash = seed
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return hash.toString(16).padStart(8, "0")
-}
-
-/**
- * Deterministic per-(device, room) peer identifier.
- *
- * Opening the same room again in another tab/window yields the SAME peerId, so
- * the server's duplicate check in `joinRoom` kicks the stale session instead of
- * letting a "clone" occupy a second slot and fight over producers. Different
- * rooms get different ids, so a delayed disconnect in room A can never evict
- * the same device from room B.
- */
-export function getOrCreatePeerId(roomId: string): string {
-  // Match the server's room canonicalisation (case-insensitive, separators
-  // ignored) so "abc-defg" and "ABCDEFG" resolve to the same peer identity.
-  const room = (roomId ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
-  const scope = `${getOrCreateDeviceId()}|${room}`
-  return `${fnv1a(scope, 0x811c9dc5)}${fnv1a(scope, 0x9e3779b9)}`
+  memoryPeerIds.set(key, peerId)
+  return peerId
 }

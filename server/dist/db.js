@@ -11,7 +11,7 @@
 // функционировать как раньше (эфемерно, без сохранения), сервер не падает.
 // ---------------------------------------------------------------------------
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isChatPersistenceEnabled = void 0;
+exports.dbPool = exports.isChatPersistenceEnabled = void 0;
 exports.saveMessage = saveMessage;
 exports.getRoomMessages = getRoomMessages;
 exports.saveReadMarker = saveReadMarker;
@@ -39,6 +39,9 @@ else {
 }
 const isChatPersistenceEnabled = () => pool !== null;
 exports.isChatPersistenceEnabled = isChatPersistenceEnabled;
+// Один пул на процесс. Личные чаты (server/src/dm/*) переиспользуют его же,
+// чтобы не открывать второй набор соединений к той же базе.
+exports.dbPool = pool;
 /**
  * Сохранить сообщение. id генерируется клиентом/сервером заранее, чтобы
  * оптимистичная копия отправителя и сохранённая запись имели один и тот же id
