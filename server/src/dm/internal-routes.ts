@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'crypto'
 import type { Express, Request, Response } from 'express'
+import rateLimit from 'express-rate-limit'
 import type { Server } from 'socket.io'
 import { INTERNAL_HOOK_SECRET } from '../config'
 import { isDmEnabled, userExists } from './db'
@@ -48,6 +49,45 @@ function isId(value: unknown): value is string {
   return typeof value === 'string' && !!value && value.length <= MAX_ID_LENGTH
 }
 
+// ---------------------------------------------------------------------------
+// Ограничение частоты запросов к /internal/*.
+//
+// Сокет-сервер слушает публичный порт, значит и этот маршрут доступен из
+// интернета. Секрет его защищает, но без лимита никто не мешает перебирать
+// значения заголовка тысячами запросов в секунду: constant-time сравнение
+// спасает от утечки по времени, а не от нагрузки.
+//
+// Два уровня:
+//  1) FAILURE_LIMITER — узкий, считает ТОЛЬКО неудачные ответы
+//     (skipSuccessfulRequests). Легальный трафик от Next-роутов почти всегда
+//     успешен и в этот лимит не упирается, а перебор секрета состоит из одних
+//     401 и глохнет после 20 попыток за 5 минут.
+//  2) BURST_LIMITER — широкий потолок на всё, включая успешные запросы: защита
+//     от простого флуда, если секрет всё-таки утёк.
+//
+// Ключ — IP (req.ip). trust proxy на приложении не включён, поэтому за обратным
+// прокси все запросы попадут в одно ведро: лимит станет глобальным, а не
+// per-IP. Для внутреннего маршрута это допустимо (легальных источников единицы),
+// но если начнёшь доверять X-Forwarded-For — не забудь app.set('trust proxy').
+// ---------------------------------------------------------------------------
+
+const FAILURE_LIMITER = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'too_many_requests' },
+})
+
+const BURST_LIMITER = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'too_many_requests' },
+})
+
 export function registerInternalRoutes(app: Express, io: Server): void {
   if (!INTERNAL_HOOK_SECRET) {
     console.warn(
@@ -55,6 +95,11 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         'realtime дружбы работает через фолбэк на socket-событии.',
     )
   }
+
+  // Лимиты навешиваем на весь префикс, а не на конкретный маршрут: любой
+  // будущий /internal/* получит защиту автоматически, включая запросы к
+  // несуществующим путям под этим префиксом (их тоже незачем разрешать перебирать).
+  app.use('/internal', BURST_LIMITER, FAILURE_LIMITER)
 
   app.post('/internal/friends/changed', (req: Request, res: Response) => {
     void (async () => {
@@ -80,8 +125,11 @@ export function registerInternalRoutes(app: Express, io: Server): void {
       }
 
       // Оба id приходят от доверенного Next-роута, но существование проверяем:
-      // рассылать в комнату несуществующего пользователя незачем.
-      if (!(await userExists(userId)) || !(await userExists(peerId))) {
+      // рассылать в комнату несуществующего пользователя незачем. Два запроса
+      // независимы, поэтому идут параллельно — последовательный await удваивал
+      // задержку хука на ровном месте.
+      const [selfOk, peerOk] = await Promise.all([userExists(userId), userExists(peerId)])
+      if (!selfOk || !peerOk) {
         res.status(404).json({ error: 'user_not_found' })
         return
       }

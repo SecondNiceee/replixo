@@ -117,6 +117,15 @@ export function playIncomingMessage() {
   ])
 }
 
+// Мягкий двухнотный аккорд для события дружбы (заявка / её принятие). Тише и
+// «круглее» сообщения, чтобы социальные события не путались со новыми письмами.
+export function playFriendEvent() {
+  playSequence([
+    { freq: 659.25, at: 0, duration: 0.1, wave: "sine", gain: 0.4 }, // E5
+    { freq: 987.77, at: 0.09, duration: 0.24, wave: "sine", gain: 0.45 }, // B5
+  ])
+}
+
 // Snappy descending arpeggio — signals demonstration has STOPPED. (~0.35s)
 export function playScreenShareStopSound() {
   playSequence([

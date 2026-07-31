@@ -41,7 +41,30 @@ function serverBaseUrl(): string {
 
 // Realtime не стоит того, чтобы держать ответ API: если сокет-сервер тормозит,
 // быстрее ответить пользователю и оставить обновление на фолбэк.
-const TIMEOUT_MS = 3000
+//
+// Общий бюджет прежний (3 с), но делим его на две попытки по 1.5 с. Смысл в
+// том, что клиентский фолбэк помогает только когда у инициатора есть живой
+// websocket — то есть ровно в том сценарии, от которого мы и уходили. Дешевле
+// один раз перезапросить сервер, чем надеяться на сокет инициатора.
+const ATTEMPT_TIMEOUT_MS = 1500
+const ATTEMPTS = 2
+
+/** Повторяем только сетевые сбои и 5xx: 4xx воспроизведётся один в один. */
+function isRetriable(status: number | null): boolean {
+  return status === null || status >= 500
+}
+
+let missingSecretWarned = false
+
+function warnMissingSecretOnce(): void {
+  if (missingSecretWarned) return
+  missingSecretWarned = true
+  console.warn(
+    '[friends] INTERNAL_HOOK_SECRET не задан — серверный хук отключён. ' +
+      'Realtime дружбы работает только через клиентский фолбэк: собеседник ' +
+      'увидит изменение лишь при живом websocket у инициатора.',
+  )
+}
 
 /**
  * Сообщить сокет-серверу, что связь между `userId` и `peerId` изменилась.
@@ -61,28 +84,47 @@ export async function notifyFriendsChanged(
   reason: FriendsChangeReason,
 ): Promise<boolean> {
   const secret = process.env.INTERNAL_HOOK_SECRET
-  // Без секрета внутренний хук выключен на обеих сторонах: работает фолбэк на
-  // socket-событии, поэтому это не ошибка и шуметь в логах не нужно.
-  if (!secret) return false
-
-  try {
-    const res = await fetch(`${serverBaseUrl()}/internal/friends/changed`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-secret': secret,
-      },
-      body: JSON.stringify({ userId, peerId, reason }),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) {
-      console.error(`[friends] хук вернул ${res.status} (reason=${reason})`)
-      return false
-    }
-    return true
-  } catch (e) {
-    console.error('[friends] хук недоступен:', (e as Error).message)
+  // Без секрета внутренний хук выключен на обеих сторонах и всё держится на
+  // клиентском фолбэке — то есть realtime работает через раз. Это не ошибка
+  // запроса, но молчать нельзя: иначе деградацию легко не заметить. Логируем
+  // один раз за жизнь процесса, чтобы не засорять логи на каждом действии.
+  if (!secret) {
+    warnMissingSecretOnce()
     return false
   }
+
+  const url = `${serverBaseUrl()}/internal/friends/changed`
+  const body = JSON.stringify({ userId, peerId, reason })
+
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    let status: number | null = null
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-secret': secret,
+        },
+        body,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+      })
+      if (res.ok) return true
+      status = res.status
+      console.error(
+        `[friends] хук вернул ${status} (reason=${reason}, попытка ${attempt}/${ATTEMPTS})`,
+      )
+    } catch (e) {
+      // Таймаут или сеть — повторяем: сокет-сервер мог перезапускаться.
+      console.error(
+        `[friends] хук недоступен (попытка ${attempt}/${ATTEMPTS}):`,
+        (e as Error).message,
+      )
+    }
+
+    // 401/400/404 повторять бессмысленно — ответ не изменится.
+    if (!isRetriable(status)) return false
+  }
+
+  return false
 }

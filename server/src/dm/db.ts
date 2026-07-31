@@ -127,6 +127,33 @@ export async function userExists(userId: string): Promise<boolean> {
   }
 }
 
+/**
+ * Отображаемое имя пользователя — нужно, чтобы realtime-событие о дружбе несло
+ * подпись для уведомления («Иван принял вашу заявку»).
+ *
+ * Имя берём из БД, а не из payload вызывающей стороны: инициатор не должен
+ * иметь возможности подставить чужое или произвольное имя в уведомление,
+ * которое увидит собеседник.
+ */
+export async function userDisplayName(userId: string): Promise<string | null> {
+  if (!dbPool) return null
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT "name", "username" FROM "user" WHERE "id" = $1 LIMIT 1`,
+      [userId],
+    )
+    if (rows.length === 0) return null
+    const name = (rows[0].name as string | null)?.trim()
+    if (name) return name
+    // У аккаунта может не быть заполненного name — тогда логин лучше, чем пустота.
+    const username = (rows[0].username as string | null)?.trim()
+    return username || null
+  } catch (e) {
+    console.error('[dm] userDisplayName failed:', (e as Error).message)
+    return null
+  }
+}
+
 /** Все участники диалога (для адресации broadcast'ов). */
 export async function listMemberIds(conversationId: string): Promise<string[]> {
   if (!dbPool) return []
