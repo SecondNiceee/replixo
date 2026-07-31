@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { MessagesButton } from '@/components/messages-button'
+import { NotificationsButton } from '@/components/notifications-button'
 import { LogOut, UserCircle } from 'lucide-react'
 
 interface AuthButtonsProps {
@@ -23,6 +24,9 @@ export function AuthButtons({ user }: AuthButtonsProps) {
     return (
       <div className="flex items-center gap-2">
         <MessagesButton />
+        {/* Как и MessagesButton — только внутри ветки «авторизован»: хук внутри
+            грузит /api/notifications, которое анониму отдаст 401. */}
+        <NotificationsButton />
         <Button
           variant="ghost"
           size="sm"

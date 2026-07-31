@@ -1,11 +1,15 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useUnreadTotal } from '@/hooks/dm/use-unread-total'
 import { useFriendsRealtime } from '@/hooks/dm/use-friends-realtime'
+import {
+  useNotificationsRealtime,
+  type StoredNotification,
+} from '@/hooks/dm/use-notifications'
 import { useDmStore } from '@/stores/dm-store'
-import { playIncomingMessage } from '@/lib/sounds'
+import { playFriendEvent, playIncomingMessage } from '@/lib/sounds'
 import { pushNotification } from '@/stores/notifications-store'
 import { AppToasts } from '@/components/app-toasts'
 
@@ -25,9 +29,60 @@ import { AppToasts } from '@/components/app-toasts'
 // dm:message не обрабатывается дважды.
 // ---------------------------------------------------------------------------
 
+/** Тост по сохранённому уведомлению. Текст один и тот же и здесь, и в панели. */
+function toastFor(n: StoredNotification): void {
+  const who = n.actorName.trim() || 'Пользователь'
+
+  if (n.kind === 'friend-request') {
+    pushNotification({
+      kind: 'friend-request',
+      title: who,
+      body: 'хочет добавить вас в друзья',
+      href: '/profile',
+      actionLabel: 'Открыть заявки',
+      // Заявка требует действия — держим на экране дольше остальных.
+      duration: 9000,
+      dedupeKey: `friend:${n.actorId}`,
+    })
+    playFriendEvent()
+    return
+  }
+
+  if (n.kind === 'friend-accepted') {
+    pushNotification({
+      kind: 'friend-accepted',
+      title: who,
+      body: 'принял вашу заявку в друзья',
+      // Сразу даём написать: диалог создастся по ?u=<id>, если его ещё нет.
+      href: `/chat?u=${encodeURIComponent(n.actorId)}`,
+      actionLabel: 'Написать',
+      dedupeKey: `friend:${n.actorId}`,
+    })
+    playFriendEvent()
+    return
+  }
+
+  // Отказ: сообщить нужно, привлекать внимание звуком — нет.
+  pushNotification({
+    kind: 'friend-declined',
+    title: who,
+    body: 'отклонил вашу заявку в друзья',
+    duration: 5000,
+    dedupeKey: `friend:${n.actorId}`,
+  })
+}
+
 export function DmNotifier({ selfId }: { selfId: string }) {
   const { socket } = useDmSocket()
   const totalUnread = useUnreadTotal()
+
+  // Тост теперь производная от СОХРАНЁННОГО уведомления, а не от события
+  // дружбы: раз запись уже в БД, тост можно спокойно потерять — центр
+  // уведомлений её сохранит. useCallback нужен, чтобы подписка на сокет не
+  // пересоздавалась на каждый ререндер.
+  const onIncoming = useCallback((n: StoredNotification) => toastFor(n), [])
+
+  useNotificationsRealtime(socket, onIncoming)
 
   // Заявки в друзья и их принятие должны быть видны без перезагрузки страницы.
   // Подписка живёт здесь, а не в профиле: ключи SWR глобальные, поэтому списки

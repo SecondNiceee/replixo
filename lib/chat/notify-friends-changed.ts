@@ -82,6 +82,7 @@ export async function notifyFriendsChanged(
   userId: string,
   peerId: string,
   reason: FriendsChangeReason,
+  notificationId?: string | null,
 ): Promise<boolean> {
   const secret = process.env.INTERNAL_HOOK_SECRET
   // Без секрета внутренний хук выключен на обеих сторонах и всё держится на
@@ -94,7 +95,10 @@ export async function notifyFriendsChanged(
   }
 
   const url = `${serverBaseUrl()}/internal/friends/changed`
-  const body = JSON.stringify({ userId, peerId, reason })
+  // notificationId — id УЖЕ сохранённой записи уведомления. Сервер по нему
+  // перечитает запись из БД и запушит её получателю. Содержимое уведомления в
+  // payload не передаём: сервер не должен верить тексту, пришедшему по HTTP.
+  const body = JSON.stringify({ userId, peerId, reason, notificationId: notificationId ?? null })
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     let status: number | null = null

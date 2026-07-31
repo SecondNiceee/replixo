@@ -114,13 +114,23 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         return
       }
 
-      const { userId, peerId, reason } = (req.body ?? {}) as Record<string, unknown>
+      const { userId, peerId, reason, notificationId } = (req.body ?? {}) as Record<
+        string,
+        unknown
+      >
       if (!isId(userId) || !isId(peerId) || userId === peerId) {
         res.status(400).json({ error: 'bad_payload' })
         return
       }
       if (!isReason(reason)) {
         res.status(400).json({ error: 'bad_reason' })
+        return
+      }
+      // Уведомление создаётся не для каждого события (отмена заявки и удаление
+      // из друзей ничего не создают), поэтому поле опционально. Но если оно
+      // пришло — это должен быть валидный id, иначе payload битый.
+      if (notificationId != null && !isId(notificationId)) {
+        res.status(400).json({ error: 'bad_notification_id' })
         return
       }
 
@@ -134,7 +144,13 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         return
       }
 
-      const link = await broadcastFriendsChanged(io.of('/dm'), userId, peerId, reason)
+      const link = await broadcastFriendsChanged(
+        io.of('/dm'),
+        userId,
+        peerId,
+        reason,
+        typeof notificationId === 'string' ? notificationId : null,
+      )
       res.json({ ok: true, status: link.status })
     })().catch((e: unknown) => {
       console.error('[internal] friends/changed failed:', (e as Error).message)

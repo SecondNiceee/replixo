@@ -1,5 +1,5 @@
 import type { Namespace } from 'socket.io'
-import { friendLinkState, userDisplayName } from './db'
+import { friendLinkState, notificationForPush, userDisplayName } from './db'
 import { announceMutualPresence, invalidateFriendsCache } from './presence'
 import { userRoom } from './namespace-types'
 
@@ -38,6 +38,7 @@ export async function broadcastFriendsChanged(
   userId: string,
   peerId: string,
   reason: FriendsChangeReason,
+  notificationId?: string | null,
 ): Promise<{ status: string; requesterId: string | null }> {
   // Имя инициатора нужно принимающей стороне для текста уведомления. Запрос
   // независим от статуса связи, поэтому идёт параллельно и не добавляет задержки.
@@ -65,6 +66,29 @@ export async function broadcastFriendsChanged(
   // Снапшот presence оба получили ещё когда друзьями не были, поэтому точку
   // «в сети» после принятия заявки нужно объявить отдельно.
   if (link.status === 'accepted') announceMutualPresence(nsp, userId, peerId)
+
+  // Пуш сохранённого уведомления получателю. Именно ПОЛУЧАТЕЛЮ, а не обоим:
+  // уведомление адресное, а инициатор и так видел результат своего действия.
+  //
+  // Запись уже лежит в БД (её создал Next-роут), поэтому этот emit — только
+  // ускорение: без него получатель увидит то же самое при следующей загрузке
+  // страницы, а не потеряет событие, как было до появления таблицы.
+  if (notificationId) {
+    const stored = await notificationForPush(notificationId, peerId)
+    if (stored) {
+      nsp.to(userRoom(peerId)).emit('dm:notification', {
+        notification: {
+          id: stored.id,
+          kind: stored.kind,
+          actorId: stored.actorId,
+          actorName: stored.actorName,
+          createdAt: stored.createdAt,
+          read: false,
+        },
+        unread: stored.unread,
+      })
+    }
+  }
 
   return link
 }
