@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { Socket } from "socket.io-client"
-import { NETWORK_GUARD } from "./types"
+import { CAMERA_ENCODINGS, NETWORK_GUARD } from "./types"
 import type { Consumer, Producer, Transport } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -518,8 +518,13 @@ export function useNetworkGuard({
           })
         }
         // Stage 1: keep sending, but only the smallest layer, slowly.
+        // The "no cap" value has to track CAMERA_ENCODINGS, not be a literal 2:
+        // adding a fourth simulcast layer would otherwise silently leave the
+        // camera one rung below its own top quality forever.
         void producer
-          .setMaxSpatialLayer(stage >= 1 ? NETWORK_GUARD.LOW_SPATIAL_LAYER : 2)
+          .setMaxSpatialLayer(
+            stage >= 1 ? NETWORK_GUARD.LOW_SPATIAL_LAYER : CAMERA_ENCODINGS.length - 1,
+          )
           .catch(() => {})
         void capProducer(
           producer,

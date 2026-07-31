@@ -162,6 +162,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     videoDegraded,
     uplinkVideoSuppressed,
     downlinkVideoSuppressed,
+    noteUserWantsVideo,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -223,6 +224,19 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
       openWhiteboard()
     }
   }, [whiteboardOpen, closeWhiteboard, openWhiteboard, setAnnotationActive])
+
+  // Pressing the camera button while the guard is holding video down has to mean
+  // "give me my camera back", not "toggle". The camera track still exists in that
+  // state (it is only paused and disabled), so a plain toggleCam would take the
+  // "camera is on, turn it off" branch and close the producer for real — the user
+  // would end up permanently off-camera by trying to come back on.
+  const handleToggleCam = useCallback(() => {
+    if (uplinkVideoSuppressed && !isCamOff) {
+      noteUserWantsVideo()
+      return
+    }
+    void toggleCam()
+  }, [uplinkVideoSuppressed, isCamOff, noteUserWantsVideo, toggleCam])
 
   const handleLeave = useCallback(() => {
     leave()
@@ -315,12 +329,15 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             whiteboardOpen ? "shrink-0" : "flex-1 flex-col",
           )}
         >
+          {/* `isCamOff` here also covers a guard-paused camera: the track is
+              still live, so without it the self-view would be a black rectangle
+              instead of the usual avatar placeholder. */}
           <RoomVideoGrid
             localStream={localStream}
             localScreenStream={localScreenStream}
             displayName={displayName}
             isMicMuted={isMicMuted}
-            isCamOff={isCamOff}
+            isCamOff={isCamOff || uplinkVideoSuppressed}
             isScreenSharing={isScreenSharing}
             peers={peers}
             participantsHidden={participantsHidden}
@@ -374,6 +391,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             localStream={localStream}
             isCamOff={isCamOff}
             isCamStarting={isCamStarting}
+            cameraSuppressed={uplinkVideoSuppressed}
             isScreenSharing={isScreenSharing}
             screenQuality={screenQuality}
             micDevices={micDevices}
@@ -387,7 +405,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             onToggleAnnotation={handleAnnotationButtonClick}
             onToggleCollapsed={() => setControlsCollapsed((v) => !v)}
             onToggleMic={toggleMic}
-            onToggleCam={toggleCam}
+            onToggleCam={handleToggleCam}
             onToggleScreenShare={toggleScreenShare}
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
@@ -403,7 +421,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
 
           OVERLAY_INTERACTIVE_ATTR: в overlay-режиме (Electron) панель и её
           стрелка-хэндл должны «ловить» клики, иначе hit-test через
-          elementFromPoint не найдёт интерактивный маркер и клик уйдёт сквозь
+          elementFromPoint не ��айдёт интерактивный маркер и клик уйдёт сквозь
           окно на рабочий стол. */}
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
@@ -490,10 +508,11 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           subscribeAnnotationClear={subscribeAnnotationClear}
           isMicMuted={isMicMuted}
           isCamOff={isCamOff}
+          cameraSuppressed={uplinkVideoSuppressed}
           whiteboardOpen={whiteboardOpen}
           onToggleWhiteboard={toggleWhiteboard}
           onToggleMic={toggleMic}
-          onToggleCam={toggleCam}
+          onToggleCam={handleToggleCam}
           onStopScreenShare={stopScreenShare}
         />
       )}
