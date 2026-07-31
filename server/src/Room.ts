@@ -367,6 +367,35 @@ export class Room {
   }
 
   /**
+   * Highest spatial/temporal layer index the given producer actually publishes.
+   *
+   * The consumer's own `rtpParameters` are useless here — mediasoup gives a
+   * simulcast consumer a single encoding regardless of how many layers the
+   * sender produces — so the numbers have to come from the producer. Temporal
+   * layers live in `scalabilityMode` ("L3T3" → 3 temporal layers); when it is
+   * absent there is exactly one.
+   */
+  private topLayersOf(producerId: string): { spatialLayers: number; temporalLayers: number } {
+    for (const peer of this.peers.values()) {
+      const producer = peer.getProducer(producerId)
+      if (!producer) continue
+
+      const encodings = producer.rtpParameters.encodings ?? []
+      const spatial = Math.max(1, encodings.length)
+      const temporal = encodings.reduce(
+        (max: number, encoding: { scalabilityMode?: string }) => {
+          const match = /T(\d+)/.exec(encoding.scalabilityMode ?? '')
+          return Math.max(max, match ? Number(match[1]) : 1)
+        },
+        1,
+      )
+      return { spatialLayers: spatial - 1, temporalLayers: temporal - 1 }
+    }
+    // Producer went away mid-flight; a single-layer request is always safe.
+    return { spatialLayers: 0, temporalLayers: 0 }
+  }
+
+  /**
    * Pin (or unpin) a consumer's simulcast layers.
    *
    * This is the step *before* pausing: instead of taking the picture away we
@@ -387,9 +416,16 @@ export class Room {
 
     try {
       if (spatialLayer === null) {
-        // "Best available" — mediasoup has no explicit reset, so ask for a layer
-        // index above anything a sender can publish and let it clamp down.
-        await consumer.setPreferredLayers({ spatialLayer: 2, temporalLayer: 2 })
+        // "Best available" — mediasoup has no explicit reset, so we ask for the
+        // sender's top layer. It has to be derived from the *producer*, not
+        // hard-coded: a literal 2 silently caps quality the moment someone
+        // publishes more than three spatial layers (or CAMERA_ENCODINGS
+        // changes), turning this "reset" into yet another restriction.
+        const { spatialLayers, temporalLayers } = this.topLayersOf(consumer.producerId)
+        await consumer.setPreferredLayers({
+          spatialLayer: spatialLayers,
+          temporalLayer: temporalLayers,
+        })
         return
       }
       await consumer.setPreferredLayers({
