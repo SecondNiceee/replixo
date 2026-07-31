@@ -230,12 +230,25 @@ export function useNetworkGuard({
   const [downlinkStage, setDownlinkStage] = useState<DegradeStage>(0)
 
   const videoModeRef = useRef<VideoMode>("auto")
-  videoModeRef.current = videoMode
+  // Mirrored in an effect rather than during render: writing a ref while rendering
+  // is a side effect React is allowed to discard or double-run (StrictMode, aborted
+  // renders), which could leave the sampling loop reading a mode that never
+  // committed. `setVideoMode` below still updates the ref synchronously, so the
+  // very next tick sees an explicit user choice without waiting for this effect.
+  useEffect(() => {
+    videoModeRef.current = videoMode
+  }, [videoMode])
   const forceVideoUntilRef = useRef(0)
 
   // Cumulative counters from the previous sample, keyed by stats source.
   const prevUplinkRef = useRef<Counter | undefined>(undefined)
   const uplinkCarryRef = useRef<Counter>(emptyCarry())
+  // Which producer, and which unbroken send streak, the counters above belong to.
+  // Counters are cumulative per producer: they freeze while the mic is muted and
+  // restart from zero on a new producer. Comparing across either boundary yields a
+  // delta covering the whole silent gap, which reads as a huge loss spike and could
+  // kill the camera the instant someone unmutes.
+  const uplinkCounterKeyRef = useRef<string | null>(null)
   const prevDownlinkRef = useRef<Map<string, Counter>>(new Map())
   const downlinkCarryRef = useRef<Map<string, Counter>>(new Map())
 
@@ -290,7 +303,16 @@ export function useNetworkGuard({
     // `remote-inbound-rtp` is the receiver report coming back from the SFU — it
     // is the only place that tells us what actually arrived, as opposed to what
     // we tried to send.
-    if (producer && !producer.closed && !producer.paused) {
+    // A muted or closed producer stops advancing its counters, so drop the
+    // baseline now and rebuild it from the first sample after the gap.
+    const counterKey = producer && !producer.closed && !producer.paused ? producer.id : null
+    if (uplinkCounterKeyRef.current !== counterKey) {
+      uplinkCounterKeyRef.current = counterKey
+      prevUplinkRef.current = undefined
+      uplinkCarryRef.current = emptyCarry()
+    }
+
+    if (counterKey && producer) {
       try {
         const stats: RTCStatsReport = await producer.getStats()
         stats.forEach((report: Record<string, unknown>) => {
