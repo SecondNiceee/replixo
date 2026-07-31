@@ -177,6 +177,28 @@ export const NETWORK_GUARD = {
   WEAK_LOSS: 0.04,
   /** Audio loss ratio (0..1) at which video must go. */
   BAD_LOSS: 0.12,
+
+  /**
+   * Minimum packets in a sampling window before a loss ratio means anything.
+   * Deliberately small: Opus with DTX + 40 ms ptime sends only ~50 packets per
+   * 2 s while somebody talks and almost none in silence, so a large window
+   * would silently disable the whole guard during quiet moments.
+   */
+  MIN_LOSS_WINDOW_PACKETS: 12,
+  /**
+   * Concealed-audio ratio (0..1) — the share of playout that the jitter buffer
+   * had to invent because packets were missing or too late. Unlike `packetsLost`
+   * this keeps working during DTX silence and captures late packets too, which
+   * makes it the more honest "is the voice actually intelligible" signal.
+   */
+  WEAK_CONCEALMENT: 0.06,
+  BAD_CONCEALMENT: 0.15,
+  /**
+   * Consecutive samples where a live, unmuted audio producer/consumer produced
+   * no measurable progress at all (stats missing, or zero packets moved). That
+   * is a dead path, not a healthy one — the previous version reported "good".
+   */
+  STALLED_SAMPLES_TO_BAD: 2,
   /**
    * Available outgoing bitrate below which video cannot coexist with voice.
    * The lowest camera simulcast layer alone asks for 100 kbps and mediasoup
@@ -184,11 +206,47 @@ export const NETWORK_GUARD = {
    */
   BAD_UPLINK_BPS: 180_000,
   WEAK_UPLINK_BPS: 400_000,
+  /**
+   * Same idea for the incoming direction, read from the recv transport's
+   * `availableIncomingBitrate` when the browser exposes it.
+   */
+  BAD_DOWNLINK_BPS: 250_000,
+  WEAK_DOWNLINK_BPS: 600_000,
   /** Round-trip time (seconds) that indicates a badly congested path. */
   BAD_RTT_S: 1.0,
 
   /** Opus target bitrate per quality level. */
   VOICE_BITRATE: { good: 64_000, weak: 40_000, bad: 24_000 },
+
+  // -------------------------------------------------------------------------
+  // The "shrink before you kill" step.
+  //
+  // Going straight from 720p to no video at all is jarring and usually
+  // unnecessary: capping the camera to its lowest simulcast layer already frees
+  // ~800 kbps, which is far more than Opus will ever need. Video only gets
+  // dropped if shrinking it wasn't enough.
+  // -------------------------------------------------------------------------
+  /** Simulcast layer video is pinned to while the link is merely "weak". */
+  LOW_SPATIAL_LAYER: 0,
+  LOW_TEMPORAL_LAYER: 0,
+  /** Hard cap on the camera encoder while degraded. */
+  LOW_CAMERA_BPS: 120_000,
+  /** Frame rate cap while degraded — motion is what costs bits. */
+  LOW_CAMERA_FPS: 15,
+  /**
+   * Screen share cap while degraded. Kept well above the camera cap because a
+   * shared screen is usually the reason the call exists, and static content
+   * compresses far better than a talking head.
+   */
+  LOW_SCREEN_BPS: 500_000,
+  LOW_SCREEN_FPS: 5,
+
+  /**
+   * How long a manual "keep my video on" override lasts before the guard takes
+   * over again. Without an expiry, one press of the camera button disabled the
+   * protection for the rest of the call.
+   */
+  FORCE_VIDEO_TTL_MS: 60_000,
 }
 
 // ---------------------------------------------------------------------------

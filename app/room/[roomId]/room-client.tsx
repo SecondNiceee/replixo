@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState, useCallback, useEffect } from "react"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
+import { NetworkBanner } from "@/components/network-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
 import { getSavedDisplayName, setDisplayName } from "@/lib/display-name"
@@ -156,6 +157,11 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     sendAnnotationClear,
     subscribeAnnotationStroke,
     subscribeAnnotationClear,
+    videoMode,
+    setVideoMode,
+    videoDegraded,
+    uplinkVideoSuppressed,
+    downlinkVideoSuppressed,
   } = useMediasoup(roomId, displayName, create)
 
   const { devices: micDevices } = useAudioDevices()
@@ -238,6 +244,17 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
       overlayMode ? "bg-transparent" : "bg-background",
     )}>
       {!overlayMode && <EnableSoundBanner />}
+
+      {/* Explains why video shrank or disappeared on a weak connection. */}
+      {!overlayMode && (
+        <NetworkBanner
+          uplinkVideoSuppressed={uplinkVideoSuppressed}
+          downlinkVideoSuppressed={downlinkVideoSuppressed}
+          videoDegraded={videoDegraded}
+          videoMode={videoMode}
+          setVideoMode={setVideoMode}
+        />
+      )}
 
       {/* Permission error banner — shown when the browser blocked mic or cam access */}
       {permissionError && (
