@@ -366,6 +366,41 @@ export class Room {
     }
   }
 
+  /**
+   * Pin (or unpin) a consumer's simulcast layers.
+   *
+   * This is the step *before* pausing: instead of taking the picture away we
+   * forward only the smallest layer the sender publishes (~100 kbps instead of
+   * ~900 kbps), which is usually enough to stop starving the Opus stream. Only
+   * meaningful for video; audio has a single layer.
+   */
+  async setConsumerPreferredLayers(
+    peerId: string,
+    consumerId: string,
+    spatialLayer: number | null,
+    temporalLayer?: number | null,
+  ): Promise<void> {
+    const peer = this.peers.get(peerId)
+    if (!peer) return
+    const consumer = peer.getConsumer(consumerId)
+    if (!consumer || consumer.closed || consumer.kind !== 'video') return
+
+    try {
+      if (spatialLayer === null) {
+        // "Best available" — mediasoup has no explicit reset, so ask for a layer
+        // index above anything a sender can publish and let it clamp down.
+        await consumer.setPreferredLayers({ spatialLayer: 2, temporalLayer: 2 })
+        return
+      }
+      await consumer.setPreferredLayers({
+        spatialLayer,
+        ...(typeof temporalLayer === 'number' ? { temporalLayer } : {}),
+      })
+    } catch {
+      // Producer may be non-simulcast, or closed meanwhile — nothing to do.
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // On-demand keyframe request.
   //

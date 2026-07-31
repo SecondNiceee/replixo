@@ -73,6 +73,25 @@ export interface PauseConsumerPayload {
   paused: boolean
 }
 
+/**
+ * Client-driven simulcast layer selection (the *gentle* step of the weak-network
+ * guard, applied before video is dropped altogether).
+ *
+ * Pausing a consumer is a cliff: the picture disappears. Most congested links
+ * only need the picture to become small and choppy, which is exactly what
+ * pinning the consumer to the lowest spatial/temporal layer does — 100 kbps
+ * instead of 900 kbps, with the video still visible. Like `pauseConsumer` this
+ * is one viewer's private decision and is never broadcast.
+ */
+export interface SetConsumerLayersPayload {
+  roomId: string
+  peerId: string
+  consumerId: string
+  /** Lowest layer is 0; `null` clears the preference back to "best available". */
+  spatialLayer: number | null
+  temporalLayer?: number | null
+}
+
 export interface CloseProducerPayload {
   roomId: string
   peerId: string

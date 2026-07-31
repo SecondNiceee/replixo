@@ -9,6 +9,7 @@ import type {
   ConsumePayload,
   ResumeConsumerPayload,
   PauseConsumerPayload,
+  SetConsumerLayersPayload,
   CloseProducerPayload,
   PauseProducerPayload,
 } from '../types'
@@ -339,6 +340,34 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         } else {
           await room.resumeConsumer(peerId, consumerId)
         }
+        if (callback) ack(callback, undefined)
+      } catch (e) {
+        if (callback) err(callback as Callback<never>, (e as Error).message)
+      }
+    },
+  )
+
+  // -----------------------------------------------------------------------
+  // setConsumerLayers  (client-driven weak-downlink protection, gentle step)
+  //
+  // The viewer's guard noticed its downlink is getting tight but not hopeless.
+  // Rather than killing the picture we pin the consumer to the lowest simulcast
+  // layer, which cuts the incoming video bitrate roughly 9× while keeping a
+  // (small, choppy) image. Private to this viewer, so nothing is broadcast.
+  // -----------------------------------------------------------------------
+  socket.on(
+    'setConsumerLayers',
+    async (payload: SetConsumerLayersPayload, callback?: Callback<void>) => {
+      const { roomId, peerId, consumerId, spatialLayer, temporalLayer } = payload ?? {}
+
+      try {
+        const room = rooms.get(roomId)
+        if (!room) {
+          if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
+          return
+        }
+
+        await room.setConsumerPreferredLayers(peerId, consumerId, spatialLayer, temporalLayer)
         if (callback) ack(callback, undefined)
       } catch (e) {
         if (callback) err(callback as Callback<never>, (e as Error).message)

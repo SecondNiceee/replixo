@@ -14,6 +14,7 @@ import type { ChatAttachment, ScreenQuality, Consumer, Transport, Producer, Devi
 
 import { useTransports } from "./mediasoup/use-transports"
 import { useMediaControls } from "./mediasoup/use-media-controls"
+import { useNetworkGuard } from "./mediasoup/use-network-guard"
 import { useWhiteboard } from "./mediasoup/use-whiteboard"
 import { reducer } from "./mediasoup/reducer"
 import { useChat } from "./mediasoup/use-chat"
@@ -89,6 +90,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const recoveryInFlightRef = useRef(false)
   const lastRebuildAtRef = useRef(0)
   const rebuildConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
+  // Set by the weak-network guard. Read by useTransports so an ICE-recovery
+  // resume sweep (or a brand new consumer) can't undo a downlink decision.
+  const videoConsumersSuppressedRef = useRef(false)
+  // Indirection: media controls are created before the guard, but the camera
+  // button has to be able to tell the guard "the user wants video".
+  const noteUserWantsVideoRef = useRef<() => void>(() => {})
 
   // Keep refs in sync with state (readable inside async callbacks without stale closures)
   statusRef.current = state.status
@@ -107,6 +114,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     iceRestartingRef, iceRetryTimersRef,
     audioProducerRef, videoProducerRef,
     screenVideoProducerRef, screenAudioProducerRef,
+    videoConsumersSuppressedRef,
     onRecoveryExhausted: (reason) => { void rebuildConnectionRef.current(`ice-${reason}`) },
     dispatch,
   })
@@ -118,8 +126,21 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     screenVideoProducerRef, screenAudioProducerRef,
     screenStreamRef, screenQualityRef, selectedMicIdRef,
     isCamOffRef,
+    onUserWantsVideo: () => { noteUserWantsVideoRef.current() },
     dispatch,
   })
+
+  // Keeps the voice alive on a bad link by degrading — and finally dropping —
+  // video in whichever direction is actually failing.
+  const networkGuard = useNetworkGuard({
+    roomId, peerIdRef, socketRef,
+    sendTransportRef, recvTransportRef,
+    audioProducerRef, videoProducerRef, screenVideoProducerRef,
+    localStreamRef, consumersRef,
+    videoConsumersSuppressedRef,
+    isCamOffRef, hasJoinedRef,
+  })
+  noteUserWantsVideoRef.current = networkGuard.noteUserWantsVideo
 
   const chat = useChat({
     roomId, displayName, peerIdRef, socketRef, dispatch,
@@ -617,6 +638,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Connection
     leave,
     recoverConnection,
+    // Weak-network guard
+    networkQuality: networkGuard.networkQuality,
+    uplinkQuality: networkGuard.uplinkQuality,
+    downlinkQuality: networkGuard.downlinkQuality,
+    videoMode: networkGuard.videoMode,
+    setVideoMode: networkGuard.setVideoMode,
+    videoDegraded: networkGuard.videoDegraded,
+    uplinkVideoSuppressed: networkGuard.uplinkVideoSuppressed,
+    downlinkVideoSuppressed: networkGuard.downlinkVideoSuppressed,
     // Chat
     messages: state.messages,
     sendChatMessage: chat.sendChatMessage,

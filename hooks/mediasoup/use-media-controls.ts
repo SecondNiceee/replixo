@@ -56,6 +56,13 @@ interface UseMediaControlsParams {
   // Reflects the user's camera intent, so recovery can republish paused
   // instead of unexpectedly turning the camera back on.
   isCamOffRef?: React.MutableRefObject<boolean>
+  /**
+   * Called when the user deliberately turns their camera ON. The weak-network
+   * guard may have video suppressed at that moment, and without this signal it
+   * would re-pause the freshly published producer within two seconds, making the
+   * camera button look broken.
+   */
+  onUserWantsVideo?: () => void
   dispatch: (action: Action) => void
 }
 
@@ -73,6 +80,7 @@ export function useMediaControls({
   screenQualityRef,
   selectedMicIdRef,
   isCamOffRef,
+  onUserWantsVideo,
   dispatch,
 }: UseMediaControlsParams) {
   const [permissionError, setPermissionError] = useState<string | null>(null)
@@ -232,6 +240,9 @@ export function useMediaControls({
       // Turning the camera ON — this can take a few seconds (permission prompt,
       // device warm-up, publishing). Surface a loader on the button meanwhile.
       setIsCamStarting(true)
+      // Tell the network guard the user wants video *before* publishing, so the
+      // new producer is never born into a suppressed state.
+      onUserWantsVideo?.()
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
         setPermissionError(null)
@@ -270,7 +281,7 @@ export function useMediaControls({
     }
     dispatch({ type: "TOGGLE_CAM", isOff: true })
   }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, videoProducerRef,
-      dispatch, waitForSendTransport, watchCameraTrack])
+      dispatch, waitForSendTransport, watchCameraTrack, onUserWantsVideo])
 
   // ---------------------------------------------------------------------------
   // Camera recovery after a network blip / device sleep
