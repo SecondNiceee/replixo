@@ -5,7 +5,7 @@ import { UserPlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 
 export function AddFriendForm() {
   // Соединение общее (refcount), поэтому лишнего websocket здесь не появляется.
@@ -24,17 +24,15 @@ export function AddFriendForm() {
     setAddError(null)
     setAddSuccess(null)
 
-    const res = await fetch('/api/friends/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: trimmed }),
+    // friendsAction, а не fetch напрямую: он передаёт id нашего соединения, и
+    // сервер погасит эхо только в этой вкладке — соседние обновятся событием.
+    const { ok, data } = await friendsAction(socket, '/api/friends/request', 'POST', {
+      username: trimmed,
     })
-
-    const data = await res.json()
     setAddLoading(false)
 
-    if (!res.ok) {
-      setAddError(data.error ?? 'Ошибка')
+    if (!ok) {
+      setAddError(data?.error ?? 'Ошибка')
       return
     }
 

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Users, UserMinus, Loader2, MessageSquare } from 'lucide-react'
 import { useDmStore } from '@/stores/dm-store'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { Friend } from './types'
 
 interface FriendsListProps {
@@ -20,13 +20,10 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
   const { socket } = useDmSocket()
 
   const handleRemove = async (friendshipId: string, friendId: string) => {
-    const res = await fetch('/api/friends/remove', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ friendshipId }),
+    const { ok, data } = await friendsAction(socket, '/api/friends/remove', 'DELETE', {
+      friendshipId,
     })
-    const data = await res.json().catch(() => null)
-    if (res.ok) {
+    if (ok) {
       // Второй участник тоже должен увидеть, что дружбы больше нет.
       notifyFriendsChanged(socket, friendId, 'removed', data?.notified === true)
     }

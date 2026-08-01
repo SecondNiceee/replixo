@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Send, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { SentRequest } from './types'
 
 interface SentRequestsProps {
@@ -19,14 +19,11 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
 
   const handleCancel = async (friendshipId: string, addresseeId: string) => {
     setCancellingId(friendshipId)
-    const res = await fetch('/api/friends/cancel', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ friendshipId }),
+    const { ok, data } = await friendsAction(socket, '/api/friends/cancel', 'DELETE', {
+      friendshipId,
     })
-    const data = await res.json().catch(() => null)
     setCancellingId(null)
-    if (res.ok) {
+    if (ok) {
       setCancelledIds((prev) => new Set(prev).add(friendshipId))
       // У адресата заявка должна пропасть из входящих сразу.
       notifyFriendsChanged(socket, addresseeId, 'cancelled', data?.notified === true)
