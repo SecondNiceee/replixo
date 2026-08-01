@@ -30,6 +30,18 @@ export type FriendsChangeReason =
 /**
  * Разослать `dm:friends:changed` обоим участникам и синхронизировать presence.
  *
+ * `originSocketId` — id ИМЕННО ТОГО соединения, из которого пришло действие
+ * (браузер передаёт его в заголовке при вызове Next-роута, а на фолбэк-пути это
+ * socket.id самого сокета). Комната адресуется по пользователю, а не по сокету,
+ * поэтому у инициатора событие получают ВСЕ его вкладки и устройства. Гасить
+ * эхо по userId нельзя: списки перечитала только та вкладка, где кликнули, а
+ * остальные так и оставались бы со старыми данными. Поэтому:
+ *
+ *   • инициирующее соединение исключаем из рассылки через `.except()` —
+ *     оно уже обновилось по ответу API;
+ *   • тот же id уезжает в payload, чтобы клиент мог продублировать проверку
+ *     (например, когда рассылку сделал другой узел и `except` не сработал).
+ *
  * Возвращает фактический статус связи, прочитанный из БД, — вызывающая сторона
  * может его залогировать, но полагаться на него для доступа не должна.
  */
@@ -39,6 +51,7 @@ export async function broadcastFriendsChanged(
   peerId: string,
   reason: FriendsChangeReason,
   notificationId?: string | null,
+  originSocketId?: string | null,
 ): Promise<{ status: string; requesterId: string | null }> {
   // Имя инициатора нужно принимающей стороне для текста уведомления. Запрос
   // независим от статуса связи, поэтому идёт параллельно и не добавляет задержки.
@@ -52,15 +65,25 @@ export async function broadcastFriendsChanged(
   invalidateFriendsCache(userId)
   invalidateFriendsCache(peerId)
 
+  const payload = {
+    userId,
+    peerId,
+    reason,
+    status: link.status,
+    requesterId: link.requesterId,
+    actorName,
+    // Клиент сравнит с собственным socket.id. Именно socket, а не пользователь:
+    // вторая вкладка инициатора — другой сокет, и ей событие нужно.
+    originSocketId: originSocketId ?? null,
+  }
+
   for (const memberId of [userId, peerId]) {
-    nsp.to(userRoom(memberId)).emit('dm:friends:changed', {
-      userId,
-      peerId,
-      reason,
-      status: link.status,
-      requesterId: link.requesterId,
-      actorName,
-    })
+    const target = nsp.to(userRoom(memberId))
+    // Исключаем только инициирующее соединение — остальные сокеты того же
+    // пользователя (второй таб, телефон) событие получают и перечитывают списки.
+    // socket.id сам по себе является комнатой, поэтому except им и оперирует.
+    const scoped = originSocketId ? target.except(originSocketId) : target
+    scoped.emit('dm:friends:changed', payload)
   }
 
   // Снапшот presence оба получили ещё когда друзьями не были, поэтому точку

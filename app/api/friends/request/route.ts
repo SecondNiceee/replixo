@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship, user } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
 import { randomUUID } from 'crypto'
 
@@ -164,11 +165,15 @@ export async function POST(req: NextRequest) {
   // Адресат должен увидеть заявку сразу. Уведомляем сокет-сервер сами, а не
   // руками клиента: иначе realtime зависел бы от наличия у отправителя живого
   // websocket.
+  //
+  // Заодно передаём соединение-инициатор: эхо гасится по СОКЕТУ, поэтому другие
+  // вкладки отправителя событие получат и перечитают свои списки.
   const notified = await notifyFriendsChanged(
     requesterId,
     addressee.id,
     'requested',
     notificationId,
+    originSocketIdFromRequest(req),
   )
 
   return NextResponse.json({ friendship: created, notified }, { status: 201 })

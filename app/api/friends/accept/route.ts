@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
 
 // POST /api/friends/accept — accept incoming request
@@ -46,6 +47,9 @@ export async function POST(req: NextRequest) {
     updated.requesterId,
     'accepted',
     notificationId,
+    // Эхо не отправляем только в ту вкладку, что кликнула «Принять»: остальные
+    // соединения этого пользователя обновляются событием.
+    originSocketIdFromRequest(req),
   )
 
   return NextResponse.json({ friendship: updated, notified })
