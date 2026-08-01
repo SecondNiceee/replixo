@@ -83,6 +83,7 @@ export async function notifyFriendsChanged(
   peerId: string,
   reason: FriendsChangeReason,
   notificationId?: string | null,
+  originSocketId?: string | null,
 ): Promise<boolean> {
   const secret = process.env.INTERNAL_HOOK_SECRET
   // Без секрета внутренний хук выключен на обеих сторонах и всё держится на
@@ -98,7 +99,18 @@ export async function notifyFriendsChanged(
   // notificationId — id УЖЕ сохранённой записи уведомления. Сервер по нему
   // перечитает запись из БД и запушит её получателю. Содержимое уведомления в
   // payload не передаём: сервер не должен верить тексту, пришедшему по HTTP.
-  const body = JSON.stringify({ userId, peerId, reason, notificationId: notificationId ?? null })
+  //
+  // originSocketId — соединение, из которого пришло действие. Нужен, чтобы
+  // сокет-сервер не отправлял эхо ровно в ту вкладку, которая уже обновила
+  // списки по ответу этого запроса. Остальные соединения того же пользователя
+  // (второй таб, другое устройство) событие получить ДОЛЖНЫ.
+  const body = JSON.stringify({
+    userId,
+    peerId,
+    reason,
+    notificationId: notificationId ?? null,
+    originSocketId: originSocketId ?? null,
+  })
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     let status: number | null = null

@@ -49,6 +49,14 @@ function isId(value: unknown): value is string {
   return typeof value === 'string' && !!value && value.length <= MAX_ID_LENGTH
 }
 
+// socket.io генерирует id из base64url-алфавита. Сужаем набор символов, потому
+// что этот id используется как имя комнаты в `.except()`: имена наших комнат
+// вида `user:<id>` содержат двоеточие, и без проверки клиент мог бы прислать
+// «socket id», совпадающий с комнатой пользователя, и погасить рассылку целиком.
+function isSocketId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+}
+
 // ---------------------------------------------------------------------------
 // Ограничение частоты запросов к /internal/*.
 //
@@ -114,10 +122,8 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         return
       }
 
-      const { userId, peerId, reason, notificationId } = (req.body ?? {}) as Record<
-        string,
-        unknown
-      >
+      const { userId, peerId, reason, notificationId, originSocketId } = (req.body ??
+        {}) as Record<string, unknown>
       if (!isId(userId) || !isId(peerId) || userId === peerId) {
         res.status(400).json({ error: 'bad_payload' })
         return
@@ -131,6 +137,16 @@ export function registerInternalRoutes(app: Express, io: Server): void {
       // пришло — это должен быть валидный id, иначе payload битый.
       if (notificationId != null && !isId(notificationId)) {
         res.status(400).json({ error: 'bad_notification_id' })
+        return
+      }
+      // Соединение-источник тоже опционально: действие могли выполнить вообще
+      // без websocket (curl, второй браузер без чата). Значение приходит из
+      // браузера, поэтому это не «доверенный» id: максимум, что им можно
+      // сделать — исключить один сокет из рассылки И только внутри двух комнат
+      // участников. Форму всё равно проверяем, чтобы в except() не улетала
+      // произвольная строка-комната.
+      if (originSocketId != null && !isSocketId(originSocketId)) {
+        res.status(400).json({ error: 'bad_origin_socket_id' })
         return
       }
 
@@ -150,6 +166,7 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         peerId,
         reason,
         typeof notificationId === 'string' ? notificationId : null,
+        typeof originSocketId === 'string' ? originSocketId : null,
       )
       res.json({ ok: true, status: link.status })
     })().catch((e: unknown) => {

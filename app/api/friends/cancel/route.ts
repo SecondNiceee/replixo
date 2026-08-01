@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { deleteFriendNotification } from '@/lib/chat/notifications'
 
 // DELETE /api/friends/cancel — cancel an outgoing pending request
@@ -42,7 +43,15 @@ export async function DELETE(req: NextRequest) {
   await deleteFriendNotification(deleted.addresseeId, userId, 'friend-request')
 
   // Строка удалена, поэтому статуса в БД уже нет — причину сообщаем явно.
-  const notified = await notifyFriendsChanged(userId, deleted.addresseeId, 'cancelled')
+  const notified = await notifyFriendsChanged(
+    userId,
+    deleted.addresseeId,
+    'cancelled',
+    null,
+    // Соединение-инициатор: его исключим из рассылки, а остальные вкладки
+    // отменившего уберут заявку из «исходящих» по событию.
+    originSocketIdFromRequest(req),
+  )
 
   return NextResponse.json({ ok: true, peerId: deleted.addresseeId, notified })
 }

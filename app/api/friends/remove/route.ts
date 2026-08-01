@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 
 // DELETE /api/friends/remove — remove a friend
 export async function DELETE(req: NextRequest) {
@@ -36,7 +37,14 @@ export async function DELETE(req: NextRequest) {
 
   // Удалить мог любой из двоих — второй участник это тот id, который не наш.
   const peerId = deleted.requesterId === userId ? deleted.addresseeId : deleted.requesterId
-  const notified = await notifyFriendsChanged(userId, peerId, 'removed')
+  const notified = await notifyFriendsChanged(
+    userId,
+    peerId,
+    'removed',
+    null,
+    // Только инициирующая вкладка уже перечитала списки — её и исключаем.
+    originSocketIdFromRequest(req),
+  )
 
   return NextResponse.json({ ok: true, peerId, notified })
 }
