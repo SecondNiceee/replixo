@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.webRtcTransportOptions = exports.mediaCodecs = exports.workerSettings = exports.iceServers = exports.listenIps = exports.UPLOAD_TTL_MS = exports.WINDOWS_INSTALLER_NAME = exports.WINDOWS_INSTALLER_PATH = exports.DM_UPLOAD_SUBDIR = exports.MAX_FILE_SIZE = exports.UPLOAD_DIR = exports.MAX_PEERS_PER_ROOM = exports.CLIENT_ORIGIN = exports.PORT = void 0;
+exports.webRtcTransportOptions = exports.mediaCodecs = exports.workerSettings = exports.iceServers = exports.listenIps = exports.UPLOAD_TTL_MS = exports.WINDOWS_INSTALLER_NAME = exports.WINDOWS_INSTALLER_PATH = exports.DM_UPLOAD_SUBDIR = exports.MAX_FILE_SIZE = exports.UPLOAD_DIR = exports.INTERNAL_HOOK_SECRET = exports.MAX_PEERS_PER_ROOM = exports.CLIENT_ORIGIN = exports.PORT = void 0;
 require("dotenv/config");
 const path_1 = __importDefault(require("path"));
 // ---------------------------------------------------------------------------
@@ -12,6 +12,12 @@ const path_1 = __importDefault(require("path"));
 exports.PORT = parseInt(process.env.PORT ?? '3001', 10);
 exports.CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:3000';
 exports.MAX_PEERS_PER_ROOM = 5;
+// Общий секрет для запросов «Next-сервер → этот сервер» (маршруты /internal/*).
+// У них нет пользовательской сессии: их дёргает Next-роут после успешной записи
+// в Postgres, о которой сокет-сервер сам узнать не может. Пока секрет не задан,
+// /internal/* отвечает 503 — открытым такой маршрут не бывает никогда.
+// Значение обязано совпадать с INTERNAL_HOOK_SECRET у Next-приложения.
+exports.INTERNAL_HOOK_SECRET = process.env.INTERNAL_HOOK_SECRET ?? '';
 // ---------------------------------------------------------------------------
 // Вложения чата (файлы хранятся на диске VPS, без внешних blob-хранилищ)
 // ---------------------------------------------------------------------------

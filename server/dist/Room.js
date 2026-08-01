@@ -258,6 +258,26 @@ class Room {
             throw new Error(`Producer ${producerId} not found`);
         await producer.resume();
     }
+    /**
+     * Pause a single consumer on the SFU side.
+     *
+     * Used by the client's weak-network guard: when a viewer's downlink can no
+     * longer carry video without shredding the Opus stream, it asks us to stop
+     * forwarding that video entirely. A client-only `consumer.pause()` would keep
+     * the RTP flowing and free nothing, so the pause must be applied here.
+     * Resuming goes through `resumeConsumer`, which also re-requests a keyframe.
+     */
+    async pauseConsumer(peerId, consumerId) {
+        const peer = this.peers.get(peerId);
+        if (!peer)
+            throw new Error(`Peer ${peerId} not found`);
+        const consumer = peer.getConsumer(consumerId);
+        if (!consumer)
+            throw new Error(`Consumer ${consumerId} not found`);
+        if (consumer.closed || consumer.paused)
+            return;
+        await consumer.pause();
+    }
     async resumeConsumer(peerId, consumerId) {
         const peer = this.peers.get(peerId);
         if (!peer)
@@ -290,6 +310,69 @@ class Room {
             for (const delay of [200, 600, 1200, 2500]) {
                 setTimeout(requestKeyFrameSafely, delay);
             }
+        }
+    }
+    /**
+     * Highest spatial/temporal layer index the given producer actually publishes.
+     *
+     * The consumer's own `rtpParameters` are useless here — mediasoup gives a
+     * simulcast consumer a single encoding regardless of how many layers the
+     * sender produces — so the numbers have to come from the producer. Temporal
+     * layers live in `scalabilityMode` ("L3T3" → 3 temporal layers); when it is
+     * absent there is exactly one.
+     */
+    topLayersOf(producerId) {
+        for (const peer of this.peers.values()) {
+            const producer = peer.getProducer(producerId);
+            if (!producer)
+                continue;
+            const encodings = producer.rtpParameters.encodings ?? [];
+            const spatial = Math.max(1, encodings.length);
+            const temporal = encodings.reduce((max, encoding) => {
+                const match = /T(\d+)/.exec(encoding.scalabilityMode ?? '');
+                return Math.max(max, match ? Number(match[1]) : 1);
+            }, 1);
+            return { spatialLayers: spatial - 1, temporalLayers: temporal - 1 };
+        }
+        // Producer went away mid-flight; a single-layer request is always safe.
+        return { spatialLayers: 0, temporalLayers: 0 };
+    }
+    /**
+     * Pin (or unpin) a consumer's simulcast layers.
+     *
+     * This is the step *before* pausing: instead of taking the picture away we
+     * forward only the smallest layer the sender publishes (~100 kbps instead of
+     * ~900 kbps), which is usually enough to stop starving the Opus stream. Only
+     * meaningful for video; audio has a single layer.
+     */
+    async setConsumerPreferredLayers(peerId, consumerId, spatialLayer, temporalLayer) {
+        const peer = this.peers.get(peerId);
+        if (!peer)
+            return;
+        const consumer = peer.getConsumer(consumerId);
+        if (!consumer || consumer.closed || consumer.kind !== 'video')
+            return;
+        try {
+            if (spatialLayer === null) {
+                // "Best available" — mediasoup has no explicit reset, so we ask for the
+                // sender's top layer. It has to be derived from the *producer*, not
+                // hard-coded: a literal 2 silently caps quality the moment someone
+                // publishes more than three spatial layers (or CAMERA_ENCODINGS
+                // changes), turning this "reset" into yet another restriction.
+                const { spatialLayers, temporalLayers } = this.topLayersOf(consumer.producerId);
+                await consumer.setPreferredLayers({
+                    spatialLayer: spatialLayers,
+                    temporalLayer: temporalLayers,
+                });
+                return;
+            }
+            await consumer.setPreferredLayers({
+                spatialLayer,
+                ...(typeof temporalLayer === 'number' ? { temporalLayer } : {}),
+            });
+        }
+        catch {
+            // Producer may be non-simulcast, or closed meanwhile — nothing to do.
         }
     }
     // ---------------------------------------------------------------------------

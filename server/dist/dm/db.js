@@ -12,6 +12,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.isDmEnabled = void 0;
 exports.validateSessionToken = validateSessionToken;
 exports.areFriends = areFriends;
+exports.friendLinkState = friendLinkState;
+exports.userExists = userExists;
+exports.userDisplayName = userDisplayName;
+exports.notificationForPush = notificationForPush;
 exports.listMemberIds = listMemberIds;
 exports.isMember = isMember;
 exports.listFriendIds = listFriendIds;
@@ -61,6 +65,114 @@ async function areFriends(a, b) {
     catch (e) {
         console.error('[dm] areFriends failed:', e.message);
         return false;
+    }
+}
+async function friendLinkState(a, b) {
+    if (!db_1.dbPool)
+        return { status: 'none', requesterId: null };
+    try {
+        const { rows } = await db_1.dbPool.query(
+        // На паре могут лежать две строки (A→B и B→A) из данных, созданных до
+        // того, как повторная заявка стала переиспользовать существующую запись.
+        // Без ORDER BY при LIMIT 1 статус связи в этом случае недетерминирован,
+        // поэтому явно задаём приоритет: реальная дружба важнее висящей заявки,
+        // а та — важнее отказа. При равенстве берём самую свежую.
+        `SELECT "status", "requesterId" FROM "friendship"
+       WHERE ("requesterId" = $1 AND "addresseeId" = $2)
+          OR ("requesterId" = $2 AND "addresseeId" = $1)
+       ORDER BY CASE "status"
+                  WHEN 'accepted' THEN 0
+                  WHEN 'pending'  THEN 1
+                  ELSE 2
+                END,
+                "updatedAt" DESC
+       LIMIT 1`, [a, b]);
+        if (rows.length === 0)
+            return { status: 'none', requesterId: null };
+        return {
+            status: rows[0].status,
+            requesterId: rows[0].requesterId,
+        };
+    }
+    catch (e) {
+        console.error('[dm] friendLinkState failed:', e.message);
+        return { status: 'none', requesterId: null };
+    }
+}
+/** Существует ли пользователь с таким id. */
+async function userExists(userId) {
+    if (!db_1.dbPool)
+        return false;
+    try {
+        const { rows } = await db_1.dbPool.query(`SELECT 1 FROM "user" WHERE "id" = $1 LIMIT 1`, [userId]);
+        return rows.length > 0;
+    }
+    catch (e) {
+        console.error('[dm] userExists failed:', e.message);
+        return false;
+    }
+}
+/**
+ * Отображаемое имя пользователя — нужно, чтобы realtime-событие о дружбе несло
+ * подпись для уведомления («Иван принял вашу заявку»).
+ *
+ * Имя берём из БД, а не из payload вызывающей стороны: инициатор не должен
+ * иметь возможности подставить чужое или произвольное имя в уведомление,
+ * которое увидит собеседник.
+ */
+async function userDisplayName(userId) {
+    if (!db_1.dbPool)
+        return null;
+    try {
+        const { rows } = await db_1.dbPool.query(`SELECT "name", "username" FROM "user" WHERE "id" = $1 LIMIT 1`, [userId]);
+        if (rows.length === 0)
+            return null;
+        const name = rows[0].name?.trim();
+        if (name)
+            return name;
+        // У аккаунта может не быть заполненного name — тогда логин лучше, чем пустота.
+        const username = rows[0].username?.trim();
+        return username || null;
+    }
+    catch (e) {
+        console.error('[dm] userDisplayName failed:', e.message);
+        return null;
+    }
+}
+/**
+ * Прочитать уведомление вместе с именем актора и счётчиком непрочитанных.
+ *
+ * `recipientId` в условии обязателен: id уведомления приходит от Next-роута, и
+ * привязка к получателю гарантирует, что чужая запись не уйдёт в чужую комнату
+ * даже при ошибке на стороне вызывающего.
+ */
+async function notificationForPush(id, recipientId) {
+    if (!db_1.dbPool)
+        return null;
+    try {
+        const { rows } = await db_1.dbPool.query(`SELECT n."id", n."kind", n."actorId",
+              COALESCE(NULLIF(TRIM(u."username"), ''), NULLIF(TRIM(u."name"), '')) AS "actorName",
+              (EXTRACT(EPOCH FROM n."createdAt") * 1000)::bigint AS "createdAt",
+              (SELECT count(*) FROM "notification" c
+                WHERE c."userId" = n."userId" AND c."readAt" IS NULL)::int AS "unread"
+       FROM "notification" n
+       JOIN "user" u ON u."id" = n."actorId"
+       WHERE n."id" = $1 AND n."userId" = $2
+       LIMIT 1`, [id, recipientId]);
+        if (rows.length === 0)
+            return null;
+        return {
+            id: rows[0].id,
+            kind: rows[0].kind,
+            actorId: rows[0].actorId,
+            actorName: rows[0].actorName ?? 'Пользователь',
+            createdAt: Number(rows[0].createdAt),
+            unread: Number(rows[0].unread),
+        };
+    }
+    catch (e) {
+        console.error('[dm] notificationForPush failed:', e.message);
+        return null;
     }
 }
 /** Все участники диалога (для адресации broadcast'ов). */

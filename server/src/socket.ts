@@ -1,5 +1,5 @@
 import type { Server as HttpServer } from 'http'
-import type { Worker } from 'mediasoup/node/lib/types'
+import type { Worker } from 'mediasoup/types'
 import { Server, Socket } from 'socket.io'
 import { CLIENT_ORIGIN } from './config'
 import type { HandlerContext, SocketSession } from './socket/helpers'

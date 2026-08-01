@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import path from 'path'
-import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'mediasoup/node/lib/types'
+import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'mediasoup/types'
 
 // ---------------------------------------------------------------------------
 // Server

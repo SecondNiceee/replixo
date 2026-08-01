@@ -53,6 +53,7 @@ const room_code_1 = require("./room-code");
 const room_registry_1 = require("./socket/room-registry");
 const uploads_1 = require("./uploads");
 const db_1 = require("./dm/db");
+const internal_routes_1 = require("./dm/internal-routes");
 const uploads_2 = require("./dm/uploads");
 async function main() {
     // ---------------------------------------------------------------------------
@@ -274,6 +275,9 @@ async function main() {
     // Socket.io
     // ---------------------------------------------------------------------------
     const io = (0, socket_1.setupSocketIO)(httpServer, worker);
+    // Маршруты «Next-сервер → сокет-сервер». Регистрируются после io, потому что
+    // им нужен namespace /dm для рассылки. Защищены общим секретом.
+    (0, internal_routes_1.registerInternalRoutes)(app, io);
     // ---------------------------------------------------------------------------
     // "Я закрываю вкладку" — beacon от клиента (navigator.sendBeacon на
     // pagehide/beforeunload). sendBeacon надёжно доставляется во время выгрузки
