@@ -1,4 +1,4 @@
-import type { Worker } from 'mediasoup/node/lib/types'
+import type { Worker } from 'mediasoup/types'
 import type { Server } from 'socket.io'
 import { Room } from '../Room'
 import { deleteRoomMessages, getWhiteboard, getPresentationDrawings } from '../db'

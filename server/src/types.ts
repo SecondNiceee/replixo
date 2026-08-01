@@ -3,7 +3,7 @@ import type {
   DtlsParameters,
   Producer,
   WebRtcTransport,
-} from 'mediasoup/node/lib/types'
+} from 'mediasoup/types'
 
 // ---------------------------------------------------------------------------
 // Socket event payloads  (client → server)

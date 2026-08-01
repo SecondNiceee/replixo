@@ -1,4 +1,4 @@
-import type { Consumer, Producer, WebRtcTransport } from 'mediasoup/node/lib/types'
+import type { Consumer, Producer, WebRtcTransport } from 'mediasoup/types'
 import type { PeerData } from './types'
 
 export class Peer implements PeerData {

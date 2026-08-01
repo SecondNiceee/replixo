@@ -1,4 +1,4 @@
-import type { Worker } from 'mediasoup/node/lib/types'
+import type { Worker } from 'mediasoup/types'
 import { Peer } from '../Peer'
 import { getRoomMessages, getRoomReadMarkers } from '../db'
 import type {

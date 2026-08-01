@@ -9,6 +9,37 @@ const room_registry_1 = require("./room-registry");
 // ---------------------------------------------------------------------------
 // WebRTC / mediasoup signalling: joinRoom, transports, produce/consume
 // ---------------------------------------------------------------------------
+/**
+ * Ограничить время ожидания промиса. Нужно, чтобы ни один `await` в обработчике
+ * joinRoom не мог заблокировать отправку ack: пока ack не отправлен, клиент
+ * висит на экране «Подключение к комнате» без каких-либо признаков ошибки.
+ */
+function withTimeout(promise, ms, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms);
+        promise.then((value) => {
+            clearTimeout(timer);
+            resolve(value);
+        }, (error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+    });
+}
+/**
+ * То же, но для некритичных данных: при таймауте/ошибке возвращаем fallback и
+ * пускаем участника в комнату. Отсутствие истории чата — это деградация, а не
+ * причина не пустить человека в звонок.
+ */
+async function optional(promise, ms, label, fallback) {
+    try {
+        return await withTimeout(promise, ms, label);
+    }
+    catch (e) {
+        console.error(`[room] ${label} failed, продолжаем без него:`, e.message);
+        return fallback;
+    }
+}
 function registerMediaHandlers(ctx, worker) {
     const { io, socket, session } = ctx;
     // -----------------------------------------------------------------------
@@ -56,7 +87,11 @@ function registerMediaHandlers(ctx, worker) {
                 (0, room_registry_1.evictPeer)(io, roomId, peerId, existingSocketId);
             }
             (0, room_registry_1.clearPendingDisconnect)(roomId, peerId);
-            const room = await (0, room_registry_1.getOrCreateRoom)(roomId, worker);
+            // Создание комнаты поднимает mediasoup-router и подтягивает состояние
+            // доски из БД. Если worker мёртв или база висит, промис может не
+            // зарезолвиться никогда — ограничиваем и отвечаем ошибкой, чтобы клиент
+            // показал её вместо бесконечного спиннера.
+            const room = await withTimeout((0, room_registry_1.getOrCreateRoom)(roomId, worker), 15000, 'getOrCreateRoom');
             const repeatedJoin = room.hasPeer(peerId) && (0, room_registry_1.getPeerSocket)(roomId, peerId) === socket.id;
             if (!repeatedJoin && room.isFull())
                 return (0, helpers_1.err)(callback, 'Room is full (max 5 participants)');
@@ -83,10 +118,14 @@ function registerMediaHandlers(ctx, worker) {
                 socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() });
             // Load persisted chat history so the joining peer (or someone who just
             // reloaded the page) sees prior messages. Empty when persistence is off.
-            const messages = await (0, db_1.getRoomMessages)(roomId);
             // Read markers of every participant so checkmarks render correctly on
             // already-sent messages right after joining/reloading.
-            const readMarkers = await (0, db_1.getRoomReadMarkers)(roomId);
+            // Оба запроса некритичны для входа в звонок и выполняются параллельно с
+            // ограничением по времени: висящая база больше не задерживает ack.
+            const [messages, readMarkers] = await Promise.all([
+                optional((0, db_1.getRoomMessages)(roomId), 5000, 'getRoomMessages', []),
+                optional((0, db_1.getRoomReadMarkers)(roomId), 5000, 'getRoomReadMarkers', []),
+            ]);
             // Serialize presentationDrawings Map → plain object for JSON transport.
             const presentationDrawings = {};
             for (const [idx, snap] of room.presentationDrawings.entries()) {
@@ -249,6 +288,63 @@ function registerMediaHandlers(ctx, worker) {
         }
         catch (e) {
             (0, helpers_1.err)(callback, e.message);
+        }
+    });
+    // -----------------------------------------------------------------------
+    // pauseConsumer  (client-driven weak-downlink protection)
+    //
+    // The viewer's network guard decided that incoming video is drowning its
+    // audio and asked us to stop forwarding it. Unlike a mute, this is a purely
+    // local decision of ONE viewer — the producer keeps sending and everybody
+    // else keeps receiving, so we deliberately do NOT broadcast anything here.
+    // -----------------------------------------------------------------------
+    socket.on('pauseConsumer', async (payload, callback) => {
+        const { roomId, peerId, consumerId, paused } = payload ?? {};
+        try {
+            const room = room_registry_1.rooms.get(roomId);
+            if (!room) {
+                if (callback)
+                    return (0, helpers_1.err)(callback, `Room ${roomId} not found`);
+                return;
+            }
+            if (paused) {
+                await room.pauseConsumer(peerId, consumerId);
+            }
+            else {
+                await room.resumeConsumer(peerId, consumerId);
+            }
+            if (callback)
+                (0, helpers_1.ack)(callback, undefined);
+        }
+        catch (e) {
+            if (callback)
+                (0, helpers_1.err)(callback, e.message);
+        }
+    });
+    // -----------------------------------------------------------------------
+    // setConsumerLayers  (client-driven weak-downlink protection, gentle step)
+    //
+    // The viewer's guard noticed its downlink is getting tight but not hopeless.
+    // Rather than killing the picture we pin the consumer to the lowest simulcast
+    // layer, which cuts the incoming video bitrate roughly 9× while keeping a
+    // (small, choppy) image. Private to this viewer, so nothing is broadcast.
+    // -----------------------------------------------------------------------
+    socket.on('setConsumerLayers', async (payload, callback) => {
+        const { roomId, peerId, consumerId, spatialLayer, temporalLayer } = payload ?? {};
+        try {
+            const room = room_registry_1.rooms.get(roomId);
+            if (!room) {
+                if (callback)
+                    return (0, helpers_1.err)(callback, `Room ${roomId} not found`);
+                return;
+            }
+            await room.setConsumerPreferredLayers(peerId, consumerId, spatialLayer, temporalLayer);
+            if (callback)
+                (0, helpers_1.ack)(callback, undefined);
+        }
+        catch (e) {
+            if (callback)
+                (0, helpers_1.err)(callback, e.message);
         }
     });
     // -----------------------------------------------------------------------

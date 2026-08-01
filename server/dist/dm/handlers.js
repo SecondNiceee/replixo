@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerDmHandlers = registerDmHandlers;
 const helpers_1 = require("../socket/helpers");
 const db_1 = require("./db");
+const friends_events_1 = require("./friends-events");
 const namespace_types_1 = require("./namespace-types");
 const uploads_1 = require("./uploads");
 // ---------------------------------------------------------------------------
@@ -21,6 +22,22 @@ const MAX_NAME_LENGTH = 255;
 const MAX_MIME_LENGTH = 128;
 function isConversationId(value) {
     return typeof value === 'string' && !!value && value.length <= MAX_CONVERSATION_ID_LENGTH;
+}
+/**
+ * Причина изменения для фолбэк-пути. Клиент её не присылает (доверять ему тут
+ * нечему), поэтому выводим из фактического статуса связи в БД. На основном пути
+ * причину передаёт Next-роут — он точно знает, какое действие выполнил.
+ */
+function reasonFromStatus(status) {
+    if (status === 'accepted')
+        return 'accepted';
+    if (status === 'declined')
+        return 'declined';
+    // Строки нет — заявку отменили или друга удалили. Обе причины перечитывают
+    // один и тот же набор ключей, поэтому различать их здесь незачем.
+    if (status === 'none')
+        return 'removed';
+    return 'requested';
 }
 /**
  * Разбор вложения из payload.
@@ -173,6 +190,43 @@ function registerDmHandlers(nsp, socket) {
         for (const memberId of res.memberIds) {
             nsp.to((0, namespace_types_1.userRoom)(memberId)).emit('dm:read', { conversationId, userId, ts: res.ts });
         }
+    });
+    // --- Изменилась дружба (ФОЛБЭК) ---------------------------------------
+    // Основной путь рассылки — POST /internal/friends/changed: его дёргает
+    // Next-роут сразу после записи в БД, поэтому realtime не зависит от того,
+    // есть ли у инициатора живой websocket. Это событие остаётся страховкой на
+    // случай, когда внутренний хук не настроен (нет INTERNAL_HOOK_SECRET) или
+    // недоступен, и клиент сообщает об изменении сам.
+    //
+    // Защита от амплификации: событие несёт только «перечитай списки», поэтому
+    // достаточно, чтобы адресат существовал, а частота была ограничена
+    // `allowMeta` (40 за 2 с на соединение). Требовать существующую связь нельзя:
+    // отмена заявки и удаление из друзей УДАЛЯЮТ строку, и к моменту события
+    // статус уже 'none' — а именно тогда второму участнику и нужно сообщить.
+    socket.on('dm:friends:changed', async (payload, cb) => {
+        const userId = data.userId;
+        if (!userId)
+            return;
+        // Событие редкое: заявка/принятие/удаление. Спамить им нечего.
+        if (!allowMeta())
+            return;
+        const { peerId } = (payload ?? {});
+        if (typeof peerId !== 'string' || !peerId || peerId.length > MAX_ID_LENGTH)
+            return;
+        if (peerId === userId)
+            return;
+        if (!(await (0, db_1.userExists)(peerId)))
+            return;
+        const link = await (0, db_1.friendLinkState)(userId, peerId);
+        // Причину выводим из фактического статуса: клиент её не присылает.
+        // status === 'none' здесь означает удалённую строку, то есть
+        // отмену заявки или удаление из друзей.
+        //
+        // socket.id — источник действия: эхо гасим по соединению, а не по
+        // пользователю, иначе вторая вкладка инициатора осталась бы со старыми
+        // списками (она ничего не перечитывала, но событие бы выбросила).
+        await (0, friends_events_1.broadcastFriendsChanged)(nsp, userId, peerId, reasonFromStatus(link.status), null, socket.id);
+        respond(cb, { ok: true, id: peerId, createdAt: Date.now() });
     });
     // --- «Печатает…» ------------------------------------------------------
     // Событие эфемерное: в БД не пишется, автосброс — на стороне клиента.

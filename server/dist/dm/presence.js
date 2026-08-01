@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isOnline = isOnline;
+exports.invalidateFriendsCache = invalidateFriendsCache;
+exports.announceMutualPresence = announceMutualPresence;
 exports.trackConnect = trackConnect;
 exports.trackDisconnect = trackDisconnect;
 const db_1 = require("./db");
@@ -36,6 +38,25 @@ async function friendsOf(userId) {
 }
 function isOnline(userId) {
     return (connections.get(userId)?.size ?? 0) > 0;
+}
+/**
+ * Сбросить кэш друзей пользователя. Нужен, когда состав друзей изменился
+ * (приняли заявку, удалили из друзей): иначе до FRIENDS_TTL_MS новый друг не
+ * получал бы событий online/offline, а удалённый продолжал бы их получать.
+ */
+function invalidateFriendsCache(userId) {
+    friendsCache.delete(userId);
+}
+/**
+ * Взаимно объявить presence двум пользователям. Вызывается сразу после
+ * подтверждения дружбы: снапшот они получили при подключении, когда друзьями
+ * ещё не были, поэтому иначе точка «в сети» появилась бы только после reload.
+ */
+function announceMutualPresence(nsp, a, b) {
+    if (isOnline(b))
+        nsp.to((0, namespace_types_1.userRoom)(a)).emit('dm:presence', { userId: b, online: true });
+    if (isOnline(a))
+        nsp.to((0, namespace_types_1.userRoom)(b)).emit('dm:presence', { userId: a, online: true });
 }
 /**
  * Регистрирует соединение. Если оно первое у пользователя — рассылает друзьям

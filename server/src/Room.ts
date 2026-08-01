@@ -1,4 +1,10 @@
-import type { Router, Worker, DtlsParameters, WebRtcTransport } from 'mediasoup/node/lib/types'
+import type {
+  Router,
+  Worker,
+  DtlsParameters,
+  DtlsState,
+  WebRtcTransport,
+} from 'mediasoup/types'
 import * as mediasoup from 'mediasoup'
 import { mediaCodecs, webRtcTransportOptions, MAX_PEERS_PER_ROOM, iceServers } from './config'
 import { Peer } from './Peer'
@@ -130,7 +136,7 @@ export class Room {
       }
     }
 
-    transport.on('dtlsstatechange', (dtlsState) => {
+    transport.on('dtlsstatechange', (dtlsState: DtlsState) => {
       if (dtlsState === 'closed') transport.close()
     })
 

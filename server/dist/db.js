@@ -25,8 +25,27 @@ exports.deletePresentationDrawings = deletePresentationDrawings;
 const pg_1 = require("pg");
 const connectionString = process.env.DATABASE_URL;
 // Один пул на весь процесс. Создаётся только если есть строка подключения.
+//
+// Все таймауты заданы явно и это принципиально: по умолчанию в `pg`
+// connectionTimeoutMillis = 0, то есть ожидание соединения бесконечно. Если база
+// недоступна, перегружена или пул исчерпан, `await pool.query(...)` внутри
+// обработчика joinRoom никогда не завершится — сервер не отправит ack, а клиент
+// навсегда останется на экране «Подключение к комнате». Лучше быстро упасть с
+// ошибкой (её ловит try/catch выше и комната открывается без истории чата),
+// чем повиснуть.
 const pool = connectionString
-    ? new pg_1.Pool({ connectionString })
+    ? new pg_1.Pool({
+        connectionString,
+        // Ждём свободное соединение ограниченное время, а не вечно.
+        connectionTimeoutMillis: 8000,
+        // Страховка на стороне сервера Postgres и на стороне клиента: одиночный
+        // запрос не может держать обработчик дольше этого времени.
+        statement_timeout: 10000,
+        query_timeout: 10000,
+        idleTimeoutMillis: 30000,
+        max: 10,
+        keepAlive: true,
+    })
     : null;
 if (!pool) {
     console.warn('[db] DATABASE_URL не задан — история чата сохраняться не будет (эфемерный режим).');
