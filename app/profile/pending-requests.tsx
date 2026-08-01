@@ -54,45 +54,40 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
     notifyFriendsChanged(socket, requesterId, 'declined', result.data?.notified === true)
   }
 
-  if (!isLoading && pending.length === 0) return null
-
+  // Пустой список раньше возвращал null. Внутри вкладки «Входящие» это давало
+  // просто пустое место под переключателем — непонятно, то ли не загрузилось,
+  // то ли заявок нет. Поэтому теперь показываем явную заглушку.
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <UserCircle className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">
-          Входящие заявки
-          {pending.length > 0 && (
-            <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
-              {pending.length}
-            </span>
-          )}
-        </h2>
-      </div>
-
+    // Без своей карточки и заголовка: раздел открыт во вкладке диалога
+    // «Заявки», рамку и подпись даёт он.
+    <div className="flex flex-col gap-2">
       {isLoading ? (
-        <div className="flex items-center justify-center py-6">
+        <div className="flex items-center justify-center py-8">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : pending.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-8 text-center">
+          <UserCircle className="size-8 text-muted-foreground/30" aria-hidden="true" />
+          <p className="text-sm text-muted-foreground">Новых заявок нет</p>
         </div>
       ) : (
         <ul className="flex flex-col gap-2">
           {pending.map((p) => (
             <li
               key={p.id}
-              className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2.5"
             >
-              <div className="flex items-center gap-2.5">
-                <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-sm font-semibold text-primary-foreground">
                   {(p.requesterUsername ?? p.requesterName).charAt(0).toUpperCase()}
-                </div>
-                <span className="text-sm text-foreground">
+                </span>
+                <span className="truncate text-sm font-medium text-foreground">
                   {p.requesterUsername ?? p.requesterName}
                 </span>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1.5">
                 <Button
                   size="sm"
-                  variant="outline"
                   onClick={() => handleAccept(p.id, p.requesterId)}
                   disabled={busyId === p.id}
                   className="h-8 gap-1 px-2.5 text-xs"
