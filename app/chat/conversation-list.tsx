@@ -227,7 +227,7 @@ export function ConversationList({
                   <>
                     <Search className="size-8 text-muted-foreground/30" aria-hidden="true" />
                     <p className="text-pretty text-sm text-muted-foreground">
-                      Ничего не найдено по запросу «{search}»
+                      Ничего не найдено по запросу «{query.trim()}»
                     </p>
                   </>
                 ) : (
