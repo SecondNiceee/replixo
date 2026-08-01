@@ -234,7 +234,7 @@ export function ConversationList({
                   <>
                     <Users className="size-8 text-muted-foreground/30" aria-hidden="true" />
                     <p className="text-pretty text-sm text-muted-foreground">
-                      Добавьте друзей кнопкой сверху, чтобы начать переписку
+                      Пока нет диалогов. Добавьте друзей кнопкой «Добавить в друзья» сверху.
                     </p>
                   </>
                 )}
