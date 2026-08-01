@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
+import { deleteFriendNotification } from '@/lib/chat/notifications'
 
 // DELETE /api/friends/remove — remove a friend
 export async function DELETE(req: NextRequest) {
@@ -37,6 +38,14 @@ export async function DELETE(req: NextRequest) {
 
   // Удалить мог любой из двоих — второй участник это тот id, который не наш.
   const peerId = deleted.requesterId === userId ? deleted.addresseeId : deleted.requesterId
+
+  // Дружбы больше нет, значит «принял вашу заявку» стало ложью: карточка ведёт в
+  // диалог, который уже не создать. Чистим в обе стороны, потому что по строке
+  // friendship не видно, кто принимал заявку, а удалить связь мог любой из двоих.
+  await Promise.all([
+    deleteFriendNotification(peerId, userId, 'friend-accepted'),
+    deleteFriendNotification(userId, peerId, 'friend-accepted'),
+  ])
   const notified = await notifyFriendsChanged(
     userId,
     peerId,
