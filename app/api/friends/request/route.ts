@@ -4,7 +4,7 @@ import { eq, and, or, inArray } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship, user } from '@/lib/db/schema'
-import { notifyFriendsChanged, originSocketIdFrom } from '@/lib/chat/notify-friends-changed'
+import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
 import { randomUUID } from 'crypto'
 
@@ -169,7 +169,6 @@ export async function POST(req: NextRequest) {
     addressee.id,
     'requested',
     notificationId,
-    originSocketIdFrom(req.headers),
   )
 
   return NextResponse.json({ friendship: created, notified }, { status: 201 })

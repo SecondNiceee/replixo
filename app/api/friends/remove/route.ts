@@ -4,7 +4,7 @@ import { eq, and, or } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
-import { notifyFriendsChanged, originSocketIdFrom } from '@/lib/chat/notify-friends-changed'
+import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 
 // DELETE /api/friends/remove — remove a friend
 export async function DELETE(req: NextRequest) {
@@ -36,13 +36,7 @@ export async function DELETE(req: NextRequest) {
 
   // Удалить мог любой из двоих — второй участник это тот id, который не наш.
   const peerId = deleted.requesterId === userId ? deleted.addresseeId : deleted.requesterId
-  const notified = await notifyFriendsChanged(
-    userId,
-    peerId,
-    'removed',
-    null,
-    originSocketIdFrom(req.headers),
-  )
+  const notified = await notifyFriendsChanged(userId, peerId, 'removed')
 
   return NextResponse.json({ ok: true, peerId, notified })
 }

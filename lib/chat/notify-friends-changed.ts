@@ -78,29 +78,11 @@ function warnMissingSecretOnce(): void {
  * событие обоим участникам. При `false` роут отдаёт клиенту `notified: false`,
  * и тот включает фолбэк — emit `dm:friends:changed` со своего websocket.
  */
-/** Тот же предел, что и у id на сокет-сервере: заведомо битое значение не шлём. */
-const MAX_ID_LENGTH = 64
-
-/**
- * Достать id сокета вкладки-инициатора из заголовка запроса.
- *
- * Заголовок присылает клиент, поэтому доверять ему как удостоверению личности
- * нельзя — и не нужно: он влияет ровно на одно, кому НЕ отправлять эхо. Худшее,
- * что даёт подделка, — чужая вкладка не получит одно событие ревалидации и
- * обновится при следующем действии или реконнекте. Доступа он не открывает.
- */
-export function originSocketIdFrom(headers: Headers): string | null {
-  const raw = headers.get('x-dm-socket-id')
-  if (!raw || raw.length > MAX_ID_LENGTH) return null
-  return raw
-}
-
 export async function notifyFriendsChanged(
   userId: string,
   peerId: string,
   reason: FriendsChangeReason,
   notificationId?: string | null,
-  originSocketId?: string | null,
 ): Promise<boolean> {
   const secret = process.env.INTERNAL_HOOK_SECRET
   // Без секрета внутренний хук выключен на обеих сторонах и всё держится на
@@ -116,17 +98,7 @@ export async function notifyFriendsChanged(
   // notificationId — id УЖЕ сохранённой записи уведомления. Сервер по нему
   // перечитает запись из БД и запушит её получателю. Содержимое уведомления в
   // payload не передаём: сервер не должен верить тексту, пришедшему по HTTP.
-  // originSocketId — вкладка, инициировавшая действие. Она свои списки уже
-  // перечитала по ответу API, поэтому сервер исключит её из рассылки. Остальные
-  // вкладки и устройства инициатора событие получат: раньше эхо гасилось по
-  // userId, и они молча его выбрасывали, оставаясь с устаревшими списками.
-  const body = JSON.stringify({
-    userId,
-    peerId,
-    reason,
-    notificationId: notificationId ?? null,
-    originSocketId: originSocketId ?? null,
-  })
+  const body = JSON.stringify({ userId, peerId, reason, notificationId: notificationId ?? null })
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     let status: number | null = null
