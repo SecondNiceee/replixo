@@ -7,6 +7,7 @@ import { friendship, user } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
+import { enforceRateLimit, FRIENDS_REQUEST_RULE } from '@/lib/chat/rate-limit'
 import { randomUUID } from 'crypto'
 
 /**
@@ -29,6 +30,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const requesterId = session.user.id
+
+  // Лимит проверяем сразу после авторизации и до любых запросов в БД: смысл в
+  // том, чтобы поток заявок не доходил ни до Postgres, ни до рассылки.
+  const limited = enforceRateLimit(`friends:request:${requesterId}`, FRIENDS_REQUEST_RULE)
+  if (limited) return limited
 
   const body = await req.json().catch(() => null)
   const username = typeof body?.username === 'string' ? body.username.trim() : ''

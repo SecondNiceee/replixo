@@ -7,6 +7,7 @@ import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { deleteFriendNotification } from '@/lib/chat/notifications'
+import { enforceRateLimit, FRIENDS_MUTATION_RULE } from '@/lib/chat/rate-limit'
 
 // DELETE /api/friends/remove — remove a friend
 export async function DELETE(req: NextRequest) {
@@ -15,6 +16,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const userId = session.user.id
+
+  const limited = enforceRateLimit(`friends:remove:${userId}`, FRIENDS_MUTATION_RULE)
+  if (limited) return limited
 
   const body = await req.json().catch(() => null)
   const friendshipId = typeof body?.friendshipId === 'string' ? body.friendshipId : ''
