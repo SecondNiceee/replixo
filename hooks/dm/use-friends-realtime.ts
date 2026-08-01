@@ -5,6 +5,7 @@ import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
 import { revalidateNotifications } from '@/hooks/dm/use-notifications'
+import { pushNotification } from '@/stores/notifications-store'
 import { originSocketHeaders } from '@/lib/chat/origin-socket'
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,25 @@ export interface FriendsActionResponse {
 }
 
 /**
+ * Результат вызова роута дружбы.
+ *
+ * `status` и `retryAfterSec` нужны вызывающему, чтобы объяснить провал: раньше
+ * возвращались только `ok` и тело, поэтому 429 и «заявка не найдена» выглядели
+ * для компонента одинаково — как молчаливое ничего.
+ *
+ * `status: 0` — запрос не дошёл до сервера (офлайн, обрыв, заблокированный
+ * запрос). Отдельное значение, потому что реакция другая: сервер ничего не
+ * сделал, повтор осмыслен.
+ */
+export interface FriendsActionResult {
+  ok: boolean
+  status: number
+  /** Значение заголовка `Retry-After` (секунды) у ответа 429. */
+  retryAfterSec: number | null
+  data: FriendsActionResponse | null
+}
+
+/**
  * Единственный способ вызвать мутирующий роут дружбы из браузера.
  *
  * Существует ровно для того, чтобы заголовок `x-origin-socket-id` нельзя было
@@ -165,18 +185,112 @@ export async function friendsAction(
   url: string,
   method: 'POST' | 'DELETE',
   body: Record<string, unknown>,
-): Promise<{ ok: boolean; data: FriendsActionResponse | null }> {
+): Promise<FriendsActionResult> {
+  // fetch отклоняется промисом только когда запрос не состоялся: офлайн, обрыв
+  // соединения, отменённый запрос. Раньше исключение улетало наверх, а вызовы в
+  // компонентах не обёрнуты в try/catch — вместе с падением терялся и
+  // `setBusyId(null)`, так что кнопка оставалась в спиннере навсегда.
+  try {
+    return await runFriendsAction(socket, url, method, body)
+  } catch {
+    return { ok: false, status: 0, retryAfterSec: null, data: null }
+  }
+}
+
+async function runFriendsAction(
+  socket: Socket | null,
+  url: string,
+  method: 'POST' | 'DELETE',
+  body: Record<string, unknown>,
+): Promise<FriendsActionResult> {
   const res = await fetch(url, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      // socket.id читаем в момент запроса: после реконнекта он другой.
+      // socket.id читаем в момент запроса: после ре��оннекта он другой.
       ...originSocketHeaders(socket?.id),
     },
     body: JSON.stringify(body),
   })
   const data = (await res.json().catch(() => null)) as FriendsActionResponse | null
-  return { ok: res.ok, data }
+
+  // Retry-After ставит наш лимитер (lib/chat/rate-limit) в секундах. Читаем
+  // здесь, а не в компонентах: до тела ответа заголовок всё равно не доедет.
+  const header = Number(res.headers.get('Retry-After'))
+  const retryAfterSec = Number.isFinite(header) && header > 0 ? Math.ceil(header) : null
+
+  return { ok: res.ok, status: res.status, retryAfterSec, data }
+}
+
+// ---------------------------------------------------------------------------
+// Объяснение провала.
+//
+// Все три списка (входящие, исходящие, друзья) раньше на `!ok` не делали ничего:
+// спиннер гаснет, строка на месте, причины нет. А доля неуспешных ответов тут
+// не теоретическая: 429 от нашего же лимитера, 404 «заявка не найдена», если её
+// отозвали пока страница висела открытой, 401 после истечения сессии.
+// Пользователь видел просто неработающую кнопку.
+// ---------------------------------------------------------------------------
+
+/**
+ * Статусы, означающие «страница показывает то, чего уже нет».
+ *
+ * 404 — заявку успели отозвать/принять с другого устройства, 409 — состояние
+ * связи изменилось (уже друзья, заявка уже есть). В обоих случаях сервер прав,
+ * а список устарел, и его нужно перечитать.
+ */
+function isStale(status: number): boolean {
+  return status === 404 || status === 409
+}
+
+/**
+ * Текст ошибки для пользователя.
+ *
+ * Сообщение сервера приоритетнее: роуты дружбы отвечают уже готовыми русскими
+ * формулировками («Заявка не найдена», «Вы уже друзья»), и подменять их общей
+ * фразой значит терять смысл. Свои тексты — только там, где сервер объяснить не
+ * может (сеть) или где стоит добавить деталь (сколько ждать до повтора).
+ */
+export function friendsActionErrorMessage(result: FriendsActionResult): string {
+  const fromServer = result.data?.error
+
+  if (result.status === 0) return 'Нет связи с сервером. Проверьте подключение.'
+
+  if (result.status === 429) {
+    const wait = result.retryAfterSec
+    return wait
+      ? `Слишком много действий. Повторите через ${wait} с.`
+      : (fromServer ?? 'Слишком много действий, попробуйте позже.')
+  }
+
+  if (result.status === 401) return 'Сессия истекла — войдите заново.'
+
+  if (result.status >= 500) return 'Сервер недоступен. Попробуйте позже.'
+
+  return fromServer ?? 'Не удалось выполнить действие.'
+}
+
+/**
+ * Показать провал и, если причина в устаревших данных, перечитать списки.
+ *
+ * Тост, а не инлайновая ошибка в строке: строка после неудачи может исчезнуть
+ * при ревалидации (её уже нет на сервере), и сообщение исчезло бы вместе с ней,
+ * не успев прочитаться.
+ */
+export function reportFriendsActionError(result: FriendsActionResult): void {
+  pushNotification({
+    kind: 'error',
+    title: 'Не получилось',
+    body: friendsActionErrorMessage(result),
+    // Склейка по виду: серия неудач подряд (лимит выдаёт 429 на каждый клик) не
+    // должна выдавливать с экрана заявку в друзья или сообщение.
+    dedupeKey: 'friends-error',
+  })
+
+  if (isStale(result.status)) {
+    revalidateFriends()
+    revalidateNotifications()
+  }
 }
 
 /**
@@ -259,7 +373,7 @@ export function useFriendsRealtime(socket: Socket | null): void {
       if (!peerId) return
       // Эхо ЭТОГО соединения — списки здесь уже перечитаны в notifyFriendsChanged
       // сразу после ответа API. Соседние вкладки того же пользователя приходят с
-      // другим socket.id и обрабатываются как обычное событие.
+      // другим socket.id и обрабатываются как обычное ��обытие.
       if (originSocketId && socket.id && originSocketId === socket.id) return
 
       // Тост и центр уведомлений здесь НЕ трогаем: уведомление приходит

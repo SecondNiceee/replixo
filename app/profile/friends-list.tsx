@@ -1,10 +1,16 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Users, UserMinus, Loader2, MessageSquare } from 'lucide-react'
 import { useDmStore } from '@/stores/dm-store'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import {
+  friendsAction,
+  notifyFriendsChanged,
+  reportFriendsActionError,
+} from '@/hooks/dm/use-friends-realtime'
+import { cn } from '@/lib/utils'
 import type { Friend } from './types'
 
 interface FriendsListProps {
@@ -18,15 +24,25 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
   // (его держит ProfileClient). Без соединения набор пуст — и точек нет.
   const onlineIds = useDmStore((s) => s.onlineIds)
   const { socket } = useDmSocket()
+  const [removingId, setRemovingId] = useState<string | null>(null)
 
   const handleRemove = async (friendshipId: string, friendId: string) => {
-    const { ok, data } = await friendsAction(socket, '/api/friends/remove', 'DELETE', {
+    // Состояния занятости здесь не было вовсе: до ответа сервера кнопка выглядела
+    // нетронутой, и её успевали нажать несколько раз — каждый клик уходил в
+    // отдельный запрос и жёг лимит.
+    setRemovingId(friendshipId)
+    const result = await friendsAction(socket, '/api/friends/remove', 'DELETE', {
       friendshipId,
     })
-    if (ok) {
-      // Второй участник тоже должен увидеть, что дружбы больше нет.
-      notifyFriendsChanged(socket, friendId, 'removed', data?.notified === true)
+    setRemovingId(null)
+
+    if (!result.ok) {
+      reportFriendsActionError(result)
+      return
     }
+
+    // Второй участник тоже должен увидеть, что дружбы больше нет.
+    notifyFriendsChanged(socket, friendId, 'removed', result.data?.notified === true)
   }
 
   return (
@@ -82,10 +98,20 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
                 </button>
                 <button
                   onClick={() => handleRemove(f.id, f.friendId)}
-                  className="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:flex"
+                  disabled={removingId === f.id}
+                  // Пока запрос летит, кнопку показываем и без ховера: иначе
+                  // спиннер прячется, стоит увести курсор со строки.
+                  className={cn(
+                    'text-muted-foreground transition-colors hover:text-destructive disabled:opacity-60',
+                    removingId === f.id ? 'flex' : 'hidden group-hover:flex',
+                  )}
                   aria-label="Удалить из друзей"
                 >
-                  <UserMinus className="size-4" />
+                  {removingId === f.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <UserMinus className="size-4" />
+                  )}
                 </button>
               </div>
             </li>

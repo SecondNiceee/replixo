@@ -20,6 +20,10 @@ export type NotificationKind =
   | 'friend-accepted'
   | 'friend-declined'
   | 'message'
+  // Провал действия пользователя. Единственный вид, который приходит не из
+  // сокета, а из ответа API — и единственный, у которого нет записи в БД:
+  // ошибка живёт ровно до закрытия тоста, в центре уведомлений ей не место.
+  | 'error'
 
 export interface AppNotification {
   id: string

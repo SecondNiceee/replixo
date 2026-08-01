@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { MessageCircle, UserCheck, UserPlus, UserX, X } from 'lucide-react'
+import { AlertTriangle, MessageCircle, UserCheck, UserPlus, UserX, X } from 'lucide-react'
 import {
   useNotificationsStore,
   type AppNotification,
@@ -23,6 +23,7 @@ const ICONS: Record<NotificationKind, typeof UserPlus> = {
   'friend-accepted': UserCheck,
   'friend-declined': UserX,
   message: MessageCircle,
+  error: AlertTriangle,
 }
 
 /** Первая буква имени для «аватара»-заглушки. */
@@ -34,6 +35,7 @@ function Toast({ item }: { item: AppNotification }) {
   const router = useRouter()
   const dismiss = useNotificationsStore((s) => s.dismiss)
   const Icon = ICONS[item.kind]
+  const isError = item.kind === 'error'
 
   // Появление анимируем после монтирования: если поставить конечные классы
   // сразу, браузеру нечего интерполировать и переход не сыграет.
@@ -66,22 +68,44 @@ function Toast({ item }: { item: AppNotification }) {
 
   return (
     <div
+      // Ошибка — реакция на собственный клик, её нужно объявить сразу, не дожидаясь
+      // паузы в речи: внешний регион polite, поэтому assertive ставим на сам тост.
+      role={isError ? 'alert' : undefined}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       className={cn(
-        'pointer-events-auto flex w-full items-start gap-3 rounded-xl border border-border bg-card p-3 shadow-lg',
+        'pointer-events-auto flex w-full items-start gap-3 rounded-xl border bg-card p-3 shadow-lg',
         'transition-all duration-200 ease-out',
+        isError ? 'border-destructive/40' : 'border-border',
         shown ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
       )}
     >
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-secondary-foreground">
-        {initial(item.title)}
+      <div
+        className={cn(
+          'flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-medium',
+          isError
+            ? 'bg-destructive/10 text-destructive'
+            : 'bg-secondary text-secondary-foreground',
+        )}
+      >
+        {/* У ошибки нет автора, и буква «Н» от «Не получилось» в кружке выглядела
+            бы как чей-то аватар. Поэтому здесь знак, а не инициал. */}
+        {isError ? <AlertTriangle className="size-4" aria-hidden="true" /> : initial(item.title)}
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <p className="truncate text-sm font-medium text-card-foreground">{item.title}</p>
+          {!isError && (
+            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
+          <p
+            className={cn(
+              'truncate text-sm font-medium',
+              isError ? 'text-destructive' : 'text-card-foreground',
+            )}
+          >
+            {item.title}
+          </p>
         </div>
 
         {item.body && (
