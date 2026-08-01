@@ -1,27 +1,24 @@
-import { Suspense } from 'react'
-import type { Metadata } from 'next'
-import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { auth } from '@/lib/auth'
-import { ChatClient } from './chat-client'
 
-export const metadata: Metadata = {
-  title: 'Сообщения — Replixo',
-  description: 'Личные сообщения с друзьями в Replixo.',
-}
+// Переписка переехала в кабинет: список чатов и открытый диалог теперь на одном
+// экране с друзьями и заявками. Старые ссылки (уведомления, кнопка «Сообщения»,
+// закладки) ведут сюда, поэтому маршрут остаётся и перекидывает на /profile
+// вместе с параметрами ?c= и ?u= — без них глубокая ссылка на диалог потерялась
+// бы и открывался бы пустой кабинет.
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const params = await searchParams
+  const query = new URLSearchParams()
 
-export default async function ChatPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
-
-  if (!session?.user) {
-    redirect('/sign-in')
+  for (const key of ['c', 'u']) {
+    const value = params[key]
+    const single = Array.isArray(value) ? value[0] : value
+    if (single) query.set(key, single)
   }
 
-  return (
-    <main className="mx-auto flex h-dvh max-w-6xl flex-col px-4 py-4 md:px-6 md:py-6">
-      <Suspense fallback={null}>
-        <ChatClient selfId={session.user.id} />
-      </Suspense>
-    </main>
-  )
+  const suffix = query.size > 0 ? `?${query.toString()}` : ''
+  redirect(`/profile${suffix}`)
 }

@@ -133,9 +133,9 @@ export function ConversationView({
   const title = conversationTitle(conversation)
 
   return (
-    <section className="flex min-h-0 w-full flex-col overflow-hidden rounded-xl border border-border bg-card">
+    <section className="chat-surface flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-border/60 backdrop-blur-xl">
       {/* Шапка */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3">
         <Button
           variant="ghost"
           size="icon"

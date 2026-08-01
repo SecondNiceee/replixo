@@ -1,25 +1,48 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
+import { MessageSquare, Users } from 'lucide-react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
-import { ProfileHeader } from './profile-header'
+import { useConversations } from '@/hooks/dm/use-conversations'
+import { useDmStore } from '@/stores/dm-store'
+import { cn } from '@/lib/utils'
+import { ConversationList } from '@/app/chat/conversation-list'
+import { ConversationView } from '@/app/chat/conversation-view'
+import { ProfileTopbar } from './profile-topbar'
+import { AccountDialog } from './account-dialog'
 import { FriendsList } from './friends-list'
-import { SentRequests } from './sent-requests'
-import { AddFriendForm } from './add-friend-form'
-import { PendingRequests } from './pending-requests'
 import { fetcher, type User, type Friend, type PendingRequest, type SentRequest } from './types'
 
-type Tab = 'friends' | 'sent'
+type Pane = 'chats' | 'friends'
 
+/**
+ * Личный кабинет в раскладке мессенджера: слева список чатов и друзей, справа
+ * открытая переписка, сверху действия с заявками.
+ *
+ * Раньше кабинет и переписка были двумя страницами: из профиля кнопка «Написать»
+ * уводила на /chat. Теперь это один экран, поэтому весь стейт диалогов
+ * (активный диалог, счётчики, presence) живёт здесь — на /chat он дублировался
+ * бы и терялся при переходе.
+ */
 export function ProfileClient({ user }: { user: User }) {
-  const [activeTab, setActiveTab] = useState<Tab>('friends')
+  const [pane, setPane] = useState<Pane>('chats')
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  // Presence нужен только для точек «в сети» в списке друзей. Сокет живёт,
-  // пока открыта страница; если чат недоступен, точек просто не будет.
-  const { socket } = useDmSocket()
+  const { socket, connected, unavailable } = useDmSocket()
+
+  // Единственный на приложение подписчик на эфемерные события: presence,
+  // «печатает…», прочтение собеседника. Без него точки «в сети», индикатор
+  // набора и вторые галочки не работают.
   useDmPresence(socket, user.id)
+
+  // Список диалогов, счётчики и все мутации живут в useConversations: тот же
+  // SWR-ключ читают бейджи вне этой страницы, поэтому число непрочитанных
+  // всегда совпадает.
+  const { conversations, isLoading, zeroUnreadLocally, startWithFriend, markReadFallback } =
+    useConversations(user.id, activeId)
 
   const { data: friendsData, isLoading: friendsLoading } = useSWR<{ friends: Friend[] }>(
     '/api/friends',
@@ -37,58 +60,154 @@ export function ProfileClient({ user }: { user: User }) {
   const pending = pendingData?.pending ?? []
   const sent = sentData?.sent ?? []
 
-  const displayName = (user as unknown as Record<string, unknown>).username as string | undefined
-    ?? user.name
+  const active = conversations.find((c) => c.id === activeId) ?? null
 
-  const tabs: { id: Tab; label: string; count?: number }[] = [
-    { id: 'friends', label: 'Друзья', count: friends.length || undefined },
-    { id: 'sent', label: 'Мои заявки', count: sent.length || undefined },
+  const displayName =
+    ((user as unknown as Record<string, unknown>).username as string | undefined) ?? user.name
+
+  // Сообщаем глобальному уведомителю, какой диалог открыт: он монтируется вне
+  // этой страницы и о локальном activeId ничего не знает, а без этого играл бы
+  // звук по сообщениям из диалога, который пользователь и так видит.
+  const setActiveConversationId = useDmStore((s) => s.setActiveConversationId)
+  useEffect(() => {
+    setActiveConversationId(activeId)
+    return () => setActiveConversationId(null)
+  }, [activeId, setActiveConversationId])
+
+  const openConversation = useCallback(
+    (conversationId: string) => {
+      setActiveId(conversationId)
+      zeroUnreadLocally(conversationId)
+    },
+    [zeroUnreadLocally],
+  )
+
+  // Создать диалог и сразу открыть его. Обёртка над startWithFriend из хука:
+  // сам хук об активном диалоге ничего не знает. Переключаем панель на «Чаты» —
+  // иначе переписка открылась бы справа, а слева остался бы список друзей.
+  const openWithFriend = useCallback(
+    async (friendId: string) => {
+      const conversationId = await startWithFriend(friendId)
+      if (conversationId) {
+        setPane('chats')
+        openConversation(conversationId)
+      }
+    },
+    [startWithFriend, openConversation],
+  )
+
+  // Глубокие ссылки: ?c=<conversationId> и ?u=<friendId>. Их присылают
+  // уведомления и кнопка «Сообщения» в шапке.
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    const fromUrl = searchParams.get('c')
+    if (fromUrl) setActiveId(fromUrl)
+  }, [searchParams])
+
+  // В отличие от ?c=, диалога в БД может ещё не быть, поэтому идём через
+  // startWithFriend: он создаёт его при необходимости и только потом открывает.
+  const handledFriendParam = useRef<string | null>(null)
+  useEffect(() => {
+    const friendId = searchParams.get('u')
+    if (!friendId || handledFriendParam.current === friendId) return
+    handledFriendParam.current = friendId
+    void openWithFriend(friendId)
+  }, [searchParams, openWithFriend])
+
+  const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
+
+  const panes: { id: Pane; label: string; icon: typeof MessageSquare; count: number }[] = [
+    { id: 'chats', label: 'Чаты', icon: MessageSquare, count: totalUnread },
+    { id: 'friends', label: 'Друзья', icon: Users, count: friends.length },
   ]
 
   return (
-    <div className="flex flex-col gap-8">
-      <ProfileHeader displayName={displayName} email={user.email} />
+    <div className="flex min-h-0 flex-1 flex-col gap-3 md:gap-4">
+      <ProfileTopbar
+        pending={pending}
+        pendingLoading={pendingLoading}
+        sent={sent}
+        sentLoading={sentLoading}
+        connected={connected}
+        unavailable={unavailable}
+      />
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
-        {/* Left — tabs + list */}
-        <aside className="flex flex-col gap-4">
-          {/* Tab switcher */}
-          <div className="flex rounded-lg border border-border bg-secondary/30 p-1 gap-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-card text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {tab.label}
-                {tab.count !== undefined && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                      activeTab === tab.id
-                        ? 'bg-secondary text-foreground'
-                        : 'bg-secondary/50 text-muted-foreground'
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[320px_1fr] md:gap-4">
+        {/* Левая панель: аккаунт, переключатель и список. На мобильном скрыта,
+            когда открыт диалог — иначе две колонки не поместились бы. */}
+        <aside
+          className={cn(
+            'panel-surface min-h-0 flex-col overflow-hidden rounded-2xl border border-border/60 backdrop-blur-xl',
+            active ? 'hidden md:flex' : 'flex',
+          )}
+        >
+          <div className="shrink-0 border-b border-border/60 p-2">
+            <AccountDialog displayName={displayName} email={user.email} />
           </div>
 
-          {activeTab === 'friends' && <FriendsList friends={friends} isLoading={friendsLoading} />}
-          {activeTab === 'sent' && <SentRequests sent={sent} isLoading={sentLoading} />}
+          <div className="shrink-0 px-2 pt-2">
+            <div className="flex gap-1 rounded-xl bg-foreground/5 p-1">
+              {panes.map(({ id, label, icon: Icon, count }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setPane(id)}
+                  aria-current={pane === id ? 'true' : undefined}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                    pane === id
+                      ? 'bg-card text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="size-3.5" aria-hidden="true" />
+                  {label}
+                  {count > 0 && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none',
+                        id === 'chats'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-secondary text-secondary-foreground',
+                      )}
+                    >
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {pane === 'chats' ? (
+            <ConversationList
+              conversations={conversations}
+              friends={friends}
+              activeId={activeId}
+              isLoading={isLoading}
+              selfId={user.id}
+              onSelect={openConversation}
+              onStartWithFriend={openWithFriend}
+            />
+          ) : (
+            <FriendsList
+              friends={friends}
+              isLoading={friendsLoading}
+              onMessage={openWithFriend}
+            />
+          )}
         </aside>
 
-        {/* Right — add friend + pending incoming */}
-        <section className="flex flex-col gap-4">
-          <AddFriendForm />
-          <PendingRequests pending={pending} isLoading={pendingLoading} />
-        </section>
+        <div className={cn('min-h-0', active ? 'flex' : 'hidden md:flex')}>
+          <ConversationView
+            conversation={active}
+            selfId={user.id}
+            socket={socket}
+            connected={connected}
+            onBack={() => setActiveId(null)}
+            onReadFallback={markReadFallback}
+          />
+        </div>
       </div>
     </div>
   )
