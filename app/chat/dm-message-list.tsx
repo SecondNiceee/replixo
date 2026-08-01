@@ -54,12 +54,12 @@ export function DmMessageList({
         return (
           <li key={m.id} className="flex flex-col gap-3">
             {showDay && (
-              <div className="flex items-center gap-2" aria-hidden="true">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              // Плашка по центру, как в Telegram: линии по бокам на узорном
+              // полотне ленты выглядели бы обрывками сетки.
+              <div className="flex justify-center py-1" aria-hidden="true">
+                <span className="rounded-full bg-foreground/5 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm">
                   {formatDayLabel(m.createdAt)}
                 </span>
-                <span className="h-px flex-1 bg-border" />
               </div>
             )}
 
@@ -67,9 +67,7 @@ export function DmMessageList({
               <div
                 className={cn(
                   'flex max-w-[85%] flex-col gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed',
-                  self
-                    ? 'rounded-br-sm bg-primary text-primary-foreground'
-                    : 'rounded-bl-sm bg-secondary text-secondary-foreground',
+                  self ? 'rounded-br-md bubble-self' : 'rounded-bl-md bubble-peer',
                   m.status === 'failed' && 'ring-1 ring-destructive',
                 )}
               >

@@ -8,6 +8,7 @@ import { useConversationMessages } from '@/hooks/dm/use-conversation-messages'
 import { useDmRead } from '@/hooks/dm/use-dm-read'
 import { useTyping } from '@/hooks/dm/use-typing'
 import { useDmStore } from '@/stores/dm-store'
+import { cn } from '@/lib/utils'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
@@ -145,7 +146,7 @@ export function ConversationView({
         >
           <ArrowLeft className="size-4" />
         </Button>
-        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/85 to-primary/60 text-sm font-semibold text-primary-foreground">
           {title.charAt(0).toUpperCase()}
           {peerOnline && (
             <span
@@ -156,7 +157,12 @@ export function ConversationView({
         </span>
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
-          <span className="truncate text-[11px] text-muted-foreground">
+          <span
+            className={cn(
+              'truncate text-[11px]',
+              peerOnline ? 'text-emerald-600' : 'text-muted-foreground',
+            )}
+          >
             {peerOnline ? 'в сети' : formatLastSeen(peerLastSeen)}
           </span>
         </div>
@@ -166,7 +172,7 @@ export function ConversationView({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        className="chat-canvas min-h-0 flex-1 overflow-y-auto px-4 py-3"
       >
         {hasMore && (
           <div className="flex justify-center pb-3">

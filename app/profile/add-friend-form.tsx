@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { UserPlus, Loader2 } from 'lucide-react'
+import { AtSign, Loader2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
@@ -56,39 +56,50 @@ export function AddFriendForm() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <UserPlus className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">Добавить друга</h2>
-      </div>
+    // Без своей карточки и заголовка: форма живёт внутри диалога «Добавить в
+    // друзья», который уже даёт и рамку, и подпись. Вложенная карточка читалась
+    // бы как вторая рамка, а второй заголовок дублировал бы DialogTitle.
+    <div className="flex flex-col gap-2">
       <form onSubmit={handleAddFriend} className="flex gap-2">
-        <Input
-          value={addUsername}
-          onChange={(e) => {
-            setAddUsername(e.target.value)
-            setAddError(null)
-            setAddSuccess(null)
-          }}
-          placeholder="Введите username"
-          maxLength={20}
-          className="flex-1"
-        />
-        <Button type="submit" size="sm" disabled={addLoading || !addUsername.trim()}>
+        <div className="relative flex-1">
+          <AtSign
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            value={addUsername}
+            onChange={(e) => {
+              setAddUsername(e.target.value)
+              setAddError(null)
+              setAddSuccess(null)
+            }}
+            placeholder="username"
+            aria-label="Username друга"
+            maxLength={20}
+            autoComplete="off"
+            className="h-10 pl-9"
+          />
+        </div>
+        <Button
+          type="submit"
+          disabled={addLoading || !addUsername.trim()}
+          className="h-10 gap-1.5"
+        >
           {addLoading ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
             <UserPlus className="size-4" />
           )}
-          <span className="hidden sm:inline">Отправить</span>
+          Отправить
         </Button>
       </form>
       {addError && (
-        <p className="mt-2 text-sm text-destructive" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           {addError}
         </p>
       )}
       {addSuccess && (
-        <p className="mt-2 text-sm text-green-500" role="status">
+        <p className="text-sm text-emerald-600" role="status">
           {addSuccess}
         </p>
       )}

@@ -121,7 +121,7 @@ export function DmComposer({
     <div
       onDrop={handleDrop}
       onDragOver={(e) => e.preventDefault()}
-      className="shrink-0 border-t border-border"
+      className="shrink-0 border-t border-border/60 bg-card/70"
     >
       {/* Статус загрузки / готовое вложение */}
       {(pending || uploading || uploadError) && (
@@ -223,7 +223,7 @@ export function DmComposer({
           maxLength={MAX_LENGTH}
           placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
           aria-label="Текст сообщения"
-          className="max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-input bg-background px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
+          className="max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
         />
         <Button
           type="submit"

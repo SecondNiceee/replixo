@@ -9,6 +9,7 @@ import {
   notifyFriendsChanged,
   reportFriendsActionError,
 } from '@/hooks/dm/use-friends-realtime'
+import { cn } from '@/lib/utils'
 import type { SentRequest } from './types'
 
 interface SentRequestsProps {
@@ -41,17 +42,9 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <Send className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">
-          Мои заявки
-          {sent.length > 0 && (
-            <span className="ml-1.5 text-muted-foreground">({sent.length})</span>
-          )}
-        </h2>
-      </div>
-
+    // Без своей карточки и заголовка: раздел открыт во вкладке диалога
+    // «Заявки», рамку и подпись даёт он.
+    <div className="flex flex-col gap-2">
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -69,16 +62,19 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
             return (
               <li
                 key={s.id}
-                className={`flex items-center justify-between rounded-lg border px-3 py-2.5 transition-opacity ${
-                  isCancelled ? 'border-border/40 opacity-40' : 'border-border'
-                }`}
+                className={cn(
+                  'flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition-opacity',
+                  isCancelled
+                    ? 'border-border/40 bg-secondary/10 opacity-40'
+                    : 'border-border/60 bg-secondary/25',
+                )}
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
                     {(s.addresseeUsername ?? s.addresseeName).charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm text-foreground">
+                  </span>
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium text-foreground">
                       {s.addresseeUsername ?? s.addresseeName}
                     </span>
                     {isCancelled && (
