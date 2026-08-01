@@ -98,9 +98,20 @@ export async function friendLinkState(a: string, b: string): Promise<FriendLinkS
   if (!dbPool) return { status: 'none', requesterId: null }
   try {
     const { rows } = await dbPool.query(
+      // На паре могут лежать две строки (A→B и B→A) из данных, созданных до
+      // того, как повторная заявка стала переиспользовать существующую запись.
+      // Без ORDER BY при LIMIT 1 статус связи в этом случае недетерминирован,
+      // поэтому явно задаём приоритет: реальная дружба важнее висящей заявки,
+      // а та — важнее отказа. При равенстве берём самую свежую.
       `SELECT "status", "requesterId" FROM "friendship"
        WHERE ("requesterId" = $1 AND "addresseeId" = $2)
           OR ("requesterId" = $2 AND "addresseeId" = $1)
+       ORDER BY CASE "status"
+                  WHEN 'accepted' THEN 0
+                  WHEN 'pending'  THEN 1
+                  ELSE 2
+                END,
+                "updatedAt" DESC
        LIMIT 1`,
       [a, b],
     )
