@@ -4,7 +4,10 @@ import { useEffect, useRef } from 'react'
 import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
-import { revalidateNotifications } from '@/hooks/dm/use-notifications'
+import {
+  revalidateNotifications,
+  scheduleNotificationsRevalidation,
+} from '@/hooks/dm/use-notifications'
 import { pushNotification } from '@/stores/notifications-store'
 import { originSocketHeaders } from '@/lib/chat/origin-socket'
 
@@ -106,10 +109,16 @@ const COALESCE_MS = 200
 
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let pendingWide = false
-let pendingNotifications = false
 
 /**
  * Отложенная ревалидация с объединением событий, пришедших в одном окне.
+ *
+ * Центр уведомлений (`notifications`) идёт своим планировщиком из
+ * use-notifications, а не флагом внутри этого окна: пришедший следом
+ * `dm:notification` должен успеть ОТМЕНИТЬ запрос, а отменить можно только уже
+ * запущенный таймер. Планируем сразу при событии — пуш приходит через считанные
+ * миллисекунды и гасит его, так что вставка записи в кэш не превращается
+ * в лишний GET центра.
  *
  * Экспортируется для тестов и на случай других источников событий; обычный путь
  * вызова — обработчик `dm:friends:changed`.
@@ -119,7 +128,7 @@ export function scheduleFriendsRevalidation(
   notifications = false,
 ): void {
   pendingWide = pendingWide || touchesFriendList(reason)
-  pendingNotifications = pendingNotifications || notifications
+  if (notifications) scheduleNotificationsRevalidation()
 
   // Таймер уже тикает — событие просто вливается в текущее окно.
   if (flushTimer) return
@@ -127,14 +136,11 @@ export function scheduleFriendsRevalidation(
   flushTimer = setTimeout(() => {
     flushTimer = null
     const wide = pendingWide
-    const notifications = pendingNotifications
-    // Флаги сбрасываем ДО запросов: событие, пришедшее пока летят fetch'и,
+    // Флаг сбрасываем ДО запросов: событие, пришедшее пока летят fetch'и,
     // должно открыть новое окно, а не потеряться в уже слитом.
     pendingWide = false
-    pendingNotifications = false
 
     runRevalidateFriends(wide)
-    if (notifications) revalidateNotifications()
   }, COALESCE_MS)
 }
 
@@ -172,7 +178,7 @@ export interface FriendsActionResult {
  * Существует ровно для того, чтобы заголовок `x-origin-socket-id` нельзя было
  * забыть: без него сокет-сервер не знает, ИЗ КАКОГО соединения пришло действие,
  * и `except()` в рассылке не срабатывает — инициирующая вкладка получает эхо
- * своего же действия и ревалидирует списки второй раз. Раньше каждый компонент
+ * своего же действия и ревалид��рует списки второй раз. Раньше каждый компонент
  * собирал fetch руками, и заголовок не уезжал ни с одного роута.
  *
  * `socket.id` есть только у подключённого сокета. Если его нет (соединение ещё
@@ -411,7 +417,9 @@ export function useFriendsRealtime(socket: Socket | null): void {
       // Тоже через планировщик: при флаппинге сети reconnect может сработать
       // несколько раз подряд, и без окна это был бы залп запросов на каждый.
       // Центр уведомлений перечитываем вместе со списками — пуши, пришедшие
-      // пока соединения не было, до нас не дошли.
+      // пока соединения не было, до нас не дошли. С тем же окном центр
+      // ревалидирует и useNotificationsRealtime на своём 'connect', и оба вызова
+      // схлопываются в один запрос (его версия ещё и запрещает отмену пушем).
       scheduleFriendsRevalidation(undefined, true)
     }
 

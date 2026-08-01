@@ -19,6 +19,8 @@
 // остаётся фолбэк на socket-событии.
 // ---------------------------------------------------------------------------
 
+import { after } from 'next/server'
+
 export type FriendsChangeReason =
   | 'requested'
   | 'accepted'
@@ -39,15 +41,21 @@ function serverBaseUrl(): string {
   return raw.replace(/\/+$/, '')
 }
 
-// Realtime не стоит того, чтобы держать ответ API: если сокет-сервер тормозит,
-// быстрее ответить пользователю и оставить обновление на фолбэк.
+// Realtime не стоит того, чтобы держать ответ API: в БД всё записано ещё до
+// вызова хука, и клик «Принять» не должен ждать сокет-сервер.
 //
-// Общий бюджет прежний (3 с), но делим его на две попытки по 1.5 с. Смысл в
-// том, что клиентский фолбэк помогает только когда у инициатора есть живой
-// websocket — то есть ровно в том сценарии, от которого мы и уходили. Дешевле
-// один раз перезапросить сервер, чем надеяться на сокет инициатора.
-const ATTEMPT_TIMEOUT_MS = 1500
-const ATTEMPTS = 2
+// Поэтому ответ держит ровно ОДНА короткая попытка: её результат нужен в ответе
+// как `notified`, иначе клиент не знает, включать ли фолбэк-emit. 700 мс — это
+// с запасом на локальный HTTP-вызов, но уже не заметная пользователю пауза.
+//
+// Ретраи ушли в after(): они выполняются после отправки ответа, поэтому им
+// можно оставить прежний щедрый таймаут. Их смысл — не `notified` (он уже
+// уехал клиенту), а второй участник: клиентский фолбэк помогает только когда у
+// инициатора живой websocket, то есть ровно в том сценарии, от которого мы
+// уходили. Дешевле дозвониться до сервера в фоне.
+const AWAITED_TIMEOUT_MS = 700
+const RETRY_TIMEOUT_MS = 1500
+const RETRIES = 2
 
 /** Повторяем только сетевые сбои и 5xx: 4xx воспроизведётся один в один. */
 function isRetriable(status: number | null): boolean {
@@ -66,13 +74,44 @@ function warnMissingSecretOnce(): void {
   )
 }
 
+/** Одна попытка вызова хука: `ok` — принято, `retriable` — стоит повторить. */
+async function sendHook(
+  url: string,
+  secret: string,
+  body: string,
+  reason: FriendsChangeReason,
+  timeoutMs: number,
+  label: string,
+): Promise<{ ok: boolean; retriable: boolean }> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-secret': secret,
+      },
+      body,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (res.ok) return { ok: true, retriable: false }
+    console.error(`[friends] хук вернул ${res.status} (reason=${reason}, ${label})`)
+    // 401/400/404 повторять бессмысленно — ответ не изменится.
+    return { ok: false, retriable: isRetriable(res.status) }
+  } catch (e) {
+    // Таймаут или сеть — повторяем: сокет-сервер мог перезапускаться.
+    console.error(`[friends] хук недоступен (${label}):`, (e as Error).message)
+    return { ok: false, retriable: true }
+  }
+}
+
 /**
  * Сообщить сокет-серверу, что связь между `userId` и `peerId` изменилась.
  * Сервер сам перечитает статус из БД и разошлёт `dm:friends:changed` обоим.
  *
- * Await-ить результат обязательно: «повесить» промис без await нельзя — в
- * serverless-окружении процесс может завершиться до отправки. Запрос локальный
- * и укладывается в миллисекунды.
+ * Первую попытку await-им: без её результата нечего положить в `notified`.
+ * Ретраи уходят в `after()` — Next держит процесс до их завершения, поэтому это
+ * не «повешенный промис», который serverless может убить на полпути.
  *
  * Возвращает `true`, если сокет-сервер принял уведомление и уже разослал
  * событие обоим участникам. При `false` роут отдаёт клиенту `notified: false`,
@@ -112,35 +151,63 @@ export async function notifyFriendsChanged(
     originSocketId: originSocketId ?? null,
   })
 
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    let status: number | null = null
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-secret': secret,
-        },
-        body,
-        cache: 'no-store',
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
-      })
-      if (res.ok) return true
-      status = res.status
-      console.error(
-        `[friends] хук вернул ${status} (reason=${reason}, попытка ${attempt}/${ATTEMPTS})`,
-      )
-    } catch (e) {
-      // Таймаут или сеть — повторяем: сокет-сервер мог перезапускаться.
-      console.error(
-        `[friends] хук недоступен (попытка ${attempt}/${ATTEMPTS}):`,
-        (e as Error).message,
-      )
-    }
+  const first = await sendHook(
+    url,
+    secret,
+    body,
+    reason,
+    AWAITED_TIMEOUT_MS,
+    'ответ ждёт',
+  )
+  if (first.ok || !first.retriable) return first.ok
 
-    // 401/400/404 повторять бессмысленно — ответ не изменится.
-    if (!isRetriable(status)) return false
+  // Дальше — уже после отправки ответа клиенту.
+  //
+  // Повтор после таймаута может продублировать событие: первая попытка,
+  // возможно, всё-таки дошла до сервера, просто ответ не успел вернуться. Это
+  // безопасно — сервер не верит payload'у, а перечитывает статус из БД и
+  // рассылает то же самое; на клиенте одинаковые события схлопываются окном
+  // ревалидации.
+  scheduleRetries(url, secret, body, reason)
+
+  // Ответ уезжает с notified: false — клиент включит фолбэк-emit, не дожидаясь
+  // фоновых попыток. Хуже от этого не станет: лишнее событие идемпотентно.
+  return false
+}
+
+/**
+ * Догнать сокет-сервер ретраями после ответа клиенту.
+ *
+ * Вне запроса (скрипт, тест) `after()` бросает — тогда просто дожидаемся
+ * попыток здесь: держать нечего, ответа уже нет.
+ */
+function scheduleRetries(
+  url: string,
+  secret: string,
+  body: string,
+  reason: FriendsChangeReason,
+): void {
+  const run = async () => {
+    for (let attempt = 1; attempt <= RETRIES; attempt++) {
+      const res = await sendHook(
+        url,
+        secret,
+        body,
+        reason,
+        RETRY_TIMEOUT_MS,
+        `фоновый повтор ${attempt}/${RETRIES}`,
+      )
+      if (res.ok || !res.retriable) return
+    }
+    console.error(
+      `[friends] хук не доставлен после ${RETRIES} фоновых попыток (reason=${reason}) — ` +
+        'realtime у второго участника зависит от клиентского фолбэка.',
+    )
   }
 
-  return false
+  try {
+    after(run)
+  } catch {
+    void run()
+  }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import useSWR, { mutate as globalMutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { chatFetcher } from '@/app/chat/types'
@@ -49,6 +49,63 @@ export interface UseNotificationsResult {
 /** Перечитать центр уведомлений из любого места (в том числе вне React). */
 export function revalidateNotifications(): void {
   void globalMutate(NOTIFICATIONS_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// Отложенная ревалидация центра — и её отмена пришедшим пушем.
+//
+// На каждое событие дружбы получателю прилетают ДВА события: `dm:friends:changed`
+// (списки заявок/друзей) и `dm:notification` (уже сохранённая запись целиком).
+// Пока обработчик первого дёргал центр напрямую, вставка записи в кэш «без
+// запроса» тут же обнулялась: GET /api/notifications всё равно уходил.
+//
+// Поэтому центр ревалидируется только ОТЛОЖЕННО, и пуш эту ревалидацию
+// отменяет: он приносит и запись, и честный счётчик непрочитанных, то есть
+// ровно то, что вернул бы запрос. Окно совпадает с окном ревалидации списков
+// дружбы — оба события приходят из одного тика сервера, `dm:notification`
+// на один запрос к БД позже.
+//
+// Кому пуш НЕ адресован (инициатору, у которого accept удалил свою же
+// `friend-request`), таймер никто не отменит — запрос уйдёт как раньше. Так
+// решается «кому нужно перечитать» без знания собственного userId в хуке.
+//
+// Собственные действия (`notifyFriendsChanged`) идут через синхронный
+// `revalidateNotifications`: пользователь ждёт результат своего клика.
+// ---------------------------------------------------------------------------
+
+const COALESCE_MS = 200
+
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+let cancellableByPush = true
+
+/**
+ * Перечитать центр через короткое окно, схлопывая серию вызовов в один запрос.
+ *
+ * `pushMayCancel: false` — для реконнекта: пока соединения не было, мимо могло
+ * пройти несколько пушей, и один пришедший следом их не заменяет.
+ */
+export function scheduleNotificationsRevalidation(pushMayCancel = true): void {
+  if (flushTimer) {
+    // Внутри одного окна побеждает самый строгий вызов: если хоть кому-то нужен
+    // гарантированный запрос, пуш окно не гасит.
+    cancellableByPush = cancellableByPush && pushMayCancel
+    return
+  }
+
+  cancellableByPush = pushMayCancel
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    cancellableByPush = true
+    revalidateNotifications()
+  }, COALESCE_MS)
+}
+
+/** Пуш принёс запись и счётчик — ожидающий запрос стал лишним. */
+function cancelRevalidationSupersededByPush(): void {
+  if (!flushTimer || !cancellableByPush) return
+  clearTimeout(flushTimer)
+  flushTimer = null
+  cancellableByPush = true
 }
 
 /**
@@ -158,6 +215,10 @@ export function useNotificationsRealtime(
   socket: Socket | null,
   onIncoming?: (n: StoredNotification) => void,
 ): void {
+  // Ref, а не state: значение читается внутри обработчика и переживает
+  // перенавешивание эффекта при смене `onIncoming`.
+  const hasConnected = useRef(false)
+
   useEffect(() => {
     if (!socket) return
 
@@ -182,12 +243,33 @@ export function useNotificationsRealtime(
         { revalidate: false },
       )
 
+      // Запись и счётчик уже в кэше — ревалидация, запланированная соседним
+      // событием `dm:friends:changed`, ничего нового не принесёт.
+      cancelRevalidationSupersededByPush()
+
       onIncoming?.(notification)
     }
 
     // Пока соединения не было, пуши могли пройти мимо. Реконнект — единственный
     // момент, когда список гарантированно мог отстать от БД.
-    const onConnect = () => revalidateNotifications()
+    //
+    // Самое первое подключение пропускаем: SWR только что загрузил ключ при
+    // монтировании, и запрос здесь был бы вторым за визит (та же защита, что в
+    // useFriendsRealtime).
+    const onConnect = () => {
+      if (!hasConnected.current) {
+        hasConnected.current = true
+        return
+      }
+      // Через планировщик и без права на отмену пушем: реконнект мог пропустить
+      // несколько уведомлений, а окно ещё и схлопнет залп при флаппинге сети
+      // вместе с ревалидацией от useFriendsRealtime.
+      scheduleNotificationsRevalidation(false)
+    }
+
+    // Сокет мог подключиться до навешивания обработчика — тогда 'connect' уже
+    // не придёт, и первый реальный реконнект был бы принят за первое подключение.
+    if (socket.connected) hasConnected.current = true
 
     socket.on('dm:notification', onNotification)
     socket.on('connect', onConnect)
