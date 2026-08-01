@@ -28,6 +28,12 @@ export { SCREEN_QUALITY_PRESETS } from "./mediasoup/types"
 // into a loop on a flaky network.
 const REBUILD_COOLDOWN_MS = 30000
 
+// How long to wait for the server's joinRoom acknowledgement before giving up.
+// Generous enough for a cold room (mediasoup router creation + chat history) on
+// a slow link, but finite — an unanswered join must surface as an error rather
+// than an endless "Подключение к комнате".
+const JOIN_ACK_TIMEOUT_MS = 15000
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -248,25 +254,48 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const doJoinSequence = async () => {
       if (joinInFlightRef.current || socketRef.current !== socket || connectionGenerationRef.current !== generation) return
       joinInFlightRef.current = true
-      const { Device } = await import("mediasoup-client")
-      const device = new Device()
-      deviceRef.current = device
 
-      socket.emit(
-        "joinRoom",
-        { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, displayName, rtpCapabilities: {}, create },
-        async (error: string | null, data: {
-          rtpCapabilities: object
-          existingPeers: Array<{
-            peerId: string
-            displayName: string
-            producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
-          }>
-          messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }>
-          readMarkers?: Array<{ peerId: string; ts: number }>
-          whiteboardOpen?: boolean
-          whiteboardSnapshot?: string | null
-        } | undefined) => {
+      // Anything that throws — or never resolves — between here and the end of
+      // the ack handler used to leave `status` at "connecting" forever, because
+      // the only ways out of the "Подключение к комнате" spinner are CONNECTED
+      // and ERROR. Every failure path must therefore clear joinInFlightRef
+      // (otherwise later join/rebuild attempts are silently skipped) and report.
+      const failJoin = (message: string, cause?: unknown) => {
+        joinInFlightRef.current = false
+        console.error(`[media] Join failed room=${roomId} peer=${peerIdRef.current}: ${message}`, cause)
+        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+        // A failure after we're already in the room is handled by the rebuild
+        // logic — don't tear down an established session with a fatal error.
+        if (!hasJoinedRef.current) dispatch({ type: "ERROR", error: message })
+      }
+
+      let device: DeviceType
+      try {
+        const { Device } = await import("mediasoup-client")
+        device = new Device()
+        deviceRef.current = device
+      } catch (e) {
+        // A failed chunk load (flaky network, stale deploy) must not strand the
+        // spinner: joinInFlightRef was already set above.
+        failJoin("Не удалось загрузить медиа-библиотеку. Обновите страницу.", e)
+        return
+      }
+
+      type JoinAck = {
+        rtpCapabilities: object
+        existingPeers: Array<{
+          peerId: string
+          displayName: string
+          producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
+        }>
+        messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }>
+        readMarkers?: Array<{ peerId: string; ts: number }>
+        whiteboardOpen?: boolean
+        whiteboardSnapshot?: string | null
+      }
+
+      const applyJoinAck = async (error: string | null, data: JoinAck | undefined) => {
+        try {
           if (socketRef.current !== socket || connectionGenerationRef.current !== generation) {
             joinInFlightRef.current = false
             return
@@ -277,10 +306,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             return
           }
 
-          await device.load({
-            routerRtpCapabilities:
-              data.rtpCapabilities as Parameters<typeof device.load>[0]["routerRtpCapabilities"],
-          })
+          await device.load({ routerRtpCapabilities: data.rtpCapabilities })
           dispatch({ type: "CONNECTED", localStream })
           hasJoinedRef.current = true
 
@@ -403,6 +429,33 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             await mediaControls.recoverScreenShare()
           }
           joinInFlightRef.current = false
+        } catch (e) {
+          // device.load / setupTransports / produce can all throw (unsupported
+          // browser, revoked permission, transport closed mid-setup). Rejections
+          // inside a socket.io ack callback are swallowed, so previously
+          // CONNECTED was simply never dispatched and the spinner spun forever.
+          failJoin("Не удалось войти в комнату. Попробуйте переподключиться.", e)
+        }
+      }
+
+      // socket.io does not time out acknowledgements: if the server never calls
+      // back (hung DB query, dead mediasoup worker, lost WebSocket upgrade) the
+      // client waited indefinitely. Bound that wait explicitly.
+      let ackSettled = false
+      const ackTimeout = setTimeout(() => {
+        if (ackSettled) return
+        ackSettled = true
+        failJoin("Сервер не ответил на запрос входа в комнату. Проверьте соединение и попробуйте снова.")
+      }, JOIN_ACK_TIMEOUT_MS)
+
+      socket.emit(
+        "joinRoom",
+        { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, displayName, rtpCapabilities: {}, create },
+        (error: string | null, data: JoinAck | undefined) => {
+          if (ackSettled) return
+          ackSettled = true
+          clearTimeout(ackTimeout)
+          void applyJoinAck(error, data)
         },
       )
     }
