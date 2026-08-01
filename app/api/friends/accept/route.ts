@@ -7,6 +7,7 @@ import { friendship } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
 import { originSocketIdFromRequest } from '@/lib/chat/origin-socket'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
+import { enforceRateLimit, FRIENDS_MUTATION_RULE } from '@/lib/chat/rate-limit'
 
 // POST /api/friends/accept — accept incoming request
 export async function POST(req: NextRequest) {
@@ -15,6 +16,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const userId = session.user.id
+
+  // Каждый успешный вызов пишет в БД и запускает рассылку обоим участникам,
+  // поэтому поток запросов отсекаем до работы с Postgres.
+  const limited = enforceRateLimit(`friends:accept:${userId}`, FRIENDS_MUTATION_RULE)
+  if (limited) return limited
 
   const body = await req.json().catch(() => null)
   const friendshipId = typeof body?.friendshipId === 'string' ? body.friendshipId : ''

@@ -61,15 +61,80 @@ const PENDING_KEYS = ['/api/friends/pending', '/api/friends/sent'] as const
  * когда события могли пройти мимо) перечитываем всё.
  */
 export function revalidateFriends(reason?: FriendsChangeReason): void {
-  const touchesFriendList = !reason || reason === 'accepted' || reason === 'removed'
+  runRevalidateFriends(touchesFriendList(reason))
+}
 
-  for (const key of touchesFriendList ? FRIENDS_KEYS : PENDING_KEYS) {
+/**
+ * Затрагивает ли событие список друзей (а с ним и список диалогов).
+ *
+ * Без причины — да: это реконнект, за время которого могло произойти что угодно.
+ */
+function touchesFriendList(reason?: FriendsChangeReason): boolean {
+  return !reason || reason === 'accepted' || reason === 'removed'
+}
+
+function runRevalidateFriends(wide: boolean): void {
+  for (const key of wide ? FRIENDS_KEYS : PENDING_KEYS) {
     void mutate(key)
   }
 
   // Новый друг = новый возможный диалог, удалённый друг = недоступный.
   // Заявка и её отмена состав диалогов не меняют.
-  if (touchesFriendList) void mutate(CONVERSATIONS_KEY)
+  if (wide) void mutate(CONVERSATIONS_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// Коалесинг ревалидаций для ВХОДЯЩИХ событий.
+//
+// `mutate(key)` дедупликацию SWR не использует — он принудительно перезапрашивает
+// ключ. Поэтому серия событий подряд (человек разобрал десяток заявок, или кто-то
+// гонит request/cancel в цикле) превращалась в 5 запросов на каждое событие.
+// Лимит на роутах ограничил источник, но схлопнуть всплеск на приёме всё равно
+// нужно: события могут прийти и от разных людей одновременно.
+//
+// Окно короткое и трейлинг: 200 мс задержки на чужое действие незаметны, зато
+// десять событий внутри окна дают один набор запросов вместо десяти. Причины
+// внутри окна объединяются по максимуму: если хоть одно событие затрагивало
+// список друзей, перечитываем широкий набор ключей.
+//
+// Собственные действия (`notifyFriendsChanged` после ответа API) через планировщик
+// НЕ идут: там пользователь ждёт результат своего клика и задержка была бы видна.
+// ---------------------------------------------------------------------------
+
+const COALESCE_MS = 200
+
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+let pendingWide = false
+let pendingNotifications = false
+
+/**
+ * Отложенная ревалидация с объединением событий, пришедших в одном окне.
+ *
+ * Экспортируется для тестов и на случай других источников событий; обычный путь
+ * вызова — обработчик `dm:friends:changed`.
+ */
+export function scheduleFriendsRevalidation(
+  reason?: FriendsChangeReason,
+  notifications = false,
+): void {
+  pendingWide = pendingWide || touchesFriendList(reason)
+  pendingNotifications = pendingNotifications || notifications
+
+  // Таймер уже тикает — событие просто вливается в текущее окно.
+  if (flushTimer) return
+
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    const wide = pendingWide
+    const notifications = pendingNotifications
+    // Флаги сбрасываем ДО запросов: событие, пришедшее пока летят fetch'и,
+    // должно открыть новое окно, а не потеряться в уже слитом.
+    pendingWide = false
+    pendingNotifications = false
+
+    runRevalidateFriends(wide)
+    if (notifications) revalidateNotifications()
+  }, COALESCE_MS)
 }
 
 /** Ответ любого мутирующего роута дружбы: поле `notified` есть у всех. */
@@ -142,7 +207,7 @@ export function notifyFriendsChanged(
 /**
  * Приём событий об изменении дружбы. Монтируется один раз на приложение.
  *
- * Дедупликация эха идёт по СОЕДИНЕНИЮ (`originSocketId` против `socket.id`), а
+ * Дедупликац����я эха идёт по СОЕДИНЕНИЮ (`originSocketId` против `socket.id`), а
  * не по пользователю. Раньше стояло `if (userId === selfId) return`, и это был
  * баг мультидевайса: комната адресуется по пользователю (`user:<id>`), поэтому
  * событие приходит во все вкладки и на все устройства инициатора, но выбрасывали
@@ -177,7 +242,6 @@ export function useFriendsRealtime(socket: Socket | null): void {
       // сразу после ответа API. Соседние вкладки того же пользователя приходят с
       // другим socket.id и обрабатываются как обычное событие.
       if (originSocketId && socket.id && originSocketId === socket.id) return
-      revalidateFriends(reason)
 
       // Тост и центр уведомлений здесь НЕ трогаем: уведомление приходит
       // отдельным событием `dm:notification` уже сохранённым в БД (см.
@@ -190,9 +254,17 @@ export function useFriendsRealtime(socket: Socket | null): void {
       // меняется не только у получателя. На `accept` инициатор удаляет свою же
       // запись `friend-request` — перечитать центр должен именно он, то есть
       // сторона, для которой `peerId !== selfId`. Поэтому ревалидируем у обоих.
-      if (reason === 'requested' || reason === 'accepted' || reason === 'declined') {
-        revalidateNotifications()
-      }
+      //
+      // Сужать по причине тоже нельзя: центр меняют ВСЕ пять событий, причём
+      // отзыв заявки и удаление из друзей — только удалением записи, без пуша.
+      // Раньше здесь стоял список `requested|accepted|declined`, и это была
+      // фантомная заявка: `cancel` удалял `friend-request` из БД, а у получателя
+      // карточка и бейдж висели до перезагрузки и вели в пустые заявки. То же с
+      // `remove` и записью `friend-accepted`.
+      //
+      // Списки и центр уведомлений уходят одним планировщиком, поэтому всплеск
+      // событий даёт один набор запросов, а не по пять на каждое.
+      scheduleFriendsRevalidation(reason, true)
     }
 
     // Пока соединения не было, события могли пройти мимо: после РЕКОННЕКТА
@@ -203,7 +275,11 @@ export function useFriendsRealtime(socket: Socket | null): void {
         hasConnected.current = true
         return
       }
-      revalidateFriends()
+      // Тоже через планировщик: при флаппинге сети reconnect может сработать
+      // несколько раз подряд, и без окна это был бы залп запросов на каждый.
+      // Центр уведомлений перечитываем вместе со списками — пуши, пришедшие
+      // пока соединения не было, до нас не дошли.
+      scheduleFriendsRevalidation(undefined, true)
     }
 
     // Сокет мог подключиться до того, как эффект успел навесить обработчик:

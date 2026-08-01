@@ -1,7 +1,7 @@
 import type { Namespace } from 'socket.io'
 import { friendLinkState, notificationForPush, userDisplayName } from './db'
 import { announceMutualPresence, invalidateFriendsCache } from './presence'
-import { userRoom } from './namespace-types'
+import { userRoom, type DmSocketData } from './namespace-types'
 
 // ---------------------------------------------------------------------------
 // Рассылка «связь двух пользователей изменилась».
@@ -26,6 +26,35 @@ export type FriendsChangeReason =
   | 'declined'
   | 'cancelled'
   | 'removed'
+
+/**
+ * Принять `originSocketId` только если это соединение действительно принадлежит
+ * инициатору действия.
+ *
+ * Значение приходит из браузера (заголовок `x-origin-socket-id`), а `.except()`
+ * действует в комнатах ОБОИХ участников. Без этой проверки участник связи мог
+ * подставить socket.id жертвы и погасить у неё обновление списков: формат id мы
+ * валидируем, но формат ничего не говорит о владельце. Личность соединения
+ * известна серверу из рукопожатия (`socket.data.userId`), ей и сверяем.
+ *
+ * Неизвестный сокет тоже отбрасываем: сегодня узел один, значит «нет в
+ * nsp.sockets» = подделка или id уже отключённого соединения. Цена ошибки —
+ * инициирующая вкладка получит эхо и перечитает списки второй раз, то есть
+ * лишний запрос вместо потерянного обновления. Если появится
+ * `@socket.io/redis-adapter`, сокет может жить на другом узле — тогда проверку
+ * нужно делать через `nsp.fetchSockets()`, иначе дедупликация перестанет
+ * срабатывать в кластере.
+ */
+function verifiedOriginSocketId(
+  nsp: Namespace,
+  originSocketId: string | null | undefined,
+  userId: string,
+): string | null {
+  if (!originSocketId) return null
+  const socket = nsp.sockets.get(originSocketId)
+  if (!socket) return null
+  return (socket.data as DmSocketData).userId === userId ? originSocketId : null
+}
 
 /**
  * Разослать `dm:friends:changed` обоим участникам и синхронизировать presence.
@@ -60,6 +89,12 @@ export async function broadcastFriendsChanged(
     userDisplayName(userId),
   ])
 
+  // Дальше работаем только с подтверждённым id: и в `except()`, и в payload.
+  // Разводить их нельзя — клиентская проверка по `originSocketId` подавляет
+  // обработку так же, как `except` подавляет доставку, поэтому непроверенный id
+  // в payload давал бы ту же самую атаку в обход `except`.
+  const originId = verifiedOriginSocketId(nsp, originSocketId, userId)
+
   // Кэш друзей presence живёт 30 с. Без сброса новый друг всё это время не
   // получал бы online/offline, а удалённый продолжал бы получать.
   invalidateFriendsCache(userId)
@@ -74,7 +109,7 @@ export async function broadcastFriendsChanged(
     actorName,
     // Клиент сравнит с собственным socket.id. Именно socket, а не пользователь:
     // вторая вкладка инициатора — другой сокет, и ей событие нужно.
-    originSocketId: originSocketId ?? null,
+    originSocketId: originId,
   }
 
   for (const memberId of [userId, peerId]) {
@@ -82,7 +117,7 @@ export async function broadcastFriendsChanged(
     // Исключаем только инициирующее соединение — остальные сокеты того же
     // пользователя (второй таб, телефон) событие получают и перечитывают списки.
     // socket.id сам по себе является комнатой, поэтому except им и оперирует.
-    const scoped = originSocketId ? target.except(originSocketId) : target
+    const scoped = originId ? target.except(originId) : target
     scoped.emit('dm:friends:changed', payload)
   }
 
