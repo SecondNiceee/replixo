@@ -1,12 +1,25 @@
 import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { eq, and, or } from 'drizzle-orm'
+import { eq, and, or, inArray } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship, user } from '@/lib/db/schema'
 import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
-import { createFriendNotification } from '@/lib/chat/notifications'
+import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
 import { randomUUID } from 'crypto'
+
+/**
+ * Нарушение unique-индекса в Postgres.
+ *
+ * Drizzle оборачивает ошибку драйвера в DrizzleQueryError, поэтому code ищем и
+ * по цепочке cause, а не только на самом объекте.
+ */
+function isUniqueViolation(e: unknown): boolean {
+  for (let cur = e; cur; cur = (cur as { cause?: unknown }).cause) {
+    if ((cur as { code?: string }).code === '23505') return true
+  }
+  return false
+}
 
 // POST /api/friends/request — send friend request by username
 export async function POST(req: NextRequest) {
@@ -36,9 +49,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Нельзя добавить самого себя' }, { status: 400 })
   }
 
-  // Check for existing friendship in either direction
-  const [existing] = await db
-    .select({ id: friendship.id, status: friendship.status })
+  // Связь ищем в обе стороны и БЕЗ limit: на паре теоретически могут лежать две
+  // строки (A→B и B→A), если когда-то заявки разошлись в обоих направлениях.
+  // Их нужно увидеть все, иначе решение принимается по случайной из них.
+  const existingRows = await db
+    .select({
+      id: friendship.id,
+      requesterId: friendship.requesterId,
+      status: friendship.status,
+    })
     .from(friendship)
     .where(
       or(
@@ -46,28 +65,93 @@ export async function POST(req: NextRequest) {
         and(eq(friendship.requesterId, addressee.id), eq(friendship.addresseeId, requesterId)),
       ),
     )
-    .limit(1)
 
-  if (existing) {
-    if (existing.status === 'accepted') {
-      return NextResponse.json({ error: 'Вы уже друзья' }, { status: 409 })
-    }
-    if (existing.status === 'pending') {
-      return NextResponse.json({ error: 'Заявка уже отправлена' }, { status: 409 })
-    }
+  if (existingRows.some((r) => r.status === 'accepted')) {
+    return NextResponse.json({ error: 'Вы уже друзья' }, { status: 409 })
   }
 
-  const [created] = await db
-    .insert(friendship)
-    .values({
-      id: randomUUID(),
-      requesterId,
-      addresseeId: addressee.id,
-      status: 'pending',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .returning()
+  const pending = existingRows.find((r) => r.status === 'pending')
+  if (pending) {
+    return NextResponse.json(
+      {
+        error:
+          pending.requesterId === requesterId
+            ? 'Заявка уже отправлена'
+            : 'Этот пользователь уже отправил вам заявку',
+      },
+      { status: 409 },
+    )
+  }
+
+  // Дальше остались только отклонённые строки. Новую вставлять нельзя: на
+  // (requesterId, addresseeId) висит unique-индекс, и в прошлой версии повторная
+  // заявка после отказа падала с 23505 → 500. Поэтому переиспользуем
+  // существующую строку, разворачивая направление под нового инициатора, а
+  // возможные дубликаты по паре сносим, чтобы связь снова описывалась одной
+  // записью.
+  let created: typeof friendship.$inferSelect | undefined
+  const now = new Date()
+
+  try {
+    if (existingRows.length > 0) {
+      const [keep, ...duplicates] = existingRows
+      created = await db.transaction(async (tx) => {
+        if (duplicates.length > 0) {
+          await tx.delete(friendship).where(
+            inArray(
+              friendship.id,
+              duplicates.map((d) => d.id),
+            ),
+          )
+        }
+        const [row] = await tx
+          .update(friendship)
+          .set({
+            requesterId,
+            addresseeId: addressee.id,
+            status: 'pending',
+            // createdAt сбрасываем: для получателя это новая заявка, и списки
+            // сортируются по нему.
+            createdAt: now,
+            updatedAt: now,
+          })
+          .where(eq(friendship.id, keep.id))
+          .returning()
+        return row
+      })
+    } else {
+      const [row] = await db
+        .insert(friendship)
+        .values({
+          id: randomUUID(),
+          requesterId,
+          addresseeId: addressee.id,
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
+      created = row
+    }
+  } catch (e) {
+    // Гонка двух одновременных заявок по одной паре: одна выиграла, вторая
+    // получает осмысленный 409 вместо 500.
+    if (isUniqueViolation(e)) {
+      return NextResponse.json({ error: 'Заявка уже отправлена' }, { status: 409 })
+    }
+    throw e
+  }
+
+  if (!created) {
+    return NextResponse.json({ error: 'Не удалось создать заявку' }, { status: 500 })
+  }
+
+  // Прошлый отказ по этой паре больше не актуален: заявка снова висит, и
+  // «X отклонил вашу заявку» в центре уведомлений только путало бы.
+  await Promise.all([
+    deleteFriendNotification(requesterId, addressee.id, 'friend-declined'),
+    deleteFriendNotification(addressee.id, requesterId, 'friend-declined'),
+  ])
 
   // Сначала запись в БД, потом пуш: адресат может быть офлайн, и тогда узнает о
   // заявке в центре уведомлений при следующем входе.

@@ -4,8 +4,7 @@ import { useEffect, useRef } from 'react'
 import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
-import { pushNotification } from '@/stores/notifications-store'
-import { playFriendEvent } from '@/lib/sounds'
+import { revalidateNotifications } from '@/hooks/dm/use-notifications'
 
 // ---------------------------------------------------------------------------
 // Realtime-синхронизация дружбы.
