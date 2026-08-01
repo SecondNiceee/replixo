@@ -4,7 +4,11 @@ import { useState } from 'react'
 import { Send, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import {
+  friendsAction,
+  notifyFriendsChanged,
+  reportFriendsActionError,
+} from '@/hooks/dm/use-friends-realtime'
 import type { SentRequest } from './types'
 
 interface SentRequestsProps {
@@ -19,15 +23,21 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
 
   const handleCancel = async (friendshipId: string, addresseeId: string) => {
     setCancellingId(friendshipId)
-    const { ok, data } = await friendsAction(socket, '/api/friends/cancel', 'DELETE', {
+    const result = await friendsAction(socket, '/api/friends/cancel', 'DELETE', {
       friendshipId,
     })
     setCancellingId(null)
-    if (ok) {
-      setCancelledIds((prev) => new Set(prev).add(friendshipId))
-      // У адресата заявка должна пропасть из входящих сразу.
-      notifyFriendsChanged(socket, addresseeId, 'cancelled', data?.notified === true)
+
+    if (!result.ok) {
+      // Пометку «Отменена» не ставим: заявка жива, и кнопка должна остаться
+      // доступной для повтора.
+      reportFriendsActionError(result)
+      return
     }
+
+    setCancelledIds((prev) => new Set(prev).add(friendshipId))
+    // У адресата заявка должна пропасть из входящих сразу.
+    notifyFriendsChanged(socket, addresseeId, 'cancelled', result.data?.notified === true)
   }
 
   return (

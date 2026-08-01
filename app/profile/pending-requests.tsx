@@ -4,7 +4,11 @@ import { useState } from 'react'
 import { UserCircle, Check, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import {
+  friendsAction,
+  notifyFriendsChanged,
+  reportFriendsActionError,
+} from '@/hooks/dm/use-friends-realtime'
 import type { PendingRequest } from './types'
 
 interface PendingRequestsProps {
@@ -18,26 +22,36 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
 
   const handleAccept = async (friendshipId: string, requesterId: string) => {
     setBusyId(friendshipId)
-    const { ok, data } = await friendsAction(socket, '/api/friends/accept', 'POST', {
+    const result = await friendsAction(socket, '/api/friends/accept', 'POST', {
       friendshipId,
     })
     setBusyId(null)
-    if (ok) {
-      // Свои списки обновляются всегда; фолбэк-emit — только если серверный
-      // хук не подтвердил рассылку (notified: false).
-      notifyFriendsChanged(socket, requesterId, 'accepted', data?.notified === true)
+
+    if (!result.ok) {
+      // Без этой ветки кнопка просто перестала бы крутиться, ничего не изменив:
+      // самый частый случай здесь — заявку уже отозвали, пока страница открыта.
+      reportFriendsActionError(result)
+      return
     }
+
+    // Свои списки обновляются всегда; фолбэк-emit — только если серверный
+    // хук не подтвердил рассылку (notified: false).
+    notifyFriendsChanged(socket, requesterId, 'accepted', result.data?.notified === true)
   }
 
   const handleDecline = async (friendshipId: string, requesterId: string) => {
     setBusyId(friendshipId)
-    const { ok, data } = await friendsAction(socket, '/api/friends/decline', 'POST', {
+    const result = await friendsAction(socket, '/api/friends/decline', 'POST', {
       friendshipId,
     })
     setBusyId(null)
-    if (ok) {
-      notifyFriendsChanged(socket, requesterId, 'declined', data?.notified === true)
+
+    if (!result.ok) {
+      reportFriendsActionError(result)
+      return
     }
+
+    notifyFriendsChanged(socket, requesterId, 'declined', result.data?.notified === true)
   }
 
   if (!isLoading && pending.length === 0) return null
