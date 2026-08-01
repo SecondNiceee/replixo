@@ -154,10 +154,10 @@ export function notifyFriendsChanged(
  * второй рубеж: она срабатывает, если рассылку сделал другой узел или сокет
  * успел переподключиться с новым id.
  *
- * `selfId` больше НЕ участвует в дедупликации и нужен только чтобы понять, мы ли
- * адресат уведомления (см. ниже про центр уведомлений).
+ * Из-за этого хуку больше не нужен id пользователя: раньше он передавался только
+ * ради `userId === selfId`, а по соединению всё решается без него.
  */
-export function useFriendsRealtime(socket: Socket | null, selfId: string): void {
+export function useFriendsRealtime(socket: Socket | null): void {
   // Первое подключение — не реконнект: SWR уже загрузил списки при монтировании,
   // и ревалидация здесь просто дублировала бы 4 запроса на каждый визит. Ref, а
   // не state: значение читается внутри обработчика и ререндер ему не нужен.
@@ -186,14 +186,11 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
       // поэтому запись есть в БД, а пуша по ней не было. Перечитываем центр,
       // иначе бейдж отстанет до перезагрузки страницы.
       //
-      // Сужаем по адресату: уведомление создаётся для `peerId`, поэтому
-      // остальным вкладкам ИНИЦИАТОРА (они теперь событие тоже получают)
-      // перечитывать центр незачем — там для них ничего не появилось.
-      const isAddressee = peerId === selfId
-      if (
-        isAddressee &&
-        (reason === 'requested' || reason === 'accepted' || reason === 'declined')
-      ) {
+      // Сужать это условие по адресату (`peerId === selfId`) НЕЛЬЗЯ: центр
+      // меняется не только у получателя. На `accept` инициатор удаляет свою же
+      // запись `friend-request` — перечитать центр должен именно он, то есть
+      // сторона, для которой `peerId !== selfId`. Поэтому ревалидируем у обоих.
+      if (reason === 'requested' || reason === 'accepted' || reason === 'declined') {
         revalidateNotifications()
       }
     }
@@ -220,5 +217,5 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
       socket.off('dm:friends:changed', onChanged)
       socket.off('connect', onConnect)
     }
-  }, [socket, selfId])
+  }, [socket])
 }
