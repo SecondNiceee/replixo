@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { UserCircle, Check, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
-import { notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
+import { friendsAction, notifyFriendsChanged } from '@/hooks/dm/use-friends-realtime'
 import type { PendingRequest } from './types'
 
 interface PendingRequestsProps {
@@ -18,14 +18,11 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
 
   const handleAccept = async (friendshipId: string, requesterId: string) => {
     setBusyId(friendshipId)
-    const res = await fetch('/api/friends/accept', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ friendshipId }),
+    const { ok, data } = await friendsAction(socket, '/api/friends/accept', 'POST', {
+      friendshipId,
     })
-    const data = await res.json().catch(() => null)
     setBusyId(null)
-    if (res.ok) {
+    if (ok) {
       // Свои списки обновляются всегда; фолбэк-emit — только если серверный
       // хук не подтвердил рассылку (notified: false).
       notifyFriendsChanged(socket, requesterId, 'accepted', data?.notified === true)
@@ -34,14 +31,11 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
 
   const handleDecline = async (friendshipId: string, requesterId: string) => {
     setBusyId(friendshipId)
-    const res = await fetch('/api/friends/decline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ friendshipId }),
+    const { ok, data } = await friendsAction(socket, '/api/friends/decline', 'POST', {
+      friendshipId,
     })
-    const data = await res.json().catch(() => null)
     setBusyId(null)
-    if (res.ok) {
+    if (ok) {
       notifyFriendsChanged(socket, requesterId, 'declined', data?.notified === true)
     }
   }

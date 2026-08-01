@@ -5,6 +5,7 @@ import { mutate } from 'swr'
 import type { Socket } from 'socket.io-client'
 import { CONVERSATIONS_KEY } from '@/hooks/dm/use-conversations'
 import { revalidateNotifications } from '@/hooks/dm/use-notifications'
+import { originSocketHeaders } from '@/lib/chat/origin-socket'
 
 // ---------------------------------------------------------------------------
 // Realtime-синхронизация дружбы.
@@ -24,6 +25,14 @@ import { revalidateNotifications } from '@/hooks/dm/use-notifications'
 // Подписка одна на приложение (в DmNotifier), потому что ключи SWR глобальные:
 // профиль читает те же '/api/friends' и обновляется сам, даже если открыт в
 // другом месте дерева.
+//
+// Дедупликация эха — по СОЕДИНЕНИЮ, не по пользователю. Комната сокет-сервера
+// адресуется по пользователю, поэтому событие получают все вкладки и устройства
+// обоих участников. Гасить его по userId нельзя: обновилась только та вкладка,
+// где кликнули, а остальные так и остались бы со старыми списками. Поэтому
+// каждый мутирующий вызов идёт через `friendsAction` — он передаёт socket.id в
+// заголовке, сервер исключает ровно этот сокет, а обработчик здесь дублирует
+// проверку по `originSocketId` из payload.
 // ---------------------------------------------------------------------------
 
 /** Причина изменения. Совпадает с типом на сервере. */
@@ -63,6 +72,48 @@ export function revalidateFriends(reason?: FriendsChangeReason): void {
   if (touchesFriendList) void mutate(CONVERSATIONS_KEY)
 }
 
+/** Ответ любого мутирующего роута дружбы: поле `notified` есть у всех. */
+export interface FriendsActionResponse {
+  notified?: boolean
+  peerId?: string
+  friendship?: { addresseeId?: string; requesterId?: string }
+  error?: string
+  [key: string]: unknown
+}
+
+/**
+ * Единственный способ вызвать мутирующий роут дружбы из браузера.
+ *
+ * Существует ровно для того, чтобы заголовок `x-origin-socket-id` нельзя было
+ * забыть: без него сокет-сервер не знает, ИЗ КАКОГО соединения пришло действие,
+ * и `except()` в рассылке не срабатывает — инициирующая вкладка получает эхо
+ * своего же действия и ревалидирует списки второй раз. Раньше каждый компонент
+ * собирал fetch руками, и заголовок не уезжал ни с одного роута.
+ *
+ * `socket.id` есть только у подключённого сокета. Если его нет (соединение ещё
+ * поднимается или чат недоступен) — заголовок просто не отправляется, и эхо
+ * получают все вкладки инициатора. Лишняя ревалидация безобидна, потеря
+ * обновления — нет.
+ */
+export async function friendsAction(
+  socket: Socket | null,
+  url: string,
+  method: 'POST' | 'DELETE',
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; data: FriendsActionResponse | null }> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      // socket.id читаем в момент запроса: после реконнекта он другой.
+      ...originSocketHeaders(socket?.id),
+    },
+    body: JSON.stringify(body),
+  })
+  const data = (await res.json().catch(() => null)) as FriendsActionResponse | null
+  return { ok: res.ok, data }
+}
+
 /**
  * Обновить свои списки после успешного ответа API и, если серверный хук не
  * сработал, сообщить об изменении через сокет.
@@ -91,11 +142,22 @@ export function notifyFriendsChanged(
 /**
  * Приём событий об изменении дружбы. Монтируется один раз на приложение.
  *
- * `selfId` нужен для дедупликации: инициатор действия получает своё же событие
- * эхом, но списки он уже перечитал в notifyFriendsChanged сразу после ответа
- * API. Без этой проверки каждое действие давало бы две волны ревалидации.
+ * Дедупликация эха идёт по СОЕДИНЕНИЮ (`originSocketId` против `socket.id`), а
+ * не по пользователю. Раньше стояло `if (userId === selfId) return`, и это был
+ * баг мультидевайса: комната адресуется по пользователю (`user:<id>`), поэтому
+ * событие приходит во все вкладки и на все устройства инициатора, но выбрасывали
+ * его все — хотя списки перечитала только та вкладка, где кликнули. Второй таб и
+ * телефон оставались с устаревшими данными до перезагрузки страницы.
+ *
+ * Гасить нужно ровно одно соединение — то, что уже обновилось по ответу API.
+ * Сервер исключает его через `.except(originSocketId)`, а проверка здесь —
+ * второй рубеж: она срабатывает, если рассылку сделал другой узел или сокет
+ * успел переподключиться с новым id.
+ *
+ * Из-за этого хуку больше не нужен id пользователя: раньше он передавался только
+ * ради `userId === selfId`, а по соединению всё решается без него.
  */
-export function useFriendsRealtime(socket: Socket | null, selfId: string): void {
+export function useFriendsRealtime(socket: Socket | null): void {
   // Первое подключение — не реконнект: SWR уже загрузил списки при монтировании,
   // и ревалидация здесь просто дублировала бы 4 запроса на каждый визит. Ref, а
   // не state: значение читается внутри обработчика и ререндер ему не нужен.
@@ -105,14 +167,16 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
     if (!socket) return
 
     const onChanged = (payload: unknown) => {
-      const { peerId, userId, reason } = (payload ?? {}) as {
+      const { peerId, reason, originSocketId } = (payload ?? {}) as {
         peerId?: string
-        userId?: string
         reason?: FriendsChangeReason
+        originSocketId?: string | null
       }
       if (!peerId) return
-      // Эхо собственного действия — уже обработано локально.
-      if (userId === selfId) return
+      // Эхо ЭТОГО соединения — списки здесь уже перечитаны в notifyFriendsChanged
+      // сразу после ответа API. Соседние вкладки того же пользователя приходят с
+      // другим socket.id и обрабатываются как обычное событие.
+      if (originSocketId && socket.id && originSocketId === socket.id) return
       revalidateFriends(reason)
 
       // Тост и центр уведомлений здесь НЕ трогаем: уведомление приходит
@@ -121,6 +185,11 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
       // рассылку инициировал клиент: сервер в нём id уведомления не знает,
       // поэтому запись есть в БД, а пуша по ней не было. Перечитываем центр,
       // иначе бейдж отстанет до перезагрузки страницы.
+      //
+      // Сужать это условие по адресату (`peerId === selfId`) НЕЛЬЗЯ: центр
+      // меняется не только у получателя. На `accept` инициатор удаляет свою же
+      // запись `friend-request` — перечитать центр должен именно он, то есть
+      // сторона, для которой `peerId !== selfId`. Поэтому ревалидируем у обоих.
       if (reason === 'requested' || reason === 'accepted' || reason === 'declined') {
         revalidateNotifications()
       }
@@ -148,5 +217,5 @@ export function useFriendsRealtime(socket: Socket | null, selfId: string): void 
       socket.off('dm:friends:changed', onChanged)
       socket.off('connect', onConnect)
     }
-  }, [socket, selfId])
+  }, [socket])
 }
