@@ -30,6 +30,41 @@ import {
 // WebRTC / mediasoup signalling: joinRoom, transports, produce/consume
 // ---------------------------------------------------------------------------
 
+/**
+ * Ограничить время ожидания промиса. Нужно, чтобы ни один `await` в обработчике
+ * joinRoom не мог заблокировать отправку ack: пока ack не отправлен, клиент
+ * висит на экране «Подключение к комнате» без каких-либо признаков ошибки.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
+ * То же, но для некритичных данных: при таймауте/ошибке возвращаем fallback и
+ * пускаем участника в комнату. Отсутствие истории чата — это деградация, а не
+ * причина не пустить человека в звонок.
+ */
+async function optional<T>(promise: Promise<T>, ms: number, label: string, fallback: T): Promise<T> {
+  try {
+    return await withTimeout(promise, ms, label)
+  } catch (e) {
+    console.error(`[room] ${label} failed, продолжаем без него:`, (e as Error).message)
+    return fallback
+  }
+}
+
 export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void {
   const { io, socket, session } = ctx
 
@@ -84,7 +119,11 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
 
         clearPendingDisconnect(roomId, peerId)
 
-        const room = await getOrCreateRoom(roomId, worker)
+        // Создание комнаты поднимает mediasoup-router и подтягивает состояние
+        // доски из БД. Если worker мёртв или база висит, промис может не
+        // зарезолвиться никогда — ограничиваем и отвечаем ошибкой, чтобы клиент
+        // показал её вместо бесконечного спиннера.
+        const room = await withTimeout(getOrCreateRoom(roomId, worker), 15_000, 'getOrCreateRoom')
         const repeatedJoin = room.hasPeer(peerId) && getPeerSocket(roomId, peerId) === socket.id
 
         if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
@@ -114,10 +153,14 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
 
         // Load persisted chat history so the joining peer (or someone who just
         // reloaded the page) sees prior messages. Empty when persistence is off.
-        const messages = await getRoomMessages(roomId)
         // Read markers of every participant so checkmarks render correctly on
         // already-sent messages right after joining/reloading.
-        const readMarkers = await getRoomReadMarkers(roomId)
+        // Оба запроса некритичны для входа в звонок и выполняются параллельно с
+        // ограничением по времени: висящая база больше не задерживает ack.
+        const [messages, readMarkers] = await Promise.all([
+          optional(getRoomMessages(roomId), 5_000, 'getRoomMessages', []),
+          optional(getRoomReadMarkers(roomId), 5_000, 'getRoomReadMarkers', []),
+        ])
 
         // Serialize presentationDrawings Map → plain object for JSON transport.
         const presentationDrawings: Record<string, string> = {}

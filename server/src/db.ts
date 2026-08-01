@@ -40,8 +40,27 @@ export interface ReadMarker {
 const connectionString = process.env.DATABASE_URL
 
 // Один пул на весь процесс. Создаётся только если есть строка подключения.
+//
+// Все таймауты заданы явно и это принципиально: по умолчанию в `pg`
+// connectionTimeoutMillis = 0, то есть ожидание соединения бесконечно. Если база
+// недоступна, перегружена или пул исчерпан, `await pool.query(...)` внутри
+// обработчика joinRoom никогда не завершится — сервер не отправит ack, а клиент
+// навсегда останется на экране «Подключение к комнате». Лучше быстро упасть с
+// ошибкой (её ловит try/catch выше и комната открывается без истории чата),
+// чем повиснуть.
 const pool: Pool | null = connectionString
-  ? new Pool({ connectionString })
+  ? new Pool({
+      connectionString,
+      // Ждём свободное соединение ограниченное время, а не вечно.
+      connectionTimeoutMillis: 8_000,
+      // Страховка на стороне сервера Postgres и на стороне клиента: одиночный
+      // запрос не может держать обработчик дольше этого времени.
+      statement_timeout: 10_000,
+      query_timeout: 10_000,
+      idleTimeoutMillis: 30_000,
+      max: 10,
+      keepAlive: true,
+    })
   : null
 
 if (!pool) {
