@@ -54,15 +54,10 @@ export function ConversationList({
   )
 
   return (
-    <aside className="flex min-h-0 w-full flex-col overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-        <Users className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">Диалоги</h2>
-        {conversations.length > 0 && (
-          <span className="text-xs text-muted-foreground">({conversations.length})</span>
-        )}
-      </div>
-
+    // Ни рамки, ни своего заголовка: список вложен в левую панель кабинета,
+    // которая даёт и то, и другое, а переключатель «Чаты / Друзья» над ним уже
+    // подписывает раздел.
+    <div className="flex min-h-0 w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -161,6 +156,6 @@ export function ConversationList({
           </>
         )}
       </div>
-    </aside>
+    </div>
   )
 }

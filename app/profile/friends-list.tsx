@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Users, UserMinus, Loader2, MessageSquare } from 'lucide-react'
 import { useDmStore } from '@/stores/dm-store'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
@@ -16,10 +15,15 @@ import type { Friend } from './types'
 interface FriendsListProps {
   friends: Friend[]
   isLoading: boolean
+  /**
+   * Открыть переписку с другом. Раньше кнопка «Написать» уводила на отдельную
+   * страницу /chat; теперь список чатов и переписка живут на одном экране, и
+   * навигация здесь только сбрасывала бы состояние открытого диалога.
+   */
+  onMessage: (friendId: string) => void
 }
 
-export function FriendsList({ friends, isLoading }: FriendsListProps) {
-  const router = useRouter()
+export function FriendsList({ friends, isLoading, onMessage }: FriendsListProps) {
   // Точки «в сети» живут ровно столько, сколько открыт сокет presence
   // (его держит ProfileClient). Без соединения набор пуст — и точек нет.
   const onlineIds = useDmStore((s) => s.onlineIds)
@@ -46,17 +50,9 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <Users className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium text-foreground">
-          Друзья
-          {friends.length > 0 && (
-            <span className="ml-1.5 text-muted-foreground">({friends.length})</span>
-          )}
-        </h2>
-      </div>
-
+    // Контейнер без рамки и фона: их даёт левая панель кабинета, а вложенная
+    // карточка внутри панели читалась бы как вторая рамка.
+    <div className="min-h-0 flex-1 overflow-y-auto p-2">
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -90,7 +86,7 @@ export function FriendsList({ friends, isLoading }: FriendsListProps) {
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
-                  onClick={() => router.push(`/chat?u=${encodeURIComponent(f.friendId)}`)}
+                  onClick={() => onMessage(f.friendId)}
                   className="text-muted-foreground transition-colors hover:text-foreground"
                   aria-label={`Написать ${f.friendUsername ?? f.friendName}`}
                 >

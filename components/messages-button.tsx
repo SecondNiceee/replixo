@@ -23,7 +23,7 @@ export function MessagesButton() {
     <Button
       variant="ghost"
       size="sm"
-      onClick={() => router.push('/chat')}
+      onClick={() => router.push('/profile')}
       className="relative text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
       aria-label={unread > 0 ? `Сообщения, ${unread} непрочитанных` : 'Сообщения'}
     >

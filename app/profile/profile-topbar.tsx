@@ -54,9 +54,13 @@ export function ProfileTopbar({
     <header className="topbar-surface flex shrink-0 items-center gap-2 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4">
       <a
         href="/"
-        className="mr-1 hidden text-sm font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70 sm:block"
+        className="mr-1 flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70"
       >
-        Replixo
+        <span
+          className="size-6 shrink-0 rounded-lg bg-gradient-to-br from-primary to-primary/70"
+          aria-hidden="true"
+        />
+        <span className="hidden sm:inline">Replixo</span>
       </a>
 
       <div className="ml-auto flex items-center gap-2">
@@ -70,7 +74,9 @@ export function ProfileTopbar({
             <UserPlus className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">Добавить в друзья</span>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          {/* app-light обязателен: DialogContent рендерится в портал у <body>,
+              вне <main class="app-light">, и без класса взял бы тёмный :root. */}
+          <DialogContent className="app-light bg-card sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Добавить в друзья</DialogTitle>
               <DialogDescription>
@@ -99,7 +105,7 @@ export function ProfileTopbar({
               </span>
             )}
           </DialogTrigger>
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className="app-light bg-card sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Заявки в друзья</DialogTitle>
               <DialogDescription>

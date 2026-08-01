@@ -54,7 +54,7 @@ function toastFor(n: StoredNotification): void {
       title: who,
       body: 'принял вашу заявку в друзья',
       // Сразу даём написать: диалог создастся по ?u=<id>, если его ещё нет.
-      href: `/chat?u=${encodeURIComponent(n.actorId)}`,
+      href: `/profile?u=${encodeURIComponent(n.actorId)}`,
       actionLabel: 'Написать',
       dedupeKey: `friend:${n.actorId}`,
     })
@@ -129,7 +129,7 @@ export function DmNotifier({ selfId }: { selfId: string }) {
         kind: 'message',
         title: message.senderName?.trim() || 'Новое сообщение',
         body,
-        href: conversationId ? `/chat?c=${encodeURIComponent(conversationId)}` : undefined,
+        href: conversationId ? `/profile?c=${encodeURIComponent(conversationId)}` : undefined,
         actionLabel: conversationId ? 'Открыть чат' : undefined,
         duration: 5000,
         // Поток сообщений из одного диалога сворачиваем в один тост, иначе три

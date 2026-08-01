@@ -75,7 +75,7 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-foreground/5"
         aria-label="Открыть настройки аккаунта"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-secondary to-secondary/40 text-sm font-semibold text-foreground ring-1 ring-foreground/10">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-sm font-semibold text-primary-foreground">
           {displayName.charAt(0).toUpperCase()}
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
@@ -85,14 +85,15 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         <Pencil className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-md">
+      {/* app-light обязателен: портал у <body> лежит вне <main class="app-light">. */}
+      <DialogContent className="app-light bg-card sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Аккаунт</DialogTitle>
           <DialogDescription>Ваш username виден друзьям и в заявках.</DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-secondary/20 p-3">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-secondary to-secondary/40 text-lg font-semibold text-foreground ring-1 ring-foreground/10">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-lg font-semibold text-primary-foreground">
             {displayName.charAt(0).toUpperCase()}
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
