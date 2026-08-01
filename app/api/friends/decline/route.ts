@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship } from '@/lib/db/schema'
-import { notifyFriendsChanged } from '@/lib/chat/notify-friends-changed'
+import { notifyFriendsChanged, originSocketIdFrom } from '@/lib/chat/notify-friends-changed'
 import { createFriendNotification, deleteFriendNotification } from '@/lib/chat/notifications'
 
 // POST /api/friends/decline — decline incoming request
@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     updated.requesterId,
     'declined',
     notificationId,
+    originSocketIdFrom(req.headers),
   )
 
   return NextResponse.json({ friendship: updated, notified })

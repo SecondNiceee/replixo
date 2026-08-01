@@ -246,7 +246,18 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
     // Причину выводим из фактического статуса: клиент её не присылает.
     // status === 'none' здесь означает удалённую строку, то есть
     // отмену заявки или удаление из друзей.
-    await broadcastFriendsChanged(nsp, userId, peerId, reasonFromStatus(link.status))
+    // Вкладку-инициатора здесь знаем точно — это соединение, приславшее
+    // событие. Свои списки она уже перечитала по ответу API, а вот ОСТАЛЬНЫЕ
+    // вкладки и устройства инициатора эхо получить должны, поэтому исключаем
+    // соединение, а не пользователя.
+    await broadcastFriendsChanged(
+      nsp,
+      userId,
+      peerId,
+      reasonFromStatus(link.status),
+      null,
+      socket.id,
+    )
 
     respond(cb, { ok: true, id: peerId, createdAt: Date.now() })
   })

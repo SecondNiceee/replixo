@@ -114,10 +114,8 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         return
       }
 
-      const { userId, peerId, reason, notificationId } = (req.body ?? {}) as Record<
-        string,
-        unknown
-      >
+      const { userId, peerId, reason, notificationId, originSocketId } = (req.body ??
+        {}) as Record<string, unknown>
       if (!isId(userId) || !isId(peerId) || userId === peerId) {
         res.status(400).json({ error: 'bad_payload' })
         return
@@ -131,6 +129,16 @@ export function registerInternalRoutes(app: Express, io: Server): void {
       // пришло — это должен быть валидный id, иначе payload битый.
       if (notificationId != null && !isId(notificationId)) {
         res.status(400).json({ error: 'bad_notification_id' })
+        return
+      }
+      // Сокет вкладки-инициатора: его исключаем из рассылки, чтобы эхо не
+      // прилетало туда, где списки уже перечитаны по ответу API. Поля может не
+      // быть вовсе (websocket не поднят, действие из другого клиента) — тогда
+      // событие уходит всем соединениям обоих участников. Битое значение
+      // отбиваем: подставлять его в except() и молча резать не ту вкладку хуже,
+      // чем вернуть 400.
+      if (originSocketId != null && !isId(originSocketId)) {
+        res.status(400).json({ error: 'bad_origin_socket_id' })
         return
       }
 
@@ -150,6 +158,7 @@ export function registerInternalRoutes(app: Express, io: Server): void {
         peerId,
         reason,
         typeof notificationId === 'string' ? notificationId : null,
+        typeof originSocketId === 'string' ? originSocketId : null,
       )
       res.json({ ok: true, status: link.status })
     })().catch((e: unknown) => {

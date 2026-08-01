@@ -39,6 +39,12 @@ export async function broadcastFriendsChanged(
   peerId: string,
   reason: FriendsChangeReason,
   notificationId?: string | null,
+  // Сокет вкладки, инициировавшей действие. Именно ЭТА вкладка уже перечитала
+  // свои списки по ответу API, поэтому эхо ей не нужно. Раньше эхо гасилось на
+  // клиенте по `userId === selfId`, но комната адресуется пользователю, а не
+  // соединению: остальные вкладки и устройства инициатора событие получали и
+  // молча выбрасывали, хотя списки в них так и оставались устаревшими.
+  originSocketId?: string | null,
 ): Promise<{ status: string; requesterId: string | null }> {
   // Имя инициатора нужно принимающей стороне для текста уведомления. Запрос
   // независим от статуса связи, поэтому идёт параллельно и не добавляет задержки.
@@ -53,13 +59,25 @@ export async function broadcastFriendsChanged(
   invalidateFriendsCache(peerId)
 
   for (const memberId of [userId, peerId]) {
-    nsp.to(userRoom(memberId)).emit('dm:friends:changed', {
+    // socket.io кладёт каждое соединение в комнату со своим id, поэтому except()
+    // вырезает ровно вкладку-инициатора, не затрагивая её остальные вкладки.
+    // Второй участник это исключение не заметит: чужого сокета в его комнате
+    // нет.
+    const target = originSocketId
+      ? nsp.to(userRoom(memberId)).except(originSocketId)
+      : nsp.to(userRoom(memberId))
+
+    target.emit('dm:friends:changed', {
       userId,
       peerId,
       reason,
       status: link.status,
       requesterId: link.requesterId,
       actorName,
+      // Дублируем в payload как страховку: не всякий адаптер (например,
+      // сторонний кластерный) обязан поддерживать except, а клиенту достаточно
+      // сравнить с собственным socket.id.
+      originSocketId: originSocketId ?? null,
     })
   }
 
