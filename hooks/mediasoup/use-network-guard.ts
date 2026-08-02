@@ -82,6 +82,17 @@ interface Sample {
   stalled: boolean
 }
 
+/**
+ * Kill switch for the whole degradation ladder (video shrink -> camera off ->
+ * screen off, plus the Opus bitrate drop).
+ *
+ * Turned off on purpose: the guard is still allowed to *measure* the link and
+ * report `networkQuality` to the UI, but it must not touch any producer or
+ * consumer. Flip back to `true` to re-enable the ladder — all of the logic is
+ * still here, just gated.
+ */
+const DEGRADATION_ENABLED: boolean = false
+
 const EMPTY_SAMPLE: Sample = {
   loss: 0,
   concealment: 0,
@@ -715,18 +726,19 @@ export function useNetworkGuard({
       if (cancelled) return
       const now = Date.now()
 
+      // DEGRADATION DISABLED — see the note above `useNetworkGuard`.
       // Manual low-data mode: nothing to measure, just hold video off.
-      if (videoModeRef.current === "audio-only") {
-        uplinkStageRef.current = 3
-        downlinkStageRef.current = 3
-        videoConsumersSuppressedRef.current = true
-        applyUplink(3)
-        applyDownlink(3)
-        setUplinkStage(3)
-        setDownlinkStage(3)
-        schedule()
-        return
-      }
+      // if (videoModeRef.current === "audio-only") {
+      //   uplinkStageRef.current = 3
+      //   downlinkStageRef.current = 3
+      //   videoConsumersSuppressedRef.current = true
+      //   applyUplink(3)
+      //   applyDownlink(3)
+      //   setUplinkStage(3)
+      //   setDownlinkStage(3)
+      //   schedule()
+      //   return
+      // }
 
       // A manual "keep my video" override is temporary. Left permanent (as it
       // was), a single camera-button press disabled the protection for the whole
@@ -771,13 +783,20 @@ export function useNetworkGuard({
       setUplinkQuality(uplinkClass)
       setDownlinkQuality(downlinkClass)
 
-      const worst: NetworkQuality =
-        uplinkClass === "bad" || downlinkClass === "bad"
-          ? "bad"
-          : uplinkClass === "weak" || downlinkClass === "weak"
-            ? "weak"
-            : "good"
-      void applyVoiceBitrate(worst)
+      // DEGRADATION DISABLED: the voice bitrate is no longer lowered on weak links.
+      // const worst: NetworkQuality =
+      //   uplinkClass === "bad" || downlinkClass === "bad"
+      //     ? "bad"
+      //     : uplinkClass === "weak" || downlinkClass === "weak"
+      //       ? "weak"
+      //       : "good"
+      // void applyVoiceBitrate(worst)
+
+      // Measurement only: the ladder below is gated off.
+      if (!DEGRADATION_ENABLED) {
+        schedule()
+        return
+      }
 
       // ---- uplink decision -------------------------------------------------
       if (mode === "force-video") {
@@ -933,6 +952,8 @@ export function useNetworkGuard({
     (mode: VideoMode) => {
       setVideoModeState(mode)
       videoModeRef.current = mode
+      // Degradation is disabled, so there is no stage to force or undo.
+      if (!DEGRADATION_ENABLED) return
       // Act immediately instead of waiting for the next sample — a button that
       // takes two seconds to do anything feels broken.
       if (mode === "audio-only") {
