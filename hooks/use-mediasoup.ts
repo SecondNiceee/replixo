@@ -157,6 +157,31 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   })
 
   // ---------------------------------------------------------------------------
+  // Restart ICE only when the transport actually needs it.
+  //
+  // The recovery hooks below fire on `visibilitychange`, `pageshow` and `online`
+  // — events that occur constantly during ordinary use (alt-tab, minimising the
+  // window, switching tabs) while the WebRTC transport never went anywhere. An
+  // unconditional ICE restart on a healthy, `connected` transport is pure
+  // disruption: it swaps in fresh ICE credentials, forces a new
+  // candidate/DTLS handshake and leaves the transport in `connecting` for a
+  // moment, during which frames stop flowing and the follow-up recovery passes
+  // see a "broken" session and start tearing producers down.
+  //
+  // A genuine outage always moves the transport out of `connected`
+  // (`disconnected`/`failed`), and that case still restarts ICE — plus the
+  // `connectionstatechange` watcher in use-transports triggers it on its own.
+  // ---------------------------------------------------------------------------
+  const restartIceIfNeeded = useCallback((transport: Transport | null, context: string) => {
+    if (!transport || transport.closed) return
+    if (transport.connectionState === "connected") {
+      console.info(`[media] ICE restart skipped (transport healthy) transport=${transport.id} context=${context}`)
+      return
+    }
+    transports.restartIceForTransport(transport)
+  }, [transports])
+
+  // ---------------------------------------------------------------------------
   // Connection recovery (mobile / tab switch / VPN)
   // ---------------------------------------------------------------------------
   const recoverConnection = useCallback(() => {
@@ -185,12 +210,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         void rebuildConnectionRef.current(`manual-probe-rejected:${error}`)
         return
       }
-      transports.restartIceForTransport(sendTransportRef.current)
-      transports.restartIceForTransport(recvTransportRef.current)
+      restartIceIfNeeded(sendTransportRef.current, "manual-probe")
+      restartIceIfNeeded(recvTransportRef.current, "manual-probe")
       void mediaControls.recoverCamera()
       window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
     })
-  }, [roomId, transports, mediaControls])
+  }, [roomId, restartIceIfNeeded, mediaControls])
 
   // ---------------------------------------------------------------------------
   // Leave
@@ -562,8 +587,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
         console.info(`[socket] Rejoin probe room=${roomId} peer=${peerIdRef.current} socket=${socket.id} result=${error ?? "accepted"}`)
         if (!error) {
-          transports.restartIceForTransport(sendTransportRef.current)
-          transports.restartIceForTransport(recvTransportRef.current)
+          restartIceIfNeeded(sendTransportRef.current, "rejoin-probe")
+          restartIceIfNeeded(recvTransportRef.current, "rejoin-probe")
           // The camera capture track often dies during the outage even though
           // the transport itself is reusable. Re-check and republish it.
           void mediaControls.recoverCamera()

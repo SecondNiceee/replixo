@@ -303,9 +303,18 @@ export function useMediaControls({
     const trackDead = !existingTrack || existingTrack.readyState === "ended"
     const producerDead = !producer || producer.closed
 
-    // Nothing to do while the track is live and the producer is still attached
-    // to the current send transport.
-    if (!trackDead && !producerDead && producer.transport === sendTransportRef.current) return false
+    // Nothing to do while the track is live and the producer is still open.
+    //
+    // `producer.closed` is the ONLY reliable staleness signal here: mediasoup's
+    // Producer has no `.transport` back-reference, so the old
+    // `producer.transport === sendTransportRef.current` check compared
+    // `undefined` against a Transport and was therefore *always* false. That
+    // made this early return dead code, so every tab restore / visibility
+    // change tore down a perfectly healthy camera producer and republished it —
+    // which is exactly why the camera went black after switching away from the
+    // tab and back. A transport that dies calls `transportClosed()` on all of
+    // its producers, so `closed` already covers "my transport is gone".
+    if (!trackDead && !producerDead) return false
     // The user intentionally has no camera running — leave it that way.
     if (!existingTrack && !producer) return false
 
@@ -406,6 +415,14 @@ export function useMediaControls({
           videoGoogleMinBitrate: 600,
         },
         appData: { source: "screen" },
+        // The capture track's lifetime is owned by `stopScreenShare`, never by a
+        // producer. mediasoup defaults to `stopTracks: true`, which means BOTH
+        // `producer.close()` and the implicit `transportClosed()` during a
+        // transport rebuild call `track.stop()` — that ends the getDisplayMedia
+        // capture, fires `onended`, and kills the whole share. Opting out lets a
+        // recovery/rebuild republish the very same track without re-prompting
+        // the user for the screen picker.
+        stopTracks: false,
       })
       screenVideoProducerRef.current = producer
       try {
@@ -429,6 +446,9 @@ export function useMediaControls({
           opusMaxAverageBitrate: 192_000,
         },
         appData: { source: "screen" },
+        // Same reasoning as the video producer above: `stopScreenShare` owns the
+        // track, so a producer close must not stop system-audio capture.
+        stopTracks: false,
       })
     }
   }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef])
@@ -473,16 +493,37 @@ export function useMediaControls({
       const transport = await waitForSendTransport()
       if (!transport || transport.closed) return false
 
-      const currentVideo = screenVideoProducerRef.current
-      const currentAudio = screenAudioProducerRef.current
-      if (currentVideo && (currentVideo.closed || currentVideo.transport !== transport)) {
-        currentVideo.close()
-        screenVideoProducerRef.current = null
+      // Only a genuinely dead producer may be dropped here.
+      //
+      // The previous condition included `producer.transport !== transport`, but
+      // mediasoup's Producer exposes no `.transport`, so it read
+      // `undefined !== transport` → always true. Consequences on every single
+      // recovery pass (which runs 1.5 s after any tab restore):
+      //   1. `producer.close()` defaults to `stopTracks: true`, so closing the
+      //      still-healthy video producer STOPPED the getDisplayMedia capture
+      //      track. That fires the track's `onended` → `stopScreenShare()`, so
+      //      the share collapsed ~2 s after coming back to the tab.
+      //   2. The close was local-only — no `closeProducer` was sent — so every
+      //      viewer kept consuming a producer the server still believed in,
+      //      leaving a permanently frozen/black screen tile.
+      // A live producer needs nothing: ICE restarts reuse the same transport and
+      // the same RTP sender, so the existing producer keeps working untouched.
+      const dropDeadProducer = (
+        producer: Producer | null,
+        clear: () => void,
+      ) => {
+        if (!producer || !producer.closed) return
+        // The server may still be advertising this producer to other peers.
+        // Tell it to forget it so viewers drop the zombie consumer instead of
+        // waiting forever on a stream that will never send another packet.
+        socketRef.current?.emit("closeProducer", {
+          roomId, peerId: peerIdRef.current, producerId: producer.id,
+        })
+        clear()
       }
-      if (currentAudio && (currentAudio.closed || currentAudio.transport !== transport)) {
-        currentAudio.close()
-        screenAudioProducerRef.current = null
-      }
+
+      dropDeadProducer(screenVideoProducerRef.current, () => { screenVideoProducerRef.current = null })
+      dropDeadProducer(screenAudioProducerRef.current, () => { screenAudioProducerRef.current = null })
 
       await publishCapturedScreen(transport, stream)
       const recovered = !!screenVideoProducerRef.current && !screenVideoProducerRef.current.closed
@@ -495,7 +536,7 @@ export function useMediaControls({
     } finally {
       screenRecoveryInFlightRef.current = false
     }
-  }, [roomId, peerIdRef, screenStreamRef, screenVideoProducerRef, screenAudioProducerRef,
+  }, [roomId, peerIdRef, socketRef, screenStreamRef, screenVideoProducerRef, screenAudioProducerRef,
       publishCapturedScreen, dispatch, waitForSendTransport, stopScreenShare])
 
   const startScreenShare = useCallback(async (options?: { silent?: boolean }) => {

@@ -1,12 +1,22 @@
 // mediasoup-client is a CJS bundle with internal circular dependencies that
-// cause a TDZ crash when Turbopack tries to statically analyse it.
-// Use local shim types; load the real module lazily via import().
+// cause a TDZ crash when Turbopack tries to statically analyse it, so the real
+// module is only ever loaded lazily via import() at runtime.
+//
+// `import type` is erased at compile time and emits no require()/import at all,
+// so pulling the REAL declarations in here is free — the bundler never sees it.
+// This matters: `Producer` used to be `any`, which silently allowed
+// `producer.transport` (a property mediasoup-client's Producer does not have —
+// only Transport owns its producers). Every such comparison evaluated
+// `undefined === transport` → false, so recovery code that meant "is this
+// producer still attached to the current transport?" always concluded "no" and
+// tore down perfectly healthy camera/screen producers on every tab return.
+import type { Producer as MediasoupProducer } from "mediasoup-client/types"
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type DeviceType = any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Transport = any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type Producer = any
+export type Producer = MediasoupProducer
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Consumer = any
 

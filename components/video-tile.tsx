@@ -92,7 +92,6 @@ export function VideoTile({
   useEffect(() => {
     const video = videoRef.current
     if (!video || !stream) return
-    video.srcObject = stream
     // Electron/Chromium sometimes leaves a freshly-attached remote stream
     // paused (the `autoPlay` attribute doesn't always fire when srcObject is
     // set imperatively), which shows up as a black tile even though frames are
@@ -110,11 +109,43 @@ export function VideoTile({
         })
       }
     }
+
+    // Re-point the element at the stream and restart playback.
+    //
+    // The local tile is handed ONE long-lived MediaStream whose tracks are
+    // swapped in place (camera recovery removes the dead capture track and adds
+    // a fresh one). Because the MediaStream identity never changes, this effect
+    // does not re-run and Chromium keeps rendering the element's original,
+    // now-ended track — a permanently black self-view even though a live track
+    // is sitting right there in `stream`. Re-assigning `srcObject` is what
+    // forces the element to pick up the current track set.
+    const attach = () => {
+      if (cancelled) return
+      // Assigning the same object is a no-op in some engines, so detach first.
+      if (video.srcObject === stream) video.srcObject = null
+      video.srcObject = stream
+      tries = 0
+      play()
+    }
+
+    video.srcObject = stream
     play()
+
     video.addEventListener("loadedmetadata", play)
+    // `emptied` fires when the element loses its media — reattaching recovers it
+    // instead of leaving a black frame behind.
+    video.addEventListener("emptied", attach)
+    // Track churn on the same MediaStream (camera recovery, screen-audio
+    // replacement, a producer republishing after a reconnect).
+    stream.addEventListener("addtrack", attach)
+    stream.addEventListener("removetrack", attach)
+
     return () => {
       cancelled = true
       video.removeEventListener("loadedmetadata", play)
+      video.removeEventListener("emptied", attach)
+      stream.removeEventListener("addtrack", attach)
+      stream.removeEventListener("removetrack", attach)
     }
   }, [stream])
 
