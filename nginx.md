@@ -12,6 +12,22 @@ Nginx выступает reverse proxy: принимает HTTPS на 443, от�
 ## Конфиг
 
 ```nginx
+# ВАЖНО: Connection нельзя хардкодить в 'upgrade'.
+# Раньше в location / стояло `proxy_set_header Connection 'upgrade';` для ВСЕХ
+# запросов, включая обычные HTTP-запросы страниц (где $http_upgrade пустой).
+# Node получал `Connection: upgrade` без `Upgrade`, из-за чего keep-alive
+# соединение к upstream ломалось и streaming-ответ Next.js обрывался посередине:
+# chunked-ответ приходил без терминирующего чанка (ERR_INCOMPLETE_CHUNKED_ENCODING).
+# Браузер такой обрыв прощает (рисует частичный HTML), а Electron показывает
+# "This page couldn't load / A server error occurred".
+#
+# Правильный способ — map: 'upgrade' только когда клиент реально просит upgrade,
+# иначе 'close'. Блок map ставится на уровне http {} (вне server {}).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     server_name replixo.ru www.replixo.ru;
@@ -34,12 +50,21 @@ server {
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Connection $connection_upgrade;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+
+        # Next.js стримит HTML и RSC-пейлоад. С буферизацией nginx копит ответ в
+        # 4/8 КБ буферах и при переполнении уходит в temp-файл — на медленном
+        # диске это даёт зависшие "полуответы". Отключаем буферизацию и даём
+        # запас по таймауту, чтобы стрим доходил до конца.
+        proxy_buffering    off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     # ── Mediasoup / Socket.io (WebSocket) ─────────────────────────────
@@ -47,7 +72,7 @@ server {
         proxy_pass         http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade $http_upgrade;
-        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Connection $connection_upgrade;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;

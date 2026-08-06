@@ -10,6 +10,12 @@ const {
   log,
 } = require("./diagnostics")
 
+// Имя приложения задаём ДО initDiagnostics(): app.getPath("userData") строится
+// из app.getName(), а тот берётся из package.json ("productName" || "name").
+// Без этого userData был %APPDATA%\my-project, и папки %APPDATA%\Replixo,
+// описанной в диагностике, на машине пользователя просто не существовало.
+app.setName("Replixo")
+
 // Диагностика включается ДО app.whenReady() и до создания дочерних процессов,
 // иначе их краши не попадут в minidump'ы.
 initDiagnostics()
@@ -18,6 +24,96 @@ initDiagnostics()
 const APP_URL = process.env.APP_URL || "https://replixo.ru"
 
 let mainWindow = null
+
+// ---------------------------------------------------------------------------
+// Загрузка APP_URL с повторными попытками.
+//
+// Зачем: загрузка главного фрейма может провалиться по причинам, никак не
+// связанным с самим приложением — сеть ещё не поднялась после логина в Windows,
+// VPN переключается, или сервер оборвал streaming-ответ Next.js на середине
+// (ERR_INCOMPLETE_CHUNKED_ENCODING / ERR_EMPTY_RESPONSE). Браузер такой обрыв
+// прощает и рисует частичный HTML, а Chromium внутри Electron считает
+// навигацию проваленной и показывает свою заглушку
+// "This page couldn't load — A server error occurred", из которой пользователь
+// выйти не может: кнопки Reload там нет, F5 на chrome-error:// не работает.
+//
+// Поэтому: перехватываем did-fail-load, автоматически повторяем загрузку с
+// нарастающей задержкой, и только если попытки закончились — показываем СВОЙ
+// экран с понятным текстом, кодом ошибки и рабочей кнопкой «Повторить».
+// ---------------------------------------------------------------------------
+const LOAD_RETRY_DELAYS_MS = [500, 1500, 3000, 5000]
+let loadAttempt = 0
+
+// -3 (ERR_ABORTED) — не ошибка: так выглядит навигация, отменённая новой
+// навигацией или редиректом. Повторять её нельзя, иначе получим цикл.
+const IGNORED_LOAD_ERRORS = new Set([-3])
+
+function renderLoadErrorPage(code, description) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  const html = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<style>
+  :root { color-scheme: dark }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0a0a0a; color: #fafafa; -webkit-app-region: drag;
+    font: 400 14px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 26rem; padding: 2rem; text-align: center; -webkit-app-region: no-drag }
+  h1 { margin: 0 0 .5rem; font-size: 1.25rem; font-weight: 600 }
+  p { margin: 0 0 1.5rem; color: #a1a1a1 }
+  code { font-family: ui-monospace, monospace; font-size: .8125rem; color: #737373 }
+  button {
+    font: inherit; font-weight: 500; cursor: pointer; padding: .625rem 1.25rem;
+    border: 0; border-radius: .625rem; background: #fafafa; color: #0a0a0a;
+  }
+  button:hover { opacity: .9 }
+</style></head>
+<body><main>
+  <h1>Не удалось подключиться к Replixo</h1>
+  <p>Сервер не ответил или оборвал соединение. Проверьте интернет и попробуйте снова.</p>
+  <button onclick="location.replace(${JSON.stringify(APP_URL)})">Повторить</button>
+  <p style="margin:1.5rem 0 0"><code>${code} ${String(description || "").replace(/</g, "&lt;")}</code></p>
+</main></body></html>`
+
+  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+}
+
+function loadAppUrl() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.loadURL(APP_URL).catch((error) => {
+    // loadURL реджектится тем же кодом, что придёт в did-fail-load, поэтому
+    // саму повторную попытку планирует обработчик события — здесь только лог.
+    log.warn("load", "loadURL rejected", error?.message || error)
+  })
+}
+
+function setupLoadRetry(win) {
+  win.webContents.on("did-fail-load", (_e, code, description, url, isMainFrame) => {
+    if (!isMainFrame || IGNORED_LOAD_ERRORS.has(code)) return
+    // Ошибки загрузки нашей же data:-заглушки повторять бессмысленно.
+    if (url && url.startsWith("data:")) return
+
+    const delay = LOAD_RETRY_DELAYS_MS[loadAttempt]
+    if (delay === undefined) {
+      log.error("load", "giving up after retries", { code, description, url })
+      renderLoadErrorPage(code, description)
+      return
+    }
+
+    loadAttempt += 1
+    log.warn("load", "retrying", { attempt: loadAttempt, delay, code, description })
+    setTimeout(loadAppUrl, delay)
+  })
+
+  // Успешная загрузка сбрасывает счётчик: следующий сбой снова получит все
+  // попытки, иначе после одного обрыва за сессию приложение теряло защиту.
+  win.webContents.on("did-finish-load", () => {
+    loadAttempt = 0
+  })
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -50,7 +146,20 @@ function createWindow() {
     mainWindow.show()
   })
 
-  mainWindow.loadURL(APP_URL)
+  // Страховка: ready-to-show ждёт первую отрисовку, а если сервер не отвечает,
+  // отрисовки может не быть вовсе — окно никогда не покажется, и приложение
+  // выглядит как «запустилось и ничего не произошло». Через 10 секунд
+  // показываем окно принудительно, чтобы пользователь увидел хотя бы экран
+  // ошибки с кнопкой «Повторить».
+  const forceShowTimer = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      log.warn("load", "forcing window show: no first paint within 10s")
+      mainWindow.show()
+    }
+  }, 10_000)
+
+  setupLoadRetry(mainWindow)
+  loadAppUrl()
 
   // Внешние ссылки (mailto, другие домены) открываем в системном браузере
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -72,6 +181,7 @@ function createWindow() {
   })
 
   mainWindow.on("closed", () => {
+    clearTimeout(forceShowTimer)
     mainWindow = null
   })
 }
