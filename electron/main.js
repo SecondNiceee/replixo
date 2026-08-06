@@ -70,8 +70,20 @@ function renderLoadErrorPage(code, description) {
     border: 0; border-radius: .625rem; background: #fafafa; color: #0a0a0a;
   }
   button:hover { opacity: .9 }
+  /* Окно безрамочное (frame: false), а кастомный титлбар живёт в renderer
+     основного приложения — на этой странице его нет. Без своей кнопки закрытия
+     пользователь остался бы в окне, которое нечем закрыть. */
+  #close {
+    position: fixed; top: 0; right: 0; width: 46px; height: 34px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; color: #a1a1a1; border-radius: 0; font-size: 15px;
+    -webkit-app-region: no-drag;
+  }
+  #close:hover { background: #e81123; color: #fff; opacity: 1 }
 </style></head>
-<body><main>
+<body>
+  <button id="close" onclick="window.close()" aria-label="Закрыть" title="Закрыть">&#10005;</button>
+  <main>
   <h1>Не удалось подключиться к Replixo</h1>
   <p>Сервер не ответил или оборвал соединение. Проверьте интернет и попробуйте снова.</p>
   <button onclick="location.replace(${JSON.stringify(APP_URL)})">Повторить</button>
