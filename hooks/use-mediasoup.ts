@@ -158,11 +158,76 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
   // ---------------------------------------------------------------------------
   // Connection recovery (mobile / tab switch / VPN)
+  //
+  // IMPORTANT: recovery is *evidence-based*. Simply switching to another browser
+  // tab and coming back does not break anything on desktop — the socket stays
+  // connected, ICE stays connected and the capture tracks stay live. The old
+  // code nonetheless ran the full heavy repair on every `visibilitychange`
+  // (ICE restart on BOTH transports + camera republish + screen republish),
+  // which is exactly what made the camera go black and killed a running screen
+  // share a couple of seconds after returning to the tab.
+  //
+  // So we first look at what is actually broken and only repair that. When the
+  // session is healthy we do nothing at all.
   // ---------------------------------------------------------------------------
-  const recoverConnection = useCallback(() => {
+  const isTransportBroken = useCallback((transport: Transport | null) => {
+    if (!transport) return true
+    if (transport.closed) return true
+    const state = transport.connectionState
+    return state === "disconnected" || state === "failed" || state === "closed"
+  }, [])
+
+  const assessSession = useCallback(() => {
+    const sendTransport = sendTransportRef.current
+    const sendBroken = isTransportBroken(sendTransport)
+    const recvBroken = isTransportBroken(recvTransportRef.current)
+
+    // Camera: only "broken" when a camera is supposed to be running and either
+    // the capture track died or its producer no longer belongs to the current
+    // send transport.
+    const camTrack = localStreamRef.current?.getVideoTracks()[0] ?? null
+    const camProducer = videoProducerRef.current
+    const camExpected = !!camTrack || !!camProducer
+    const camBroken = camExpected && (
+      !camTrack ||
+      camTrack.readyState === "ended" ||
+      !camProducer ||
+      camProducer.closed ||
+      (!!sendTransport && camProducer.transport !== sendTransport)
+    )
+
+    // Screen share: same idea. A live capture track with a live producer on the
+    // current transport must never be touched.
+    const screenTrack = screenStreamRef.current?.getVideoTracks()[0] ?? null
+    const screenProducer = screenVideoProducerRef.current
+    const screenExpected = !!screenStreamRef.current || !!screenProducer
+    const screenBroken = screenExpected && (
+      !screenTrack ||
+      screenTrack.readyState === "ended" ||
+      !screenProducer ||
+      screenProducer.closed ||
+      (!!sendTransport && screenProducer.transport !== sendTransport)
+    )
+
+    return {
+      sendBroken,
+      recvBroken,
+      camBroken,
+      screenBroken,
+      healthy: !sendBroken && !recvBroken && !camBroken && !screenBroken,
+    }
+  }, [isTransportBroken])
+
+  const recoverConnection = useCallback((options?: { force?: boolean }) => {
     const socket = socketRef.current
     if (!socket || !hasJoinedRef.current) return
     if (!socket.connected) { socket.connect(); return }
+
+    const assessment = assessSession()
+    // Nothing is wrong — a plain tab switch, window focus or bfcache restore.
+    // Touching the transports here is strictly harmful.
+    if (assessment.healthy && !options?.force) return
+
     const now = Date.now()
     if (now - lastRecoverAtRef.current < 5000 || recoveryInFlightRef.current) return
     lastRecoverAtRef.current = now
@@ -185,12 +250,17 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         void rebuildConnectionRef.current(`manual-probe-rejected:${error}`)
         return
       }
-      transports.restartIceForTransport(sendTransportRef.current)
-      transports.restartIceForTransport(recvTransportRef.current)
-      void mediaControls.recoverCamera()
-      window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+      // Re-assess: the probe round-trip takes a moment and things may have
+      // healed on their own (ICE often reconnects by itself).
+      const current = assessSession()
+      if (current.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
+      if (current.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
+      if (current.camBroken) void mediaControls.recoverCamera()
+      if (current.screenBroken) {
+        window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+      }
     })
-  }, [roomId, transports, mediaControls])
+  }, [roomId, transports, mediaControls, assessSession])
 
   // ---------------------------------------------------------------------------
   // Leave
@@ -562,12 +632,19 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
         console.info(`[socket] Rejoin probe room=${roomId} peer=${peerIdRef.current} socket=${socket.id} result=${error ?? "accepted"}`)
         if (!error) {
-          transports.restartIceForTransport(sendTransportRef.current)
-          transports.restartIceForTransport(recvTransportRef.current)
+          // A socket reconnect does not necessarily mean the media path broke
+          // (a short WebSocket blip leaves ICE and the capture tracks intact).
+          // Only repair what is actually damaged — a blanket ICE restart here
+          // freezes a perfectly healthy camera / screen share.
+          const assessment = assessSession()
+          if (assessment.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
+          if (assessment.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
           // The camera capture track often dies during the outage even though
           // the transport itself is reusable. Re-check and republish it.
-          void mediaControls.recoverCamera()
-          window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+          if (assessment.camBroken) void mediaControls.recoverCamera()
+          if (assessment.screenBroken) {
+            window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
+          }
         } else {
           hasJoinedRef.current = false
           void rebuildMediaSession(`rejoin-rejected:${error}`)

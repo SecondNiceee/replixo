@@ -112,9 +112,25 @@ export function VideoTile({
     }
     play()
     video.addEventListener("loadedmetadata", play)
+    video.addEventListener("pause", play)
+    // Returning to the tab after it was in the background is the other case
+    // where Chromium/Electron can leave the element paused (or detached from the
+    // stream) — which renders as a black tile even though the track is live and
+    // frames are flowing. Re-attach + replay instead of tearing down media.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return
+      if (video.srcObject !== stream) video.srcObject = stream
+      tries = 0
+      play()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
     return () => {
       cancelled = true
       video.removeEventListener("loadedmetadata", play)
+      video.removeEventListener("pause", play)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
     }
   }, [stream])
 
