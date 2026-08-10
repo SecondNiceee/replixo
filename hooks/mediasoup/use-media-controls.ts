@@ -464,8 +464,18 @@ export function useMediaControls({
     const stream = screenStreamRef.current
     const videoTrack = stream?.getVideoTracks()[0]
     if (!stream || !videoTrack || videoTrack.readyState !== "live") {
+      // The capture itself is genuinely gone (user pressed "Stop sharing", the
+      // window closed). Only then do we tear the share down.
       stopScreenShare({ silent: true })
       return false
+    }
+
+    // Already healthy: live capture track published through a producer that
+    // belongs to the current send transport. Republishing here would interrupt
+    // an ongoing presentation for every viewer, so bail out untouched.
+    const liveProducer = screenVideoProducerRef.current
+    if (liveProducer && !liveProducer.closed && liveProducer.transport === sendTransportRef.current) {
+      return true
     }
 
     screenRecoveryInFlightRef.current = true
@@ -496,7 +506,7 @@ export function useMediaControls({
       screenRecoveryInFlightRef.current = false
     }
   }, [roomId, peerIdRef, screenStreamRef, screenVideoProducerRef, screenAudioProducerRef,
-      publishCapturedScreen, dispatch, waitForSendTransport, stopScreenShare])
+      sendTransportRef, publishCapturedScreen, dispatch, waitForSendTransport, stopScreenShare])
 
   const startScreenShare = useCallback(async (options?: { silent?: boolean }) => {
     const sendTransport = sendTransportRef.current
