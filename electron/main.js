@@ -16,6 +16,25 @@ const {
 // описанной в диагностике, на машине пользователя просто не существовало.
 app.setName("Replixo")
 
+// ---------------------------------------------------------------------------
+// Явный лимит heap + снапшот у предела — чтобы отличать OOM от нативного краша.
+//
+// Без --max-old-space-size V8 берёт лимит из объёма ОЗУ машины, поэтому «упало
+// по памяти» выглядит по-разному у разных пользователей, а в логах остаётся
+// только необъяснимое исчезновение процесса — ровно как при нативном краше.
+// С фиксированным лимитом и снапшотом у предела OOM однозначно опознаётся:
+// либо в логах есть предупреждение heap-monitor и .heapsnapshot, либо это
+// нативный краш и надо смотреть minidump.
+//
+// Switch влияет на renderer и дочерние V8-изолаты; собственный heap main-процесса
+// отслеживает heap-monitor в diagnostics.js.
+// ---------------------------------------------------------------------------
+const JS_HEAP_LIMIT_MB = Number(process.env.REPLIXO_MAX_OLD_SPACE_MB) || 1024
+app.commandLine.appendSwitch(
+  "js-flags",
+  `--max-old-space-size=${JS_HEAP_LIMIT_MB} --heap-snapshot-near-heap-limit=1`,
+)
+
 // Диагностика включается ДО app.whenReady() и до создания дочерних процессов,
 // иначе их краши не попадут в minidump'ы.
 initDiagnostics()
@@ -297,7 +316,7 @@ function setupDesktopCapturer() {
 
 // ---------------------------------------------------------------------------
 // Управление безрамочным окном из renderer (кастомный титлбар).
-// Так как frame: false убирает ��ативные кнопки, их заменяет DesktopTitlebar,
+// Так как frame: false убирает ����ативные кнопки, их заменяет DesktopTitlebar,
 // который шлёт эти IPC-команды.
 // ---------------------------------------------------------------------------
 function setupWindowControls() {
@@ -501,16 +520,54 @@ const AUDIO_FRAME_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT
 const AUDIO_IPC_FRAMES = 960 // 20 ms at 48 kHz
 const AUDIO_IPC_BYTES = AUDIO_IPC_FRAMES * AUDIO_FRAME_BYTES
 const AUDIO_IPC_INTERVAL_MS = 20
-const AUDIO_MAX_QUEUE_BYTES = 48000 * AUDIO_FRAME_BYTES / 2 // 500 ms
-// The bounded queue holds 500 ms, so 25 packets of 20 ms drain it completely.
-const AUDIO_MAX_PACKETS_PER_TICK = AUDIO_MAX_QUEUE_BYTES / AUDIO_IPC_BYTES
+const AUDIO_BYTES_PER_SEC = 48000 * AUDIO_FRAME_BYTES // 384 КБ/с
+
+// Очередь в main держит 2 с вместо 500 мс. Причина: буфер в main — это ОДИН
+// массив чанков с известным размером, который мы контролируем; просадка
+// renderer'а или таймера на 300-800 мс (энкодер + GPU под демонстрацией) при
+// лимите 500 мс приводила к выбросу живого звука и щелчкам. 2 с дают запас на
+// такие просадки, при этом это всего ~768 КБ — на порядок дешевле, чем прежняя
+// неограниченная очередь внутри Chromium IPC.
+const AUDIO_QUEUE_MS = 2000
+const AUDIO_MAX_QUEUE_BYTES = (AUDIO_BYTES_PER_SEC * AUDIO_QUEUE_MS) / 1000
+
+// Сколько пакетов насос отдаёт за один тик, догоняя отставание. Не зависит от
+// размера очереди: 25 пакетов = 500 мс звука — этого хватает, чтобы выбраться из
+// любой реальной просадки таймера, и это не превращает один тик в лавину IPC.
+const AUDIO_MAX_PACKETS_PER_TICK = 25
+
+// ---------------------------------------------------------------------------
+// Backpressure на IPC.
+//
+// КРИТИЧНО: webContents.send() — это fire-and-forget. Если renderer занят
+// (GC, перерисовка, энкодер), пакеты не исчезают — они копятся в НЕОГРАНИЧЕННОЙ
+// внутренней очереди Chromium IPC, о которой мы ничего не знаем и которую не
+// можем ни измерить, ни обрезать. Наша аккуратно ограниченная очередь в main при
+// этом выглядит пустой, а память растёт в чужом буфере, пока процесс не умрёт.
+//
+// Поэтому renderer подтверждает приём каждого пакета (audio-capture-ack с его
+// номером), а main перестаёт слать, пока неподтверждённых больше
+// AUDIO_MAX_IN_FLIGHT_PACKETS. Звук в это время остаётся в НАШЕЙ очереди, где
+// его при переполнении можно осознанно подрезать с начала.
+//
+// AUDIO_ACK_TIMEOUT_MS — предохранитель: если renderer вообще не отвечает
+// (старый preload без ack, ack потерялся при перезагрузке страницы), окно
+// открывается заново, иначе звук замолчал бы навсегда.
+// ---------------------------------------------------------------------------
+const AUDIO_MAX_IN_FLIGHT_PACKETS = 10 // 200 мс неподтверждённого звука
+const AUDIO_ACK_TIMEOUT_MS = 1000
+
+let audioSentSeq = 0
+let audioAckedSeq = 0
+let lastAudioAckAt = 0
+let lastBackpressureLogAt = 0
 
 // ---------------------------------------------------------------------------
 // PCM queue as a list of chunks instead of one contiguous Buffer.
 //
 // КРИТИЧНО: раньше здесь был `Buffer.concat([queue, chunk])` на каждый чанк
 // stdout. При 48 кГц/стерео/float32 это ~384 КБ/с, и каждый чанк вызывал новую
-// аллокацию плюс копирование ВСЕЙ очереди (до 500 КБ) — десятки раз в секунду.
+// аллокацию плюс копир��вание ВСЕЙ очереди (до 500 КБ) — десятки раз в секунду.
 // Это фрагментировало heap main-процесса и держало GC под постоянной нагрузкой,
 // пока Windows не убивала audio/video-процессы (exitCode 0x40010004).
 //
@@ -585,8 +642,15 @@ function clearAudioCaptureBuffer() {
   audioQueueReset()
 }
 
+function audioResetFlowControl() {
+  audioSentSeq = 0
+  audioAckedSeq = 0
+  lastAudioAckAt = Date.now()
+}
+
 function startAudioCapturePump() {
   clearAudioCaptureBuffer()
+  audioResetFlowControl()
   audioCaptureTimer = setInterval(() => {
     // No consumer: drop audio instead of letting the queue grow behind a
     // destroyed window.
@@ -602,9 +666,34 @@ function startAudioCapturePump() {
     // "PCM queue overflow" из 96 534. Теперь насос догоняет после каждой просадки.
     let sent = 0
     while (audioQueuedBytes >= AUDIO_IPC_BYTES && sent < AUDIO_MAX_PACKETS_PER_TICK) {
+      const inFlight = audioSentSeq - audioAckedSeq
+
+      if (inFlight >= AUDIO_MAX_IN_FLIGHT_PACKETS) {
+        const silentFor = Date.now() - lastAudioAckAt
+
+        // Renderer молчит слишком долго — считаем подтверждения потерянными и
+        // открываем окно заново, иначе звук больше никогда не поедет.
+        if (silentFor > AUDIO_ACK_TIMEOUT_MS) {
+          log.warn("loopback", "ack timeout; reopening IPC window", { inFlight, silentFor })
+          audioResetFlowControl()
+          continue
+        }
+
+        const now = Date.now()
+        if (now - lastBackpressureLogAt > 1000) {
+          lastBackpressureLogAt = now
+          log.warn("loopback", "IPC backpressure; holding PCM in main queue", {
+            inFlight,
+            queuedMs: Math.round((audioQueuedBytes / AUDIO_BYTES_PER_SEC) * 1000),
+          })
+        }
+        break
+      }
+
       const packet = audioQueueTake(AUDIO_IPC_BYTES)
       if (!packet) break
-      mainWindow.webContents.send("audio-capture-data", packet)
+      audioSentSeq++
+      mainWindow.webContents.send("audio-capture-data", packet, audioSentSeq)
       sent++
     }
   }, AUDIO_IPC_INTERVAL_MS)
@@ -655,6 +744,15 @@ function stopAudioCapture() {
 
 function setupAudioCapture() {
   ipcMain.handle("get-audio-capture-support", () => getAudioCaptureSupport())
+
+  // Подтверждение приёма от renderer'а. Номера монотонные, поэтому достаточно
+  // хранить максимальный: пропущенный ack «догоняется» следующим.
+  ipcMain.on("audio-capture-ack", (_e, seq) => {
+    const acked = Number(seq)
+    if (!Number.isFinite(acked)) return
+    if (acked > audioAckedSeq) audioAckedSeq = Math.min(acked, audioSentSeq)
+    lastAudioAckAt = Date.now()
+  })
 
   ipcMain.handle("start-audio-capture", () => {
     const support = getAudioCaptureSupport()
@@ -710,7 +808,11 @@ function setupAudioCapture() {
         const now = Date.now()
         if (now - lastOverflowLogAt > 1000) {
           lastOverflowLogAt = now
-          log.warn("loopback", "PCM queue overflow; dropped oldest audio", { droppedBytes: alignedDrop })
+          log.warn("loopback", "PCM queue overflow; dropped oldest audio", {
+            droppedBytes: alignedDrop,
+            queueMs: AUDIO_QUEUE_MS,
+            inFlight: audioSentSeq - audioAckedSeq,
+          })
         }
       }
     })
