@@ -17,6 +17,17 @@ export function isNativeScreenAudioTrack(track: MediaStreamTrack | null | undefi
 
 let workletLoadedFor: AudioContext | null = null
 
+// КРИТИЧНО: одна активная сессия захвата на всё приложение.
+//
+// Раньше очистка висела только на событии "ended" видеодорожки, но
+// MediaStreamTrack НЕ эмитит "ended", когда дорожку останавливает сам код через
+// track.stop() — а именно так останавливается демонстрация из UI. В результате
+// unsubData() не вызывался, и каждый повторный запуск демонстрации навешивал
+// ещё один слушатель "audio-capture-data" на ipcRenderer. В логах это
+// "MaxListenersExceededWarning: 11 audio-capture-data listeners": каждый PCM-пакет
+// обрабатывался 11 раз, нагрузка росла от сессии к сессии до падения приложения.
+let activeSession: { stop: () => void } | null = null
+
 async function ensureWorklet(ctx: AudioContext): Promise<boolean> {
   if (workletLoadedFor === ctx) return true
   if (!ctx.audioWorklet) return false
@@ -33,6 +44,11 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
   const api = typeof window !== "undefined" ? window.electronAPI : undefined
   if (!api?.isElectron) return null
 
+  // Tear down a session that was never stopped, so its IPC listener cannot leak
+  // into this one.
+  activeSession?.stop()
+  activeSession = null
+
   let ctx: AudioContext | null = null
   let node: AudioWorkletNode | null = null
   let dest: MediaStreamAudioDestinationNode | null = null
@@ -44,9 +60,13 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
   const teardown = (stopHelper: boolean) => {
     if (stopped) return
     stopped = true
+    if (activeSession === session) activeSession = null
     try { node?.port.postMessage({ type: stopHelper ? "stop" : "end" }) } catch { /* ignore */ }
+    // Detach the IPC listeners first: nothing below should still receive PCM.
     unsubData?.()
+    unsubData = null
     unsubEnded?.()
+    unsubEnded = null
     if (stopHelper && helperStarted) {
       try { void api.stopAudioCapture() } catch { /* ignore */ }
     }
@@ -55,6 +75,9 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
     try { if (ctx) void ctx.close() } catch { /* ignore */ }
     if (workletLoadedFor === ctx) workletLoadedFor = null
   }
+
+  const session = { stop: () => teardown(true) }
+  activeSession = session
 
   try {
     const support = await api.getAudioCaptureSupport()
@@ -168,6 +191,16 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
 
     const stop = () => teardown(true)
     track.addEventListener("ended", stop, { once: true })
+
+    // "ended" не срабатывает на track.stop() из кода, поэтому оборачиваем сам
+    // stop(): любой потребитель, который просто останавливает дорожку, теперь
+    // гарантированно освобождает IPC-слушателей и хелпер.
+    const trackStop = track.stop.bind(track)
+    track.stop = () => {
+      trackStop()
+      teardown(true)
+    }
+
     console.log("[v0] Native screen audio active: process-loopback track ready")
     return { track, stop }
   } catch (error) {

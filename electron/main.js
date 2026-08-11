@@ -297,7 +297,7 @@ function setupDesktopCapturer() {
 
 // ---------------------------------------------------------------------------
 // Управление безрамочным окном из renderer (кастомный титлбар).
-// Так как frame: false убирает нативные кнопки, их заменяет DesktopTitlebar,
+// Так как frame: false убирает ��ативные кнопки, их заменяет DesktopTitlebar,
 // который шлёт эти IPC-команды.
 // ---------------------------------------------------------------------------
 function setupWindowControls() {
@@ -495,7 +495,6 @@ function setupClipboard() {
 // ---------------------------------------------------------------------------
 let audioCaptureProc = null
 let audioCaptureTimer = null
-let audioCaptureQueue = Buffer.alloc(0)
 let lastOverflowLogAt = 0
 
 const AUDIO_FRAME_BYTES = 2 * Float32Array.BYTES_PER_ELEMENT
@@ -503,25 +502,110 @@ const AUDIO_IPC_FRAMES = 960 // 20 ms at 48 kHz
 const AUDIO_IPC_BYTES = AUDIO_IPC_FRAMES * AUDIO_FRAME_BYTES
 const AUDIO_IPC_INTERVAL_MS = 20
 const AUDIO_MAX_QUEUE_BYTES = 48000 * AUDIO_FRAME_BYTES / 2 // 500 ms
+// The bounded queue holds 500 ms, so 25 packets of 20 ms drain it completely.
+const AUDIO_MAX_PACKETS_PER_TICK = AUDIO_MAX_QUEUE_BYTES / AUDIO_IPC_BYTES
+
+// ---------------------------------------------------------------------------
+// PCM queue as a list of chunks instead of one contiguous Buffer.
+//
+// КРИТИЧНО: раньше здесь был `Buffer.concat([queue, chunk])` на каждый чанк
+// stdout. При 48 кГц/стерео/float32 это ~384 КБ/с, и каждый чанк вызывал новую
+// аллокацию плюс копирование ВСЕЙ очереди (до 500 КБ) — десятки раз в секунду.
+// Это фрагментировало heap main-процесса и держало GC под постоянной нагрузкой,
+// пока Windows не убивала audio/video-процессы (exitCode 0x40010004).
+//
+// Чанки теперь только добавляются в массив, а байты копируются один раз — при
+// сборке исходящего IPC-пакета фиксированного размера.
+// ---------------------------------------------------------------------------
+let audioChunks = []
+let audioQueuedBytes = 0
+
+function audioQueuePush(chunk) {
+  audioChunks.push(chunk)
+  audioQueuedBytes += chunk.length
+}
+
+function audioQueueReset() {
+  audioChunks = []
+  audioQueuedBytes = 0
+}
+
+// Drop the oldest `bytes` without touching the rest of the queue.
+function audioQueueDropFront(bytes) {
+  let remaining = bytes
+  while (remaining > 0 && audioChunks.length > 0) {
+    const head = audioChunks[0]
+    if (head.length <= remaining) {
+      remaining -= head.length
+      audioQueuedBytes -= head.length
+      audioChunks.shift()
+    } else {
+      audioChunks[0] = head.subarray(remaining)
+      audioQueuedBytes -= remaining
+      remaining = 0
+    }
+  }
+}
+
+// Pull exactly `bytes` off the front, or null when there is not enough audio.
+function audioQueueTake(bytes) {
+  if (audioQueuedBytes < bytes) return null
+
+  // Fast path: the head chunk already holds exactly one packet, so hand the
+  // buffer over as-is with zero copying.
+  if (audioChunks[0].length === bytes) {
+    audioQueuedBytes -= bytes
+    return audioChunks.shift()
+  }
+
+  const out = Buffer.allocUnsafe(bytes)
+  let offset = 0
+  while (offset < bytes) {
+    const head = audioChunks[0]
+    const need = bytes - offset
+    if (head.length <= need) {
+      head.copy(out, offset)
+      offset += head.length
+      audioChunks.shift()
+    } else {
+      head.copy(out, offset, 0, need)
+      audioChunks[0] = head.subarray(need)
+      offset += need
+    }
+  }
+  audioQueuedBytes -= bytes
+  return out
+}
 
 function clearAudioCaptureBuffer() {
   if (audioCaptureTimer) {
     clearInterval(audioCaptureTimer)
     audioCaptureTimer = null
   }
-  audioCaptureQueue = Buffer.alloc(0)
+  audioQueueReset()
 }
 
 function startAudioCapturePump() {
   clearAudioCaptureBuffer()
   audioCaptureTimer = setInterval(() => {
-    if (audioCaptureQueue.length < AUDIO_IPC_BYTES) return
+    // No consumer: drop audio instead of letting the queue grow behind a
+    // destroyed window.
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      audioQueueReset()
+      return
+    }
 
-    const packet = audioCaptureQueue.subarray(0, AUDIO_IPC_BYTES)
-    audioCaptureQueue = audioCaptureQueue.subarray(AUDIO_IPC_BYTES)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // Copy because packet references the queue's previous backing allocation.
-      mainWindow.webContents.send("audio-capture-data", Buffer.from(packet))
+    // КРИТИЧНО: отдаём ВСЁ накопленное, а не один пакет за тик. Таймеры Electron
+    // под нагрузкой (демонстрация экрана грузит GPU и энкодер) плывут до 30-50 мс,
+    // поэтому один пакет 20 мс за тик физически не успевает за хелпером. Отставание
+    // копилось до переполнения очереди на каждом чанке — в логах это 96 466 строк
+    // "PCM queue overflow" из 96 534. Теперь насос догоняет после каждой просадки.
+    let sent = 0
+    while (audioQueuedBytes >= AUDIO_IPC_BYTES && sent < AUDIO_MAX_PACKETS_PER_TICK) {
+      const packet = audioQueueTake(AUDIO_IPC_BYTES)
+      if (!packet) break
+      mainWindow.webContents.send("audio-capture-data", packet)
+      sent++
     }
   }, AUDIO_IPC_INTERVAL_MS)
 }
@@ -613,14 +697,14 @@ function setupAudioCapture() {
     startAudioCapturePump()
 
     audioCaptureProc.stdout.on("data", (chunk) => {
-      audioCaptureQueue = Buffer.concat([audioCaptureQueue, chunk])
+      audioQueuePush(chunk)
 
       // Keep latency bounded under renderer stalls. Always drop complete stereo
       // frames from the oldest audio rather than replaying stale YouTube audio.
-      if (audioCaptureQueue.length > AUDIO_MAX_QUEUE_BYTES) {
-        const excess = audioCaptureQueue.length - AUDIO_MAX_QUEUE_BYTES
+      if (audioQueuedBytes > AUDIO_MAX_QUEUE_BYTES) {
+        const excess = audioQueuedBytes - AUDIO_MAX_QUEUE_BYTES
         const alignedDrop = Math.ceil(excess / AUDIO_FRAME_BYTES) * AUDIO_FRAME_BYTES
-        audioCaptureQueue = audioCaptureQueue.subarray(alignedDrop)
+        audioQueueDropFront(alignedDrop)
         // Троттлим лог: при затыке renderer'а это событие срабатывает десятки раз
         // в секунду, и сам логгер становится источником нагрузки.
         const now = Date.now()
