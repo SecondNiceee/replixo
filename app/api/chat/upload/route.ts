@@ -20,14 +20,19 @@ import { conversationMember } from '@/lib/db/schema'
 
 /**
  * Базовый адрес mediasoup-сервера для запроса «сервер → сервер».
- * MEDIASOUP_URL — приватная переменная (может указывать на localhost:3001 внутри
- * VPS); NEXT_PUBLIC_MEDIASOUP_URL — публичный фолбэк, тот же, что у клиента.
+ *
+ * ВАЖНО: фолбэком здесь НЕЛЬЗЯ брать NEXT_PUBLIC_MEDIASOUP_URL. В проде он
+ * равен публичному origin (https://replixo.ru), а nginx проксирует на порт 3001
+ * только /rooms/, /uploads/, /download/ и /socket.io/. Путь /dm/... попадает в
+ * `location /` → на сам Next (порт 3000), где такого роута нет — и загрузка
+ * падала с 404, который этот прокси отдавал клиенту как есть.
+ *
+ * Запрос идёт изнутри VPS, поэтому по умолчанию обращаемся к серверу напрямую,
+ * минуя nginx. Явный MEDIASOUP_URL по-прежнему переопределяет адрес — он нужен,
+ * если Next и сокет-сервер разнесены по разным хостам.
  */
 function mediasoupBaseUrl(): string {
-  const raw =
-    process.env.MEDIASOUP_URL ??
-    process.env.NEXT_PUBLIC_MEDIASOUP_URL ??
-    'http://localhost:3001'
+  const raw = process.env.MEDIASOUP_URL ?? 'http://127.0.0.1:3001'
   return raw.replace(/\/+$/, '')
 }
 
@@ -85,7 +90,24 @@ export async function POST(req: NextRequest) {
       },
     )
 
-    const payload = await upstream.json().catch(() => ({ error: 'upload failed' }))
+    // Апстрим обязан отвечать JSON. Если пришло не JSON (например HTML-страница
+    // 404 от самого Next, когда MEDIASOUP_URL указывает не туда), пробрасывать
+    // такой статус клиенту нельзя: в консоли это выглядит как «404 на
+    // /api/chat/upload», хотя роут существует. Отдаём 502 с внятным текстом.
+    const raw = await upstream.text()
+    let payload: unknown
+    try {
+      payload = JSON.parse(raw)
+    } catch {
+      console.error(
+        `[chat] upload: апстрим ответил не JSON (${upstream.status}) — проверь MEDIASOUP_URL`,
+      )
+      return NextResponse.json(
+        { error: 'Сервер вложений недоступен' },
+        { status: 502 },
+      )
+    }
+
     return NextResponse.json(payload, { status: upstream.status })
   } catch (e) {
     // Сервер вложений недоступен (не запущен / сеть) — это не 500 приложения,
