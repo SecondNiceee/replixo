@@ -160,7 +160,7 @@ export function ConversationView({
           <span
             className={cn(
               'truncate text-[11px]',
-              peerOnline ? 'text-emerald-600' : 'text-muted-foreground',
+              peerOnline ? 'text-emerald-400' : 'text-muted-foreground',
             )}
           >
             {peerOnline ? 'в сети' : formatLastSeen(peerLastSeen)}

@@ -17,6 +17,8 @@ interface DmComposerProps {
 }
 
 const MAX_LENGTH = 4000
+/** Предел роста поля ввода: дальше появляется собственный скролл. */
+const MAX_HEIGHT = 140
 
 export function DmComposer({
   conversationId,
@@ -33,6 +35,24 @@ export function DmComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Подгонка высоты под содержимое.
+  //
+  // Здесь же решается, нужен ли textarea скролл. Полагаться на CSS нельзя: у
+  // поля своя высота в одну строку, а по внутренним отступам и line-height
+  // содержимое одной строки её чуть перерастает — браузер видел переполнение и
+  // рисовал полосу прокрутки в пустом поле. Поэтому скролл включаем вручную и
+  // только когда контент реально не влез в предел роста.
+  const resize = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    // Сначала снимаем прошлую высоту: scrollHeight у зафиксированного по высоте
+    // элемента не умеет уменьшаться, и поле не сжималось бы при удалении строк.
+    el.style.height = 'auto'
+    const full = el.scrollHeight
+    el.style.height = `${Math.min(full, MAX_HEIGHT)}px`
+    el.style.overflowY = full > MAX_HEIGHT ? 'auto' : 'hidden'
+  }, [])
+
   // При переключении диалога черновик и вложение сбрасываем: ссылка вложения
   // привязана к conversationId, в другом диалоге сервер её отвергнет.
   useEffect(() => {
@@ -40,6 +60,14 @@ export function DmComposer({
     setPending(null)
     setUploadError(null)
   }, [conversationId])
+
+  // Пересчёт после рендера, а не в обработчике ввода: и при наборе, и при
+  // очистке после отправки в DOM на момент вызова ещё предыдущее значение.
+  // Первый проход на монтировании тоже нужен — он задаёт высоту ровно в одну
+  // строку вместо приблизительной из CSS.
+  useEffect(() => {
+    resize()
+  }, [text, resize])
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -87,9 +115,8 @@ export function DmComposer({
     onSend(trimmed, pending)
     setText('')
     setPending(null)
-    // Возвращаем высоту после отправки: textarea растёт по содержимому.
-    const el = textareaRef.current
-    if (el) el.style.height = 'auto'
+    // Высоту после отправки сбрасывать здесь не нужно: её вернёт эффект по
+    // изменению text — на момент этого вызова в DOM ещё старое значение.
   }, [text, pending, disabled, uploading, onSend])
 
   const handleKeyDown = useCallback(

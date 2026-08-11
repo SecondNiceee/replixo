@@ -99,7 +99,7 @@ export function AddFriendForm() {
         </p>
       )}
       {addSuccess && (
-        <p className="text-sm text-emerald-600" role="status">
+        <p className="text-sm text-emerald-400" role="status">
           {addSuccess}
         </p>
       )}
