@@ -64,12 +64,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startAudioCapture: () => ipcRenderer.invoke("start-audio-capture"),
   // Остановить helper.
   stopAudioCapture: () => ipcRenderer.invoke("stop-audio-capture"),
-  // Подписка на кадры PCM (Uint8Array с float32 LE). Возвращает функцию отписки.
+  // Подписка на кадры PCM (Uint8Array с float32 LE) с номером пакета.
+  // Возвращает функцию отписки.
   onAudioCaptureData: (callback) => {
-    const handler = (_e, chunk) => callback(chunk)
+    const handler = (_e, chunk, seq) => callback(chunk, seq)
     ipcRenderer.on("audio-capture-data", handler)
     return () => ipcRenderer.removeListener("audio-capture-data", handler)
   },
+  // Подтверждение приёма пакета. Без него main перестаёт слать звук и держит его
+  // в своей ограниченной очереди, вместо того чтобы копить в очереди Chromium IPC.
+  ackAudioCaptureData: (seq) => ipcRenderer.send("audio-capture-ack", seq),
   // Уведомление о завершении процесса захвата. Возвращает функцию отписки.
   onAudioCaptureEnded: (callback) => {
     const handler = (_e, code) => callback(code)

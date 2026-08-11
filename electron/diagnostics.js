@@ -24,6 +24,7 @@
 const { app, crashReporter, dialog, shell, ipcMain } = require("electron")
 const path = require("path")
 const fs = require("fs")
+const v8 = require("v8")
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024 // 5 МБ, дальше ротация
 const MAX_ARCHIVES = 5 // сколько датированных архивов храним
@@ -148,6 +149,79 @@ function pruneOldLogs() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Heap-monitor main-процесса: отделяет OOM от нативного краша.
+//
+// Нативный краш (SEH в WASAPI-хелпере, GPU, кодек) и OOM V8 выглядят для
+// пользователя одинаково — «приложение просто закрылось». Различить их можно
+// только по состоянию heap ПЕРЕД смертью, поэтому:
+//   * раз в HEAP_POLL_MS пишем в лог used/limit;
+//   * при превышении HEAP_WARN_RATIO пишем предупреждение;
+//   * при превышении HEAP_SNAPSHOT_RATIO один раз за сессию сохраняем
+//     .heapsnapshot рядом с minidump'ами — его открывает DevTools → Memory и
+//     сразу видно, что именно съело память (например, буферы PCM).
+// Если в логе перед обрывом нет ни одного heap-warning, значит heap был в норме
+// и причина краша — нативная.
+// ---------------------------------------------------------------------------
+const HEAP_POLL_MS = 15000
+const HEAP_WARN_RATIO = 0.7
+const HEAP_SNAPSHOT_RATIO = 0.85
+
+let heapTimer = null
+let heapSnapshotTaken = false
+
+const mb = (bytes) => Math.round(bytes / 1024 / 1024)
+
+function startHeapMonitor(crashDir) {
+  if (heapTimer) return
+
+  const initial = v8.getHeapStatistics()
+  log.info("heap-monitor", {
+    heapLimitMb: mb(initial.heap_size_limit),
+    usedMb: mb(initial.used_heap_size),
+    pollMs: HEAP_POLL_MS,
+  })
+
+  heapTimer = setInterval(() => {
+    let stats
+    try {
+      stats = v8.getHeapStatistics()
+    } catch {
+      return
+    }
+
+    const ratio = stats.used_heap_size / stats.heap_size_limit
+    const payload = {
+      usedMb: mb(stats.used_heap_size),
+      totalMb: mb(stats.total_heap_size),
+      limitMb: mb(stats.heap_size_limit),
+      externalMb: mb(stats.external_memory || 0),
+      rssMb: mb(process.memoryUsage().rss),
+      usedPct: Math.round(ratio * 100),
+    }
+
+    if (ratio >= HEAP_WARN_RATIO) {
+      log.warn("heap-monitor", "main heap is close to the V8 limit", payload)
+    } else {
+      log.info("heap-monitor", payload)
+    }
+
+    if (ratio >= HEAP_SNAPSHOT_RATIO && !heapSnapshotTaken) {
+      heapSnapshotTaken = true
+      try {
+        const file = path.join(crashDir, `main-${fileStamp()}.heapsnapshot`)
+        v8.writeHeapSnapshot(file)
+        log.error("heap-monitor", "heap snapshot written before probable OOM", { file, ...payload })
+      } catch (error) {
+        log.error("heap-monitor", "heap snapshot failed", error)
+      }
+    }
+  }, HEAP_POLL_MS)
+
+  // Таймер не должен продлевать жизнь процессу при выходе.
+  heapTimer.unref?.()
+}
+
 /**
  * Вызывать ПЕРВОЙ строкой в main.js, до app.whenReady(): crashReporter должен
  * быть запущен раньше, чем создаётся любой дочерний процесс, иначе их краши не
@@ -166,6 +240,8 @@ function initDiagnostics() {
 
   // uploadToServer: false — дампы остаются локально, ничего не уходит наружу.
   crashReporter.start({ uploadToServer: false, compress: true })
+
+  startHeapMonitor(crashDir)
 
   log.info("startup", {
     startedAt: timestamp(),

@@ -36,7 +36,9 @@ interface ElectronAPI {
   getAudioCaptureSupport: () => Promise<AudioCaptureSupport>
   startAudioCapture: () => Promise<AudioCaptureSupport>
   stopAudioCapture: () => Promise<boolean>
-  onAudioCaptureData: (callback: (chunk: Uint8Array) => void) => () => void
+  onAudioCaptureData: (callback: (chunk: Uint8Array, seq: number) => void) => () => void
+  // Подтверждение приёма PCM-пакета (backpressure на IPC).
+  ackAudioCaptureData?: (seq: number) => void
   onAudioCaptureEnded: (callback: (code: number | null) => void) => () => void
 
   // Диагностика крашей: путь к main.log и открытие папки логов.

@@ -138,7 +138,13 @@ export async function startNativeScreenAudio(): Promise<NativeScreenAudio | null
 
     // Subscribe before spawning the helper so its first PCM packet cannot be lost.
     let leftover = new Uint8Array(0)
-    unsubData = api.onAudioCaptureData((chunk) => {
+    unsubData = api.onAudioCaptureData((chunk, seq) => {
+      // Подтверждаем приём ДО любой обработки: ack — это признак того, что этот
+      // поток жив и разбирает очередь, а не сигнал успешного декодирования.
+      // Если renderer встанет, ack'и прекратятся и main задержит звук у себя,
+      // вместо того чтобы бесконтрольно копить его в очереди Chromium IPC.
+      api.ackAudioCaptureData?.(seq)
+
       if (stopped || !node) return
       const incoming = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk)
       const bytes = new Uint8Array(leftover.length + incoming.length)
