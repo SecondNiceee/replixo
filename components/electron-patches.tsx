@@ -185,6 +185,15 @@ function patchElectronDisplayMedia() {
         const videoTrack = stream.getVideoTracks()[0]
         if (videoTrack) {
           videoTrack.addEventListener("ended", () => native.stop())
+          // Событие "ended" приходит только когда захват прекращает сама ОС
+          // (кнопка "Stop sharing" в Chromium). Когда демонстрацию останавливает
+          // наш UI через videoTrack.stop(), события нет — поэтому оборачиваем stop()
+          // вручную, иначе хелпер и IPC-слушатель переживают сессию и утекают.
+          const videoStop = videoTrack.stop.bind(videoTrack)
+          videoTrack.stop = () => {
+            videoStop()
+            native.stop()
+          }
         }
         return stream
       }
