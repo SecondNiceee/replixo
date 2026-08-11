@@ -1,3 +1,11 @@
 packages:
   - "."
   - "server"
+allowBuilds:
+  core-js: true
+  electron-winstaller: true
+  esbuild: true
+  mediasoup: true
+  msw: true
+  sharp: true
+  uiohook-napi: true
