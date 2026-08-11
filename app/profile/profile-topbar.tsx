@@ -74,9 +74,10 @@ export function ProfileTopbar({
             <UserPlus className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">Добавить в друзья</span>
           </DialogTrigger>
-          {/* app-light обязателен: DialogContent рендерится в портал у <body>,
-              вне <main class="app-light">, и без класса взял бы тёмный :root. */}
-          <DialogContent className="app-light bg-card sm:max-w-md">
+          {/* app-dark обязателен: DialogContent рендерится в портал у <body>,
+              вне <main class="app-dark">, и без класса взял бы палитру :root
+              без акцента кабинета. */}
+          <DialogContent className="app-dark bg-card sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Добавить в друзья</DialogTitle>
               <DialogDescription>
@@ -105,7 +106,7 @@ export function ProfileTopbar({
               </span>
             )}
           </DialogTrigger>
-          <DialogContent className="app-light bg-card sm:max-w-lg">
+          <DialogContent className="app-dark bg-card sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Заявки в друзья</DialogTitle>
               <DialogDescription>

@@ -85,8 +85,8 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         <Pencil className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DialogTrigger>
 
-      {/* app-light обязателен: портал у <body> лежит вне <main class="app-light">. */}
-      <DialogContent className="app-light bg-card sm:max-w-md">
+      {/* app-dark обязателен: портал у <body> лежит вне <main class="app-dark">. */}
+      <DialogContent className="app-dark bg-card sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Аккаунт</DialogTitle>
           <DialogDescription>Ваш username виден друзьям и в заявках.</DialogDescription>
