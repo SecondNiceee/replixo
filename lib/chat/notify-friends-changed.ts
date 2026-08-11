@@ -30,14 +30,14 @@ export type FriendsChangeReason =
 
 /**
  * Базовый адрес сокет-сервера для запроса «сервер → сервер».
- * MEDIASOUP_URL — приватная переменная (внутри VPS это может быть
- * localhost:3001); NEXT_PUBLIC_MEDIASOUP_URL — публичный фолбэк.
+ *
+ * Фолбэком нельзя брать NEXT_PUBLIC_MEDIASOUP_URL: в проде это публичный origin,
+ * а nginx не проксирует /internal/ на порт 3001 — запрос ушёл бы в Next и молча
+ * получил 404 (то же, что ломало загрузку файлов). К тому же /internal/ и не
+ * должен быть доступен извне. Ходим напрямую внутри VPS.
  */
 function serverBaseUrl(): string {
-  const raw =
-    process.env.MEDIASOUP_URL ??
-    process.env.NEXT_PUBLIC_MEDIASOUP_URL ??
-    'http://localhost:3001'
+  const raw = process.env.MEDIASOUP_URL ?? 'http://127.0.0.1:3001'
   return raw.replace(/\/+$/, '')
 }
 
@@ -140,7 +140,7 @@ export async function notifyFriendsChanged(
   // payload не передаём: сервер не должен верить тексту, пришедшему по HTTP.
   //
   // originSocketId — соединение, из которого пришло действие. Нужен, чтобы
-  // сокет-сервер не отправлял эхо ровно в ту вкладку, которая уже обновила
+  // сокет-сервер не ��тправлял эхо ровно в ту вкладку, которая уже обновила
   // списки по ответу этого запроса. Остальные соединения того же пользователя
   // (второй таб, другое устройство) событие получить ДОЛЖНЫ.
   const body = JSON.stringify({
