@@ -126,6 +126,38 @@ export function playFriendEvent() {
   ])
 }
 
+// Входящий звонок: короткая трель, повторяемая до ответа.
+//
+// В отличие от остальных звуков это НЕ одиночное событие: пользователь может
+// смотреть в другое окно, и один «динь» он пропустит. Поэтому мотив играется по
+// кругу, а вызывающий обязан остановить его возвращённой функцией — иначе
+// интервал переживёт закрытие вызова и будет звенеть в пустоту.
+const RINGTONE_PERIOD_MS = 2400
+
+function playRingtoneMotif() {
+  playSequence([
+    { freq: 880.0, at: 0, duration: 0.16, wave: "triangle", gain: 0.5 }, // A5
+    { freq: 1108.73, at: 0.18, duration: 0.16, wave: "triangle", gain: 0.5 }, // C#6
+    { freq: 880.0, at: 0.42, duration: 0.16, wave: "triangle", gain: 0.45 }, // A5
+    { freq: 1108.73, at: 0.6, duration: 0.28, wave: "triangle", gain: 0.45 }, // C#6
+  ])
+}
+
+export function startRingtone(): () => void {
+  playRingtoneMotif()
+  const timer = setInterval(playRingtoneMotif, RINGTONE_PERIOD_MS)
+  return () => clearInterval(timer)
+}
+
+// Исходящий звонок завершился без разговора: отклонили, не ответили, отменили.
+// Нисходящая пара нот — «не сложилось», без драматизма. (~0.3s)
+export function playCallEnded() {
+  playSequence([
+    { freq: 587.33, at: 0, duration: 0.1, wave: "sine", gain: 0.4 }, // D5
+    { freq: 392.0, at: 0.1, duration: 0.26, wave: "sine", gain: 0.4 }, // G4
+  ])
+}
+
 // Snappy descending arpeggio — signals demonstration has STOPPED. (~0.35s)
 export function playScreenShareStopSound() {
   playSequence([

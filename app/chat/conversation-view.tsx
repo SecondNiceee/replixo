@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Phone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useCallActions } from '@/hooks/dm/use-calls'
+import { useCallStore } from '@/stores/call-store'
 import { useConversationMessages } from '@/hooks/dm/use-conversation-messages'
 import { useDmRead } from '@/hooks/dm/use-dm-read'
 import { useTyping } from '@/hooks/dm/use-typing'
@@ -53,6 +55,12 @@ export function ConversationView({
   const firstMessageId = messages.length > 0 ? messages[0].id : null
 
   const { notifyTyping, stopTyping } = useTyping(socket, conversationId)
+
+  // Звонок собеседнику. Состояние вызова глобальное (экраны звонка живут в
+  // корневом layout), здесь нужно только действие и признак «уже звоним» —
+  // чтобы кнопка не позволила начать второй вызов поверх первого.
+  const { invite } = useCallActions(socket)
+  const calling = useCallStore((s) => s.outgoing !== null)
 
   // Живой маркер прочтения из сокета против пришедшего с HTTP: берём больший.
   // Иначе после перезагрузки страницы галочки на секунду откатывались бы.
@@ -166,6 +174,19 @@ export function ConversationView({
             {peerOnline ? 'в сети' : formatLastSeen(peerLastSeen)}
           </span>
         </div>
+
+        {/* Позвонить — единственное действие в шапке, поэтому оно и есть её
+            акцент: сплошной кружок в фирменном цвете у правого края. */}
+        <button
+          type="button"
+          onClick={() => invite(conversation.friendId, title)}
+          disabled={!connected || calling}
+          aria-label={`Позвонить ${title}`}
+          title={`Позвонить ${title}`}
+          className="ml-auto flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-primary/40 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Phone className="size-4.5" aria-hidden="true" />
+        </button>
       </div>
 
       {/* Лента */}

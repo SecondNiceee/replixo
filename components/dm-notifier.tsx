@@ -11,7 +11,9 @@ import {
 import { useDmStore } from '@/stores/dm-store'
 import { playFriendEvent, playIncomingMessage } from '@/lib/sounds'
 import { pushNotification } from '@/stores/notifications-store'
+import { useCallsRealtime } from '@/hooks/dm/use-calls'
 import { AppToasts } from '@/components/app-toasts'
+import { CallOverlays } from '@/components/call-overlays'
 
 // ---------------------------------------------------------------------------
 // Глобальный уведомитель о личных сообщениях: звук и счётчик в заголовке
@@ -91,6 +93,11 @@ export function DmNotifier({ selfId }: { selfId: string }) {
   // иначе вторая вкладка и телефон того же пользователя выбрасывали бы событие,
   // ничего не перечитав. Поэтому id пользователя хуку не нужен.
   useFriendsRealtime(socket)
+
+  // Звонки: подписка живёт здесь по той же причине, что и остальные — вызов
+  // должен дойти до пользователя на любой странице, а обработчик события
+  // «нам звонят» обязан быть единственным, иначе рингтон заиграет в два голоса.
+  useCallsRealtime(socket)
 
   // Звук нового сообщения.
   useEffect(() => {
@@ -187,5 +194,10 @@ export function DmNotifier({ selfId }: { selfId: string }) {
   // Стопка тостов живёт здесь же: компонент уже смонтирован ровно один раз на
   // приложение и только для авторизованного пользователя — именно те условия,
   // которые нужны уведомлениям.
-  return <AppToasts />
+  return (
+    <>
+      <AppToasts />
+      <CallOverlays socket={socket} />
+    </>
+  )
 }

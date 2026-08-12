@@ -1,7 +1,8 @@
 import type { Server, Socket } from 'socket.io'
 import { isDmEnabled, validateSessionToken } from './db'
 import { registerDmHandlers } from './handlers'
-import { trackConnect, trackDisconnect } from './presence'
+import { endCallsForUser, registerCallHandlers } from './call-handlers'
+import { isOnline, trackConnect, trackDisconnect } from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
 
 // ---------------------------------------------------------------------------
@@ -54,12 +55,18 @@ export function setupDmNamespace(io: Server): void {
     console.log(`[dm] Подключён ${userId} (socket ${socket.id})`)
 
     registerDmHandlers(nsp, socket)
+    registerCallHandlers(nsp, socket)
 
     // join уже выполнен, поэтому снапшот presence гарантированно дойдёт.
     void trackConnect(nsp, socket, userId)
 
     socket.on('disconnect', () => {
       void trackDisconnect(nsp, socket, userId)
+      // Учёт соединений trackDisconnect правит синхронно (до первого await),
+      // поэтому isOnline здесь уже отвечает про состояние ПОСЛЕ разрыва.
+      // Ушло последнее соединение — незавершённые звонки надо погасить, иначе у
+      // собеседника входящий вызов остался бы висеть до таймаута.
+      if (!isOnline(userId)) endCallsForUser(nsp, userId)
       console.log(`[dm] Отключён ${userId} (socket ${socket.id})`)
     })
   })
