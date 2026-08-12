@@ -19,17 +19,15 @@ import { userRoom, type DmSocketData } from './namespace-types'
 // сообщением.
 // ---------------------------------------------------------------------------
 
-/** Сколько звонить другу, который уже в сети, прежде чем сдаться. */
-const RING_TIMEOUT_MS = 45_000
-
 /**
- * Сколько звонить другу, которого в сети ещё нет.
+ * Сколько держится попытка звонка, прежде чем закончиться сама.
  *
- * Такому звонку сначала надо дождаться, пока человек откроет сайт, и только
- * потом он успеет нажать «принять» — на это нужно заметно больше времени, чем
- * на ответ уже открытой вкладки.
+ * Минута одинаково отсчитывается и для друга в сети, и для того, кто ещё не
+ * открыл сайт: во втором случае это же время работает запасом на то, чтобы он
+ * успел зайти и увидеть вызов. По истечении звонок просто заканчивается как
+ * «не ответил», и можно позвонить заново.
  */
-const OFFLINE_RING_TIMEOUT_MS = 90_000
+const RING_TIMEOUT_MS = 60_000
 
 /** Без похожих друг на друга символов: код диктуют голосом и вводят руками. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -176,7 +174,7 @@ function readCallId(payload: unknown): string | null {
 export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
   const data = socket.data as DmSocketData
   // Звонок — действие редкое и дорогое: пять попыток за десять секунд с
-  // запасом покрывают «нажал ещё раз, потому что не дозвонился».
+  // запасом по��рывают «нажал ещё раз, потому что не дозвонился».
   const allowInvite = createRateLimiter(5, 10_000)
   const allowAnswer = createRateLimiter(20, 10_000)
 
@@ -210,9 +208,8 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
 
     // Отсутствие адресата в сети звонку не мешает: он повисит в `pending`, а
     // когда человек откроет сайт, `syncCallsForSocket` покажет ему вызов на
-    // подключившемся устройстве. Поэтому здесь проверки presence нет — только
-    // запас по времени на то, чтобы человек успел зайти.
-    const ringTimeoutMs = isOnline(peerId) ? RING_TIMEOUT_MS : OFFLINE_RING_TIMEOUT_MS
+    // подключившемся устройстве. Поэтому presence здесь не проверяется вообще —
+    // минуты ожидания хватает и на ответ, и на то, чтобы успеть зайти.
 
     // Повторный клик по кнопке: отдаём тот же звонок, второй раз не звоним.
     const existing = findBetween(fromUserId, peerId)
@@ -225,7 +222,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
     const roomId = generateRoomCode()
     const fromName = data.username ?? data.name ?? ''
     const createdAt = Date.now()
-    const expiresAt = createdAt + ringTimeoutMs
+    const expiresAt = createdAt + RING_TIMEOUT_MS
 
     const call: PendingCall = {
       callId,
@@ -240,7 +237,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
         pending.delete(callId)
         nsp.to(userRoom(peerId)).emit('call:ended', { callId, reason: 'timeout' })
         nsp.to(userRoom(fromUserId)).emit('call:ended', { callId, reason: 'timeout' })
-      }, ringTimeoutMs),
+      }, RING_TIMEOUT_MS),
     }
     pending.set(callId, call)
 
