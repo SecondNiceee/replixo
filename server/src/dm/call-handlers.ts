@@ -25,17 +25,33 @@ const RING_TIMEOUT_MS = 45_000
 /** Без похожих друг на друга символов: код диктуют голосом и вводят руками. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
+/**
+ * Сколько ждать возвращения пользователя, прежде чем гасить его звонки.
+ *
+ * Обновление страницы, переход по ссылке и мигнувшая сеть рвут websocket — а
+ * звонок при этом продолжается. Без этой отсрочки собеседник, нажавший F5 в
+ * момент вызова, обрывал бы звонок самому себе.
+ */
+const RECONNECT_GRACE_MS = 15_000
+
 interface PendingCall {
   callId: string
   roomId: string
   fromUserId: string
   fromName: string
   toUserId: string
+  toName: string
+  createdAt: number
+  /** Когда звонок сам себя закроет. Отдаём клиенту: он рисует обратный отсчёт. */
+  expiresAt: number
   timer: ReturnType<typeof setTimeout>
 }
 
 /** callId → звонок в состоянии «звоним». */
 const pending = new Map<string, PendingCall>()
+
+/** userId → отложенная уборка его звонков после разрыва последнего соединения. */
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function generateRoomCode(): string {
   let code = ''
@@ -59,20 +75,82 @@ function findBetween(fromUserId: string, toUserId: string): PendingCall | null {
   return null
 }
 
-/**
- * Завершить все звонки пользователя. Вызывается, когда у него не осталось ни
- * одного соединения: без этого закрытая вкладка звонящего оставила бы
- * собеседника с вечным входящим вызовом на экране.
- */
-export function endCallsForUser(nsp: Namespace, userId: string): void {
-  for (const call of [...pending.values()]) {
-    if (call.fromUserId !== userId && call.toUserId !== userId) continue
+/** Звонки, в которых пользователь участвует любой из сторон. */
+function callsOf(userId: string): PendingCall[] {
+  return [...pending.values()].filter(
+    (call) => call.fromUserId === userId || call.toUserId === userId,
+  )
+}
+
+function endCallsForUser(nsp: Namespace, userId: string): void {
+  for (const call of callsOf(userId)) {
     forget(call)
     const otherId = call.fromUserId === userId ? call.toUserId : call.fromUserId
     nsp.to(userRoom(otherId)).emit('call:ended', { callId: call.callId, reason: 'gone' })
     // И собственным устройствам того, кто ушёл: они могли остаться открытыми.
     nsp.to(userRoom(userId)).emit('call:ended', { callId: call.callId, reason: 'gone' })
   }
+}
+
+/**
+ * Пользователь потерял последнее соединение — погасить его звонки, но не
+ * сразу: сначала дать ему шанс вернуться (см. RECONNECT_GRACE_MS). Если он
+ * успел переподключиться, уборку отменит `cancelCallCleanup`.
+ */
+export function scheduleCallCleanup(nsp: Namespace, userId: string): void {
+  if (cleanupTimers.has(userId) || callsOf(userId).length === 0) return
+
+  const timer = setTimeout(() => {
+    cleanupTimers.delete(userId)
+    // Мог вернуться и снова уйти, пока таймер ждал: решает текущий presence.
+    if (isOnline(userId)) return
+    endCallsForUser(nsp, userId)
+  }, RECONNECT_GRACE_MS)
+
+  cleanupTimers.set(userId, timer)
+}
+
+export function cancelCallCleanup(userId: string): void {
+  const timer = cleanupTimers.get(userId)
+  if (!timer) return
+  clearTimeout(timer)
+  cleanupTimers.delete(userId)
+}
+
+/**
+ * Отдать новому сокету звонки, которые уже идут.
+ *
+ * `call:incoming` рассылается один раз, в момент вызова, поэтому устройство,
+ * подключившееся посреди звонка (открыли вторую вкладку, обновили страницу,
+ * зашли с телефона), о нём бы не узнало. Досылаем состояние при подключении —
+ * тот же приём, что и снапшот presence.
+ */
+export function syncCallsForSocket(socket: Socket, userId: string): void {
+  const calls = callsOf(userId)
+  if (calls.length === 0) return
+
+  socket.emit('call:sync', {
+    incoming: calls
+      .filter((call) => call.toUserId === userId)
+      .map((call) => ({
+        callId: call.callId,
+        roomId: call.roomId,
+        fromUserId: call.fromUserId,
+        fromName: call.fromName,
+        createdAt: call.createdAt,
+        expiresAt: call.expiresAt,
+      })),
+    outgoing: calls
+      .filter((call) => call.fromUserId === userId)
+      .map((call) => ({
+        callId: call.callId,
+        roomId: call.roomId,
+        toUserId: call.toUserId,
+        toName: call.toName,
+        createdAt: call.createdAt,
+        expiresAt: call.expiresAt,
+      })),
+  })
 }
 
 type Ack = (res: Record<string, unknown>) => void
@@ -105,11 +183,14 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
       return
     }
 
-    const { peerId } = (payload ?? {}) as Record<string, unknown>
+    const { peerId, peerName } = (payload ?? {}) as Record<string, unknown>
     if (typeof peerId !== 'string' || !peerId || peerId.length > 64 || peerId === fromUserId) {
       respond(cb, { ok: false, error: 'bad_payload' })
       return
     }
+    // Имя нужно только чтобы вернуть его же звонящему при переподключении, так
+    // что доверять клиенту тут безопасно — обрезаем лишь длину.
+    const toName = typeof peerName === 'string' ? peerName.slice(0, 120) : ''
 
     // Звонить можно только принятому другу — то же правило, что и на отправку
     // сообщений. Иначе звонок стал бы каналом для навязчивых незнакомцев.
@@ -133,6 +214,8 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
     const callId = randomUUID()
     const roomId = generateRoomCode()
     const fromName = data.username ?? data.name ?? ''
+    const createdAt = Date.now()
+    const expiresAt = createdAt + RING_TIMEOUT_MS
 
     const call: PendingCall = {
       callId,
@@ -140,6 +223,9 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
       fromUserId,
       fromName,
       toUserId: peerId,
+      toName,
+      createdAt,
+      expiresAt,
       timer: setTimeout(() => {
         pending.delete(callId)
         nsp.to(userRoom(peerId)).emit('call:ended', { callId, reason: 'timeout' })
@@ -154,10 +240,11 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
       roomId,
       fromUserId,
       fromName,
-      createdAt: Date.now(),
+      createdAt,
+      expiresAt,
     })
 
-    respond(cb, { ok: true, callId, roomId })
+    respond(cb, { ok: true, callId, roomId, expiresAt })
     console.log(`[call] ${fromUserId} → ${peerId} room=${roomId} call=${callId}`)
   })
 
