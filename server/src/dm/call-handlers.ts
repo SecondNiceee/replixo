@@ -19,8 +19,17 @@ import { userRoom, type DmSocketData } from './namespace-types'
 // сообщением.
 // ---------------------------------------------------------------------------
 
-/** Сколько звонить, прежде чем сдаться. */
+/** Сколько звонить другу, который уже в сети, прежде чем сдаться. */
 const RING_TIMEOUT_MS = 45_000
+
+/**
+ * Сколько звонить другу, которого в сети ещё нет.
+ *
+ * Такому звонку сначала надо дождаться, пока человек откроет сайт, и только
+ * потом он успеет нажать «принять» — на это нужно заметно больше времени, чем
+ * на ответ уже открытой вкладки.
+ */
+const OFFLINE_RING_TIMEOUT_MS = 90_000
 
 /** Без похожих друг на друга символов: код диктуют голосом и вводят руками. */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -199,10 +208,11 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
       return
     }
 
-    if (!isOnline(peerId)) {
-      respond(cb, { ok: false, error: 'offline' })
-      return
-    }
+    // Отсутствие адресата в сети звонку не мешает: он повисит в `pending`, а
+    // когда человек откроет сайт, `syncCallsForSocket` покажет ему вызов на
+    // подключившемся устройстве. Поэтому здесь проверки presence нет — только
+    // запас по времени на то, чтобы человек успел зайти.
+    const ringTimeoutMs = isOnline(peerId) ? RING_TIMEOUT_MS : OFFLINE_RING_TIMEOUT_MS
 
     // Повторный клик по кнопке: отдаём тот же звонок, второй раз не звоним.
     const existing = findBetween(fromUserId, peerId)
@@ -215,7 +225,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
     const roomId = generateRoomCode()
     const fromName = data.username ?? data.name ?? ''
     const createdAt = Date.now()
-    const expiresAt = createdAt + RING_TIMEOUT_MS
+    const expiresAt = createdAt + ringTimeoutMs
 
     const call: PendingCall = {
       callId,
@@ -230,7 +240,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
         pending.delete(callId)
         nsp.to(userRoom(peerId)).emit('call:ended', { callId, reason: 'timeout' })
         nsp.to(userRoom(fromUserId)).emit('call:ended', { callId, reason: 'timeout' })
-      }, RING_TIMEOUT_MS),
+      }, ringTimeoutMs),
     }
     pending.set(callId, call)
 

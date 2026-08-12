@@ -32,7 +32,8 @@ interface CallAck {
 
 /** Текст для пользователя по коду ошибки сервера. */
 function inviteErrorText(error: string | undefined): string {
-  if (error === 'offline') return 'Пользователь не в сети'
+  // Кода 'offline' здесь нет: звонок оффлайн-другу теперь не отклоняется, а
+  // ждёт, пока тот откроет сайт.
   if (error === 'not_friends') return 'Звонить можно только друзьям'
   if (error === 'rate_limited') return 'Слишком часто — подождите немного'
   return 'Не удалось позвонить'
@@ -223,7 +224,10 @@ export function useCallActions(socket: Socket | null): CallActions {
       // существующий, а на экране был бы мигающий «звоним…».
       if (useCallStore.getState().outgoing) return
 
-      socket.emit('call:invite', { peerId }, (res: CallAck) => {
+      // Имя передаём серверу, чтобы он вернул его нам же в `call:sync`: иначе
+      // после обновления страницы на экране «звоним…» вместо друга оказался бы
+      // безымянный «Пользователь».
+      socket.emit('call:invite', { peerId, peerName }, (res: CallAck) => {
         if (!res?.ok || !res.callId || !res.roomId) {
           pushNotification({
             kind: 'error',
