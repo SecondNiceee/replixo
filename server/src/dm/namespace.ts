@@ -1,7 +1,12 @@
 import type { Server, Socket } from 'socket.io'
 import { isDmEnabled, validateSessionToken } from './db'
 import { registerDmHandlers } from './handlers'
-import { endCallsForUser, registerCallHandlers } from './call-handlers'
+import {
+  cancelCallCleanup,
+  registerCallHandlers,
+  scheduleCallCleanup,
+  syncCallsForSocket,
+} from './call-handlers'
 import { isOnline, trackConnect, trackDisconnect } from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
 
@@ -57,16 +62,26 @@ export function setupDmNamespace(io: Server): void {
     registerDmHandlers(nsp, socket)
     registerCallHandlers(nsp, socket)
 
+    // Пользователь вернулся раньше, чем истёк grace-период после разрыва:
+    // отменяем отложенную уборку, иначе она погасила бы живой звонок.
+    cancelCallCleanup(userId)
+
     // join уже выполнен, поэтому снапшот presence гарантированно дойдёт.
     void trackConnect(nsp, socket, userId)
+
+    // Досылаем этому устройству звонки, которые уже идут: `call:incoming`
+    // рассылался один раз, и подключившийся посреди звонка о нём бы не узнал.
+    syncCallsForSocket(socket, userId)
 
     socket.on('disconnect', () => {
       void trackDisconnect(nsp, socket, userId)
       // Учёт соединений trackDisconnect правит синхронно (до первого await),
       // поэтому isOnline здесь уже отвечает про состояние ПОСЛЕ разрыва.
       // Ушло последнее соединение — незавершённые звонки надо погасить, иначе у
-      // собеседника входящий вызов остался бы висеть до таймаута.
-      if (!isOnline(userId)) endCallsForUser(nsp, userId)
+      // собеседника входящий вызов остался бы висеть до таймаута. Но не сразу:
+      // reload и мигнувшая сеть тоже рвут websocket, поэтому даём шанс
+      // вернуться, а вернувшемуся состояние досылает syncCallsForSocket.
+      if (!isOnline(userId)) scheduleCallCleanup(nsp, userId)
       console.log(`[dm] Отключён ${userId} (socket ${socket.id})`)
     })
   })
