@@ -51,7 +51,7 @@ export function useCallsRealtime(socket: Socket | null): void {
   useEffect(() => {
     if (!socket) return
 
-    const { setIncoming, clearIncoming, clearOutgoing } = useCallStore.getState()
+    const { setIncoming, setOutgoing, clearIncoming, clearOutgoing } = useCallStore.getState()
 
     const onIncoming = (payload: unknown) => {
       const { callId, roomId, fromUserId, fromName } = (payload ?? {}) as Record<string, unknown>
@@ -68,6 +68,59 @@ export function useCallsRealtime(socket: Socket | null): void {
         fromUserId,
         fromName: typeof fromName === 'string' && fromName.trim() ? fromName : 'Пользователь',
       })
+    }
+
+    // Снапшот идущих звонков при подключении: обновили страницу, открыли
+    // вторую вкладку или потеряли сеть посреди вызова — состояние догоняет нас
+    // здесь, потому что `call:incoming` был разослан один раз и давно.
+    const onSync = (payload: unknown) => {
+      const { incoming: incomingList, outgoing: outgoingList } = (payload ?? {}) as Record<
+        string,
+        unknown
+      >
+
+      const first = (list: unknown): Record<string, unknown> | null =>
+        Array.isArray(list) && list.length > 0 && typeof list[0] === 'object' && list[0] !== null
+          ? (list[0] as Record<string, unknown>)
+          : null
+
+      // Локальное состояние приоритетнее снапшота: пока он летел, пользователь
+      // мог успеть отклонить вызов, и возвращать его на экран нельзя.
+      const { incoming: currentIn, outgoing: currentOut } = useCallStore.getState()
+
+      const call = first(incomingList)
+      if (call && !currentIn) {
+        const { callId, roomId, fromUserId, fromName } = call
+        if (
+          typeof callId === 'string' &&
+          typeof roomId === 'string' &&
+          typeof fromUserId === 'string'
+        ) {
+          setIncoming({
+            callId,
+            roomId,
+            fromUserId,
+            fromName: typeof fromName === 'string' && fromName.trim() ? fromName : 'Пользователь',
+          })
+        }
+      }
+
+      const mine = first(outgoingList)
+      if (mine && !currentOut) {
+        const { callId, roomId, toUserId, toName } = mine
+        if (
+          typeof callId === 'string' &&
+          typeof roomId === 'string' &&
+          typeof toUserId === 'string'
+        ) {
+          setOutgoing({
+            callId,
+            roomId,
+            toUserId,
+            toName: typeof toName === 'string' && toName.trim() ? toName : 'Пользователь',
+          })
+        }
+      }
     }
 
     const onAccepted = (payload: unknown) => {
@@ -120,18 +173,21 @@ export function useCallsRealtime(socket: Socket | null): void {
     }
 
     socket.on('call:incoming', onIncoming)
+    socket.on('call:sync', onSync)
     socket.on('call:accepted', onAccepted)
     socket.on('call:ended', onEnded)
 
     return () => {
       socket.off('call:incoming', onIncoming)
+      socket.off('call:sync', onSync)
       socket.off('call:accepted', onAccepted)
       socket.off('call:ended', onEnded)
     }
   }, [socket])
 
-  // Соединение порвалось — звонки на сервере уже не живут, а экраны у нас
-  // остались бы. Чистим, чтобы не предлагать принять несуществующий вызов.
+  // Соединение порвалось — принять или отменить звонок нам сейчас нечем, а
+  // экраны остались бы висеть. Чистим; если звонок ещё жив, при переподключении
+  // его вернёт `call:sync`.
   useEffect(() => {
     if (!socket) return
     const onDisconnect = () => useCallStore.getState().reset()
