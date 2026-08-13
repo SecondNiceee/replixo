@@ -127,6 +127,10 @@ export function useMediaControls({
   const screenRecoveryInFlightRef = useRef(false)
   const camRecoveryInFlightRef = useRef(false)
   const micRecoveryInFlightRef = useRef(false)
+  // Cooldown + failure budget for mic recovery. A device that is genuinely gone
+  // (or hardware-muted) must not be re-acquired in a loop for the whole call.
+  const lastMicRecoverAtRef = useRef(0)
+  const micFailuresRef = useRef(0)
   // Fallback when the caller doesn't pass a shared publish lock.
   const localAudioPublishLockRef = useRef(false)
   const audioPublishLockRef = audioPublishInFlightRef ?? localAudioPublishLockRef
@@ -166,8 +170,12 @@ export function useMediaControls({
       //   * the optimistic TOGGLE_MIC was dispatched BEFORE produce(), and a
       //     failed / timed-out publish was never rolled back;
       //   * nothing serialised concurrent publishes.
-      if (audioPublishLockRef.current) return
+      if (audioPublishLockRef.current || micRecoveryInFlightRef.current) return
       audioPublishLockRef.current = true
+      // A deliberate press is the user asking us to try again: give recovery a
+      // fresh budget so a previously exhausted microphone can self-heal later.
+      micFailuresRef.current = 0
+      lastMicRecoverAtRef.current = 0
       let capture: MicCapture | null = null
       try {
         capture = await captureMic(selectedMicIdRef.current)
@@ -284,8 +292,193 @@ export function useMediaControls({
       return false
     } finally {
       setIsMicSwitching(false)
+      // Releasing this is not optional: the lock is shared with `toggleMic` and
+      // the join catch-up publish, so leaking it here would make the microphone
+      // button silently do nothing for the rest of the call.
+      audioPublishLockRef.current = false
+      micFailuresRef.current = 0
     }
   }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch, isMicSwitching])
+
+  // ---------------------------------------------------------------------------
+  // Microphone recovery (the audio counterpart of recoverCamera)
+  //
+  // Audio used to be completely absent from the self-healing system: the session
+  // assessment only looked at the transports, the camera and the screen share.
+  // Every way of ending up with a dead microphone — a publish that timed out, a
+  // producer orphaned by a transport rebuild, an OS-reclaimed device, a WebAudio
+  // graph that turned out to be silent — therefore lasted until the user rejoined
+  // the room, all the while showing them a cheerful "mic on" button.
+  //
+  // This re-acquires the device (when the current track cannot be carrying audio)
+  // and re-publishes it on the CURRENT send transport, preserving the user's mute
+  // intent so recovery never opens a microphone the user had muted.
+  // ---------------------------------------------------------------------------
+  const recoverMic = useCallback(async (reason: string): Promise<boolean> => {
+    if (micRecoveryInFlightRef.current || audioPublishLockRef.current) return false
+    const stream = localStreamRef.current
+    if (!stream) return false
+
+    const existing = stream.getAudioTracks()[0] ?? null
+    const producer = audioProducerRef.current
+    // The user deliberately has no microphone running — leave it that way.
+    if (!existing && !producer) return false
+
+    const diagnosis = diagnoseMicTrack(existing)
+    const sendTransport = sendTransportRef.current
+    const producerDead = !producer
+      || producer.closed
+      || (!!sendTransport && producer.transport !== sendTransport)
+    if (!diagnosis && !producerDead) return false
+
+    const now = Date.now()
+    if (now - lastMicRecoverAtRef.current < 5000) return false
+    if (micFailuresRef.current >= 3) return false
+    lastMicRecoverAtRef.current = now
+
+    micRecoveryInFlightRef.current = true
+    // Shared with toggleMic / switchMic / the join catch-up publish: recovery
+    // must never race a second audio producer into existence.
+    audioPublishLockRef.current = true
+    console.warn(`[media] Mic recovery room=${roomId} peer=${peerIdRef.current} reason=${reason} diagnosis=${diagnosis ?? "producer-dead"} gated=${isGatedMicTrack(existing)}`)
+
+    const closeStaleProducer = () => {
+      const current = audioProducerRef.current
+      if (!current) return
+      if (!current.closed) {
+        socketRef.current?.emit("closeProducer", {
+          roomId, peerId: peerIdRef.current, producerId: current.id,
+        })
+        current.close()
+      }
+      audioProducerRef.current = null
+    }
+
+    try {
+      let track = existing
+
+      // Only re-acquire when the current track provably cannot carry audio;
+      // a healthy track is reused so recovery stays as cheap as possible.
+      if (diagnosis) {
+        if (existing) {
+          stream.removeTrack(existing)
+          releaseMicTrack(existing)
+        }
+        try {
+          const capture = await captureMic(selectedMicIdRef.current)
+          track = capture.track
+          selectedMicIdRef.current = capture.deviceId ?? undefined
+          setActiveMicId(capture.deviceId ?? null)
+          stream.addTrack(track)
+        } catch {
+          // The microphone is genuinely unavailable. Tell the truth in the UI
+          // instead of pretending the user is live.
+          closeStaleProducer()
+          setActiveMicId(null)
+          micFailuresRef.current += 1
+          dispatch({ type: "TOGGLE_MIC", isMuted: true, hasMic: false })
+          setMicNotice("Микрофон перестал работать. Нажмите кнопку микрофона, чтобы включить его снова.")
+          return false
+        }
+      }
+
+      if (!track || track.readyState !== "live") {
+        micFailuresRef.current += 1
+        return false
+      }
+
+      // The old producer points at a dead track (or a transport that no longer
+      // exists) and can never resume by itself.
+      closeStaleProducer()
+
+      const transport = sendTransportRef.current ?? (await waitForSendTransport())
+      if (!transport || transport.closed) {
+        micFailuresRef.current += 1
+        return false
+      }
+
+      const nextProducer = await transport.produce({ track, codecOptions: MIC_CODEC_OPTIONS })
+      audioProducerRef.current = nextProducer
+
+      const muted = isMicMutedRef?.current ?? false
+      track.enabled = !muted
+      if (muted) {
+        await nextProducer.pause()
+        socketRef.current?.emit("pauseProducer", {
+          roomId, peerId: peerIdRef.current, producerId: nextProducer.id, paused: true,
+        })
+        dispatch({ type: "TOGGLE_MIC", isMuted: true, hasMic: true })
+      } else {
+        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
+      }
+      // Only a genuinely healthy result refills the budget. Re-acquiring a device
+      // that comes back muted again (hardware mute switch, another app holding it)
+      // must not loop forever, so it counts as a failed attempt.
+      if (diagnoseMicTrack(track) === null) {
+        micFailuresRef.current = 0
+        setMicNotice(null)
+      } else {
+        micFailuresRef.current += 1
+      }
+      console.info(`[media] Mic recovered room=${roomId} peer=${peerIdRef.current} muted=${muted}`)
+      return true
+    } catch (error) {
+      micFailuresRef.current += 1
+      console.error(`[media] Mic recovery failed room=${roomId} peer=${peerIdRef.current}`, error)
+      if (micFailuresRef.current >= 3) {
+        setMicNotice("Не удалось восстановить микрофон. Нажмите кнопку микрофона, чтобы попробовать снова.")
+      }
+      return false
+    } finally {
+      micRecoveryInFlightRef.current = false
+      audioPublishLockRef.current = false
+    }
+  }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, audioProducerRef,
+      selectedMicIdRef, isMicMutedRef, dispatch, waitForSendTransport])
+
+  // Keep the indirection ref pointing at the latest recovery closure.
+  recoverMicRef.current = recoverMic
+
+  // ---------------------------------------------------------------------------
+  // Microphone watchdog
+  //
+  // A published microphone track never "ends" on its own when it comes out of the
+  // noise gate, and a producer orphaned by a rebuild throws nothing — so the only
+  // way to notice a silent microphone is to look at it periodically.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    // The problem must persist before we act. A device track is briefly `muted`
+    // in perfectly normal situations (OS switching the default device, a headset
+    // waking up), and re-acquiring the microphone every few seconds because of
+    // that would be worse than the bug it fixes.
+    const DWELL_MS: Record<string, number> = { "device-muted": 8000, "context-not-running": 6000 }
+    let issue: { key: string; since: number } | null = null
+
+    const timer = setInterval(() => {
+      if (hasJoinedRef && !hasJoinedRef.current) return
+      if (audioPublishLockRef.current || micRecoveryInFlightRef.current) return
+      const stream = localStreamRef.current
+      if (!stream) { issue = null; return }
+      const track = stream.getAudioTracks()[0] ?? null
+      const producer = audioProducerRef.current
+      // Microphone intentionally off.
+      if (!track && !producer) { issue = null; return }
+      const diagnosis = diagnoseMicTrack(track)
+      const sendTransport = sendTransportRef.current
+      const producerDead = !producer
+        || producer.closed
+        || (!!sendTransport && producer.transport !== sendTransport)
+      if (!diagnosis && !producerDead) { issue = null; return }
+
+      const key = diagnosis ?? "producer-dead"
+      const now = Date.now()
+      if (issue?.key !== key) issue = { key, since: now }
+      if (now - issue.since < (DWELL_MS[key] ?? 0)) return
+      issue = null
+      void recoverMicRef.current(`watchdog:${key}`)
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [hasJoinedRef, localStreamRef, audioProducerRef, sendTransportRef])
 
   // Watch a camera track so we notice the moment the OS/browser kills it
   // (network drop, device sleep, driver reset). Without this the tile silently
@@ -674,6 +867,9 @@ export function useMediaControls({
   return {
     permissionError,
     clearPermissionError: () => setPermissionError(null),
+    micNotice,
+    clearMicNotice: () => setMicNotice(null),
+    recoverMic,
     screenQuality,
     isCamStarting,
     activeMicId,

@@ -123,6 +123,8 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     error,
     permissionError,
     clearPermissionError,
+    micNotice,
+    clearMicNotice,
     peers,
     localStream,
     isMicMuted,
@@ -282,6 +284,22 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             onClick={clearPermissionError}
             aria-label="Закрыть"
             className="shrink-0 text-destructive/70 hover:text-destructive transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Microphone notice — a non-fatal problem with the mic (publish failed,
+          device vanished, self-healing gave up). Deliberately not a room error:
+          the call itself is fine, only the microphone needs attention. */}
+      {micNotice && !permissionError && (
+        <div className="relative z-50 flex items-center justify-between gap-3 border-b border-border bg-muted px-4 py-2 text-sm text-foreground">
+          <span>{micNotice}</span>
+          <button
+            onClick={clearMicNotice}
+            aria-label="Закрыть"
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
           >
             ✕
           </button>
