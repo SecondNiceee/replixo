@@ -1,6 +1,6 @@
 "use client"
 
-import { captureMic, releaseMicTrack } from "@/lib/mic-gate"
+import { captureMic, releaseMicTrack, diagnoseMicTrack } from "@/lib/mic-gate"
 
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
@@ -88,6 +88,11 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const iceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const isMicMutedRef = useRef(true)
   const hasMicRef = useRef(false)
+  // Serialises EVERY microphone publish (button, device switch, recovery, and the
+  // join / rejoin catch-up below). `!audioProducerRef.current` is not a lock:
+  // `produce()` is async, so clicking the mic during a join used to create a
+  // second, orphaned producer that no mute ever reached.
+  const audioPublishInFlightRef = useRef(false)
   const isCamOffRef = useRef(true)
   const hasCamRef = useRef(false)
   const lastRecoverAtRef = useRef(0)
@@ -132,6 +137,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     screenVideoProducerRef, screenAudioProducerRef,
     screenStreamRef, screenQualityRef, selectedMicIdRef,
     isCamOffRef,
+    isMicMutedRef,
+    audioPublishInFlightRef,
+    hasJoinedRef,
     onUserWantsVideo: () => { noteUserWantsVideoRef.current() },
     dispatch,
   })
@@ -182,6 +190,21 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const sendBroken = isTransportBroken(sendTransport)
     const recvBroken = isTransportBroken(recvTransportRef.current)
 
+    // Microphone: audio was missing from this assessment entirely, which is why
+    // a silent microphone used to survive every repair path and last until the
+    // user rejoined the room. `diagnoseMicTrack` sees through the noise gate (a
+    // gate's output track is always "live" and never "muted", so it hides device
+    // loss, device mutes and a dead WebAudio graph).
+    const micTrack = localStreamRef.current?.getAudioTracks()[0] ?? null
+    const micProducer = audioProducerRef.current
+    const micExpected = !!micTrack || !!micProducer
+    const micBroken = micExpected && (
+      diagnoseMicTrack(micTrack) !== null ||
+      !micProducer ||
+      micProducer.closed ||
+      (!!sendTransport && micProducer.transport !== sendTransport)
+    )
+
     // Camera: only "broken" when a camera is supposed to be running and either
     // the capture track died or its producer no longer belongs to the current
     // send transport.
@@ -212,9 +235,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     return {
       sendBroken,
       recvBroken,
+      micBroken,
       camBroken,
       screenBroken,
-      healthy: !sendBroken && !recvBroken && !camBroken && !screenBroken,
+      healthy: !sendBroken && !recvBroken && !micBroken && !camBroken && !screenBroken,
     }
   }, [isTransportBroken])
 
@@ -255,6 +279,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       const current = assessSession()
       if (current.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
       if (current.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
+      if (current.micBroken) void mediaControls.recoverMic("manual-probe")
       if (current.camBroken) void mediaControls.recoverCamera()
       if (current.screenBroken) {
         window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
@@ -420,42 +445,65 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             return
           }
 
-          if (hasMicRef.current && !audioProducerRef.current) {
-            let audioTrack = localStreamRef.current?.getAudioTracks()[0]
-            // The previous mic track may have ended while we were disconnected
-            // (device change, OS reclaim, long background). Producing an ended
-            // track throws "InvalidStateError: track ended" and leaves us
-            // silent, so re-acquire a live one before publishing.
-            if (!audioTrack || audioTrack.readyState === "ended") {
-              try {
-                if (audioTrack) {
-                  localStreamRef.current?.removeTrack(audioTrack)
-                  releaseMicTrack(audioTrack)
+          // The whole microphone catch-up is wrapped in its own try/catch: a
+          // failure here used to bubble into `failJoin`, which does nothing at all
+          // once `hasJoinedRef` is true — the session looked connected while the
+          // user had no microphone at all. Now it degrades to "mic off" (or to a
+          // recovery attempt) and the rest of the join still completes.
+          if (hasMicRef.current && !audioProducerRef.current && !audioPublishInFlightRef.current) {
+            audioPublishInFlightRef.current = true
+            try {
+              let audioTrack = localStreamRef.current?.getAudioTracks()[0]
+              // The previous mic track may have ended (device change, OS reclaim,
+              // long background) or become structurally silent while we were
+              // disconnected. Producing an ended track throws and leaves us mute,
+              // so re-acquire whenever the track can't be carrying audio.
+              if (diagnoseMicTrack(audioTrack) !== null) {
+                try {
+                  if (audioTrack) {
+                    localStreamRef.current?.removeTrack(audioTrack)
+                    releaseMicTrack(audioTrack)
+                  }
+                  // Re-acquire through the gate, so a rejoin never republishes a
+                  // raw (unsuppressed) microphone. `captureMic` falls back to the
+                  // system default when the remembered deviceId is gone.
+                  const capture = await captureMic(selectedMicIdRef.current)
+                  audioTrack = capture.track
+                  selectedMicIdRef.current = capture.deviceId ?? undefined
+                  localStreamRef.current?.addTrack(audioTrack)
+                } catch (micError) {
+                  audioTrack = undefined
+                  console.error(`[media] Mic re-capture failed room=${roomId} peer=${peerIdRef.current}`, micError)
                 }
-                // Re-acquire through the gate, so a rejoin never republishes a
-                // raw (unsuppressed) microphone.
-                const capture = await captureMic(selectedMicIdRef.current)
-                audioTrack = capture.track
-                selectedMicIdRef.current = capture.deviceId ?? selectedMicIdRef.current
-                localStreamRef.current?.addTrack(audioTrack)
-              } catch {
-                audioTrack = undefined
               }
-            }
-            if (audioTrack && audioTrack.readyState === "live") {
-              audioTrack.enabled = true
-              const producer = await newSendTransport.produce({
-                track: audioTrack,
-                codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
-              })
-              audioProducerRef.current = producer
-              if (isMicMutedRef.current) {
-                audioTrack.enabled = false
-                producer.pause()
-                socket.emit("pauseProducer", {
-                  roomId, peerId: peerIdRef.current, producerId: producer.id, paused: true,
+              if (audioTrack && audioTrack.readyState === "live") {
+                audioTrack.enabled = true
+                const producer = await newSendTransport.produce({
+                  track: audioTrack,
+                  codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
                 })
+                audioProducerRef.current = producer
+                if (isMicMutedRef.current) {
+                  audioTrack.enabled = false
+                  producer.pause()
+                  socket.emit("pauseProducer", {
+                    roomId, peerId: peerIdRef.current, producerId: producer.id, paused: true,
+                  })
+                }
+              } else {
+                // The microphone is genuinely gone. Mirror what the video branch
+                // below does and reflect it in the UI, instead of leaving a "mic
+                // on" button over a session nobody can hear.
+                dispatch({ type: "TOGGLE_MIC", isMuted: true, hasMic: false })
               }
+            } catch (audioError) {
+              console.error(`[media] Mic republish failed room=${roomId} peer=${peerIdRef.current}`, audioError)
+              // Hand it to the watchdog: it retries on the current transport and,
+              // if the device is really unavailable, turns the button off.
+              audioPublishInFlightRef.current = false
+              void mediaControls.recoverMic("join-republish-failed")
+            } finally {
+              audioPublishInFlightRef.current = false
             }
           }
 
@@ -641,6 +689,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           const assessment = assessSession()
           if (assessment.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
           if (assessment.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
+          // The microphone is just as fragile as the camera during an outage —
+          // and a dead mic is worse, because nothing about the UI reveals it.
+          if (assessment.micBroken) void mediaControls.recoverMic("rejoin-probe")
           // The camera capture track often dies during the outage even though
           // the transport itself is reusable. Re-check and republish it.
           if (assessment.camBroken) void mediaControls.recoverCamera()
@@ -745,6 +796,10 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     error: state.error,
     permissionError: mediaControls.permissionError,
     clearPermissionError: mediaControls.clearPermissionError,
+    // Non-fatal microphone problems (publish failed, device vanished, recovery
+    // gave up). Shown as a dismissible banner — never as a fatal room error.
+    micNotice: mediaControls.micNotice,
+    clearMicNotice: mediaControls.clearMicNotice,
     localPeerId: peerIdRef.current,
     // Peers & streams
     peers: state.peers,

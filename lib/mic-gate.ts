@@ -42,6 +42,16 @@ const WORKLET_VERSION = "3"
 // before giving up on the gate. See `waitForTrackFlowing` below.
 const MUTED_TRACK_WAIT_MS = 1500
 
+// How long a gate may emit ABSOLUTE digital silence, while its device track is
+// live and unmuted, before we declare the WebAudio graph broken. This is the
+// last line of defence against the Chromium "permanently silent
+// MediaStreamAudioSourceNode" bug: the published track stays alive and never
+// ends, so nothing else in the app can notice it. 6 s is far longer than any
+// pause between words (a real microphone always carries some noise floor, never
+// exact zeroes), so this cannot fire on a merely quiet user.
+const GATE_SILENCE_MS = 6000
+const SILENCE_PROBE_MS = 1000
+
 export interface MicCapture {
   /** The track to publish and to keep inside the local stream. */
   track: MediaStreamTrack
@@ -56,6 +66,13 @@ interface Pipeline {
   source: MediaStreamAudioSourceNode
   node: AudioWorkletNode
   dest: MediaStreamAudioDestinationNode
+  /** Taps the source node so we can tell "quiet" from "structurally silent". */
+  analyser: AnalyserNode | null
+  probeBuffer: Float32Array | null
+  /** Timestamp of the first all-zero probe of the current silent stretch. */
+  silentSince: number
+  /** True once the graph is proven to carry nothing at all — see GATE_SILENCE_MS. */
+  silent: boolean
   stop: () => void
 }
 
@@ -65,6 +82,11 @@ const pipelines = new Map<MediaStreamTrack, Pipeline>()
 let workletLoaded = false
 let storeBound = false
 let keepAliveTimer: ReturnType<typeof setInterval> | null = null
+// Flipped to false the first time a gate is caught emitting digital silence.
+// From then on `captureMic` publishes the RAW device track for the rest of the
+// page's life: no noise gate, but guaranteed audible. Being heard always wins
+// over being suppressed.
+let gateTrusted = true
 
 function gateEnabled(): boolean {
   return useRoomSettingsStore.getState().noiseGate
@@ -95,9 +117,58 @@ function startKeepAlive() {
   if (keepAliveTimer) return
   keepAliveTimer = setInterval(() => {
     const ctx = getSharedAudioContext()
-    if (!ctx) return
-    if (ctx.state === "suspended") ctx.resume().catch(() => {})
-  }, 2000)
+    if (ctx?.state === "suspended") ctx.resume().catch(() => {})
+    for (const pipeline of pipelines.values()) probeSilence(pipeline)
+  }, SILENCE_PROBE_MS)
+}
+
+/**
+ * Detect a gate that carries NOTHING while the microphone behind it is live and
+ * unmuted — i.e. Chromium's permanently-silent source node. A real capture never
+ * produces exact zeroes for seconds on end, so "peak === 0" over GATE_SILENCE_MS
+ * is proof the graph is dead rather than the user being quiet.
+ *
+ * Once proven, the pipeline is marked `silent` (surfaced by `diagnoseMicTrack`,
+ * which is what makes the microphone watchdog re-capture) and the gate is
+ * distrusted for the rest of the session.
+ */
+function probeSilence(pipeline: Pipeline) {
+  const { analyser, probeBuffer } = pipeline
+  if (pipeline.silent || !analyser || !probeBuffer) return
+  // A muted / ended device legitimately delivers zeroes; those states are
+  // reported on their own by `diagnoseMicTrack`.
+  if (pipeline.raw.readyState !== "live" || pipeline.raw.muted) {
+    pipeline.silentSince = 0
+    return
+  }
+  const ctx = getSharedAudioContext()
+  if (!ctx || ctx.state !== "running") {
+    pipeline.silentSince = 0
+    return
+  }
+  try {
+    analyser.getFloatTimeDomainData(probeBuffer)
+  } catch {
+    return
+  }
+  let peak = 0
+  for (let i = 0; i < probeBuffer.length; i++) {
+    const value = Math.abs(probeBuffer[i])
+    if (value > peak) peak = value
+  }
+  if (peak > 0) {
+    pipeline.silentSince = 0
+    return
+  }
+  const now = Date.now()
+  if (!pipeline.silentSince) {
+    pipeline.silentSince = now
+    return
+  }
+  if (now - pipeline.silentSince < GATE_SILENCE_MS) return
+  pipeline.silent = true
+  gateTrusted = false
+  console.warn("[mic-gate] Gate produced only digital silence — falling back to the raw microphone")
 }
 
 function stopKeepAliveIfIdle() {
@@ -156,6 +227,8 @@ function waitForTrackFlowing(track: MediaStreamTrack, timeoutMs: number): Promis
 
 async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null> {
   try {
+    // A gate has already been caught silencing this session — never build another.
+    if (!gateTrusted) return null
     const ctx = getSharedAudioContext()
     if (!ctx) return null
     // Never build on a muted device track (permanent-silence trap, see above).
@@ -201,11 +274,26 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
     source.connect(node)
     node.connect(dest)
 
+    // Tap the source node (before the gate, so a closed gate is never mistaken
+    // for a broken graph) to watch for structural silence.
+    let analyser: AnalyserNode | null = null
+    let probeBuffer: Float32Array | null = null
+    try {
+      analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      probeBuffer = new Float32Array(analyser.fftSize)
+    } catch {
+      analyser = null
+      probeBuffer = null
+    }
+
     const track = dest.stream.getAudioTracks()[0]
     if (!track) {
       try {
         source.disconnect()
         node.disconnect()
+        analyser?.disconnect()
       } catch {
         /* ignore */
       }
@@ -222,7 +310,11 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
       } catch {
         /* ignore */
       }
-      for (const disconnect of [() => source.disconnect(), () => node.disconnect()]) {
+      for (const disconnect of [
+        () => source.disconnect(),
+        () => node.disconnect(),
+        () => analyser?.disconnect(),
+      ]) {
         try {
           disconnect()
         } catch {
@@ -243,7 +335,10 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
     // publishing a permanently silent graph.
     raw.addEventListener("ended", () => stop())
 
-    pipelines.set(track, { raw, source, node, dest, stop })
+    pipelines.set(track, {
+      raw, source, node, dest, analyser, probeBuffer,
+      silentSince: 0, silent: false, stop,
+    })
     startKeepAlive()
     return track
   } catch {
@@ -258,9 +353,25 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
  */
 export async function captureMic(deviceId?: string): Promise<MicCapture> {
   bindStore()
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: getVoiceAudioConstraints(deviceId),
-  })
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: getVoiceAudioConstraints(deviceId),
+    })
+  } catch (error) {
+    // `deviceId: { exact }` fails hard once the remembered device is gone
+    // (unplugged headset, renamed device after a driver update, another app
+    // holding it exclusively). Falling back to the system default keeps the user
+    // audible instead of leaving the call with no microphone at all.
+    const name = (error as { name?: string })?.name
+    if (!deviceId || (name !== "OverconstrainedError" && name !== "NotFoundError" && name !== "NotReadableError")) {
+      throw error
+    }
+    console.warn(`[mic-gate] Device ${deviceId} unavailable (${name}) — retrying with the system default`)
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: getVoiceAudioConstraints(),
+    })
+  }
   const raw = stream.getAudioTracks()[0]
   if (!raw) throw new Error("Микрофон не вернул аудиодорожку")
 
@@ -296,7 +407,7 @@ export function isGatedMicTrack(track: MediaStreamTrack | null | undefined): boo
  * when it looks healthy. Used by the mic watchdog to decide on re-capture.
  */
 export function diagnoseMicTrack(track: MediaStreamTrack | null | undefined):
-  | "no-track" | "ended" | "device-muted" | "context-not-running" | null {
+  | "no-track" | "ended" | "device-muted" | "context-not-running" | "gate-silent" | null {
   if (!track) return "no-track"
   if (track.readyState === "ended") return "ended"
   const pipeline = pipelines.get(track)
@@ -305,6 +416,9 @@ export function diagnoseMicTrack(track: MediaStreamTrack | null | undefined):
   if (pipeline.raw.muted) return "device-muted"
   const ctx = getSharedAudioContext()
   if (!ctx || ctx.state !== "running") return "context-not-running"
+  // Proven dead WebAudio graph: alive track, live device, running context, and
+  // still not a single non-zero sample. Re-capturing is the only way out.
+  if (pipeline.silent) return "gate-silent"
   return null
 }
 
