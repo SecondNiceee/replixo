@@ -8,6 +8,10 @@ import {
   releaseMicTrack,
   diagnoseMicTrack,
   isGatedMicTrack,
+  // Used by watchMicTrack to listen on the real device track behind the noise
+  // gate. This was missing, which made every watchMicTrack() call throw a
+  // ReferenceError — see the note there.
+  getRawMicTrack,
   type MicCapture,
 } from "@/lib/mic-gate"
 import { SCREEN_QUALITY_PRESETS } from "./types"
@@ -136,7 +140,15 @@ export function useMediaControls({
   const audioPublishLockRef = audioPublishInFlightRef ?? localAudioPublishLockRef
   // Indirection so the microphone watchdog can call recovery even though
   // recoverMic is declared further down.
-  const recoverMicRef = useRef<(reason: string) => Promise<boolean>>(async () => false)
+  const recoverMicRef = useRef<(reason: string, force?: boolean) => Promise<boolean>>(async () => false)
+  // RTP liveness probe state, keyed by producer id. `proven` is a one-way latch:
+  // once packets have demonstrably reached the SFU, this producer is never
+  // probed again, so a user who simply stops talking can never be mistaken for a
+  // broken microphone.
+  const rtpProbeRef = useRef<{ producerId: string | null; since: number; strikes: number; proven: boolean }>({
+    producerId: null, since: 0, strikes: 0, proven: false,
+  })
+  const rtpRecoveryAttemptsRef = useRef(0)
   // Indirection so the camera track's "ended" watcher can call recovery even
   // though recoverCamera is declared further down.
   const recoverCameraRef = useRef<() => Promise<boolean>>(async () => false)
@@ -156,8 +168,18 @@ export function useMediaControls({
       void recoverMicRef.current("track-ended")
     }
     track.addEventListener("ended", onEnded)
-    const raw = getRawMicTrack(track)
-    if (raw && raw !== track) raw.addEventListener("ended", onEnded)
+    // Attaching a watcher is pure hardening — it must never be able to fail the
+    // publish that just succeeded. It previously could: `getRawMicTrack` wasn't
+    // imported, so this line threw a ReferenceError *after* produce() had already
+    // stored the producer, sending toggleMic into its rollback path. That killed
+    // the live track and showed "не удалось включить микрофон" while leaving an
+    // orphaned producer behind — a mic that was on, published, and silent.
+    try {
+      const raw = getRawMicTrack(track)
+      if (raw && raw !== track) raw.addEventListener("ended", onEnded)
+    } catch (err) {
+      console.error("[media] Failed to watch raw mic track", err)
+    }
   }, [localStreamRef])
 
   // ---------------------------------------------------------------------------
@@ -190,10 +212,13 @@ export function useMediaControls({
       //   * nothing serialised concurrent publishes.
       if (audioPublishLockRef.current || micRecoveryInFlightRef.current) return
       audioPublishLockRef.current = true
-      // A deliberate press is the user asking us to try again: give recovery a
-      // fresh budget so a previously exhausted microphone can self-heal later.
-      micFailuresRef.current = 0
-      lastMicRecoverAtRef.current = 0
+    // A deliberate press is the user asking us to try again: give recovery a
+    // fresh budget so a previously exhausted microphone can self-heal later.
+    micFailuresRef.current = 0
+    lastMicRecoverAtRef.current = 0
+    // Same for the RTP probe, otherwise a mic that exhausted its republish budget
+    // earlier in the call would never be re-verified after a manual retry.
+    rtpRecoveryAttemptsRef.current = 0
       let capture: MicCapture | null = null
       try {
         capture = await captureMic(selectedMicIdRef.current)
@@ -341,7 +366,12 @@ export function useMediaControls({
   // and re-publishes it on the CURRENT send transport, preserving the user's mute
   // intent so recovery never opens a microphone the user had muted.
   // ---------------------------------------------------------------------------
-  const recoverMic = useCallback(async (reason: string): Promise<boolean> => {
+  // `force` republishes even when every local object looks healthy. The RTP
+  // liveness probe needs this: a producer can be open, on the right transport,
+  // with a live track, and still deliver zero packets to the SFU — which is
+  // exactly the "video works, nobody hears me, rejoining fixes it" case. Without
+  // `force` that call would return false right here and change nothing.
+  const recoverMic = useCallback(async (reason: string, force = false): Promise<boolean> => {
     if (micRecoveryInFlightRef.current || audioPublishLockRef.current) return false
     const stream = localStreamRef.current
     if (!stream) return false
@@ -356,7 +386,7 @@ export function useMediaControls({
     const producerDead = !producer
       || producer.closed
       || (!!sendTransport && producer.transport !== sendTransport)
-    if (!diagnosis && !producerDead) return false
+    if (!diagnosis && !producerDead && !force) return false
 
     const now = Date.now()
     if (now - lastMicRecoverAtRef.current < 5000) return false
@@ -507,6 +537,118 @@ export function useMediaControls({
     }, 3000)
     return () => clearInterval(timer)
   }, [hasJoinedRef, localStreamRef, audioProducerRef, sendTransportRef])
+
+  // ---------------------------------------------------------------------------
+  // Outbound audio RTP liveness probe
+  //
+  // Every other mic check inspects local object *state*: track.readyState,
+  // producer.closed, producer.transport. All of those can look perfect while not
+  // a single packet reaches the SFU (half-broken transport, ICE that came up but
+  // carries nothing, a producer the server never wired to consumers). That is the
+  // last remaining shape of "video is fine, nobody hears me, rejoining fixes it".
+  //
+  // The danger here is the opposite failure: the noise gate outputs exact zeros
+  // when closed (gain → 0) and `opusDtx` then legitimately stops sending, so a
+  // silent *person* looks identical to a silent *microphone* if you measure rate.
+  // So this never measures rate — it asks a one-shot question: has audio EVER
+  // reached the server on this producer? A real device always carries a noise
+  // floor and the gate starts open, so any working mic proves itself within
+  // seconds and latches `proven` forever. Staying at exactly zero is breakage.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    // Long enough for ICE/DTLS plus the first RTCP receiver report to arrive.
+    const GRACE_MS = 6000
+    // Two consecutive zero samples before acting, so one late RTCP report or a
+    // momentary stats gap can never kill a working microphone.
+    const STRIKES_TO_ACT = 2
+    const MAX_RTP_RECOVERIES = 2
+    let checking = false
+
+    const timer = setInterval(() => {
+      if (checking) return
+      if (hasJoinedRef && !hasJoinedRef.current) return
+      if (audioPublishLockRef.current || micRecoveryInFlightRef.current) return
+
+      const producer = audioProducerRef.current
+      const probe = rtpProbeRef.current
+
+      if (!producer || producer.closed) {
+        if (probe.producerId !== null) {
+          rtpProbeRef.current = { producerId: null, since: 0, strikes: 0, proven: false }
+        }
+        return
+      }
+      // A new producer starts a fresh grace window and a fresh verdict.
+      if (probe.producerId !== producer.id) {
+        rtpProbeRef.current = { producerId: producer.id, since: Date.now(), strikes: 0, proven: false }
+        return
+      }
+      if (probe.proven) return
+      // Muted: zero packets is the correct behaviour, and the grace window has to
+      // restart from the moment the user unmutes.
+      if (producer.paused || isMicMutedRef?.current) {
+        probe.since = Date.now()
+        probe.strikes = 0
+        return
+      }
+      if (Date.now() - probe.since < GRACE_MS) return
+
+      checking = true
+      void (async () => {
+        try {
+          let remoteReports = 0
+          let packetsReceived = 0
+          let packetsSent = 0
+          const stats: RTCStatsReport = await producer.getStats()
+          stats.forEach((report: Record<string, unknown>) => {
+            if (report.type === "remote-inbound-rtp") {
+              remoteReports += 1
+              packetsReceived += Number(report.packetsReceived) || 0
+            } else if (report.type === "outbound-rtp") {
+              packetsSent += Number(report.packetsSent) || 0
+            }
+          })
+
+          // Still the producer we sampled, and still unmuted? Otherwise discard.
+          if (audioProducerRef.current !== producer) return
+          if (producer.paused || isMicMutedRef?.current) return
+
+          // Audio provably reached the SFU — latch and never probe again.
+          if (packetsReceived > 0) {
+            probe.proven = true
+            probe.strikes = 0
+            rtpRecoveryAttemptsRef.current = 0
+            return
+          }
+          // No receiver report yet but packets are leaving: unmeasured, not broken.
+          // Waiting is the safe verdict here.
+          if (remoteReports === 0 && packetsSent > 0) return
+
+          probe.strikes += 1
+          if (probe.strikes < STRIKES_TO_ACT) return
+          probe.strikes = 0
+          probe.since = Date.now()
+
+          if (rtpRecoveryAttemptsRef.current >= MAX_RTP_RECOVERIES) {
+            // Republishing is not helping; stop looping and tell the truth.
+            probe.proven = true
+            setMicNotice("Звук не уходит на сервер. Нажмите кнопку микрофона или перезайдите в комнату.")
+            return
+          }
+          rtpRecoveryAttemptsRef.current += 1
+          console.warn(
+            `[media] Outbound audio silent room=${roomId} peer=${peerIdRef.current} producer=${producer.id} sent=${packetsSent} received=${packetsReceived} reports=${remoteReports}`,
+          )
+          await recoverMicRef.current("rtp-silent", true)
+        } catch {
+          // Stats are unavailable mid ICE restart — treat as unmeasured.
+        } finally {
+          checking = false
+        }
+      })()
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [hasJoinedRef, audioProducerRef, isMicMutedRef, roomId, peerIdRef])
 
   // Watch a camera track so we notice the moment the OS/browser kills it
   // (network drop, device sleep, driver reset). Without this the tile silently
@@ -898,6 +1040,11 @@ export function useMediaControls({
     micNotice,
     clearMicNotice: () => setMicNotice(null),
     recoverMic,
+    // Exposed so the join catch-up publish in use-mediasoup.ts can reuse the
+    // exact same track watching / transport readiness logic as toggleMic and
+    // recoverMic, instead of publishing the mic through an unguarded path.
+    watchMicTrack,
+    waitForSendTransport,
     screenQuality,
     isCamStarting,
     activeMicId,

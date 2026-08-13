@@ -452,6 +452,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           // recovery attempt) and the rest of the join still completes.
           if (hasMicRef.current && !audioProducerRef.current && !audioPublishInFlightRef.current) {
             audioPublishInFlightRef.current = true
+            let recoverMicAfterJoin = false
             try {
               let audioTrack = localStreamRef.current?.getAudioTracks()[0]
               // The previous mic track may have ended (device change, OS reclaim,
@@ -478,11 +479,28 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               }
               if (audioTrack && audioTrack.readyState === "live") {
                 audioTrack.enabled = true
-                const producer = await newSendTransport.produce({
+                // Re-read the send transport instead of trusting the one captured
+                // before the awaits above. Re-acquiring the mic can take well over
+                // a second (getUserMedia + the gate's "is it actually flowing"
+                // probe), and if the transport closed in that window `produce()`
+                // throws — which is exactly how a join ends up with working video
+                // and no audio at all.
+                const transport = newSendTransport.closed
+                  ? await mediaControls.waitForSendTransport()
+                  : newSendTransport
+                if (!transport || transport.closed) {
+                  throw new Error("Send transport unavailable for mic republish")
+                }
+                const producer = await transport.produce({
                   track: audioTrack,
                   codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
                 })
                 audioProducerRef.current = producer
+                // The join path used to publish without ever watching the track,
+                // so a device dying right after entering the room was invisible
+                // here — while the identical failure self-healed after a manual
+                // toggle. Watch it like every other publish path does.
+                mediaControls.watchMicTrack(audioTrack)
                 if (isMicMutedRef.current) {
                   audioTrack.enabled = false
                   producer.pause()
@@ -498,12 +516,20 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               }
             } catch (audioError) {
               console.error(`[media] Mic republish failed room=${roomId} peer=${peerIdRef.current}`, audioError)
-              // Hand it to the watchdog: it retries on the current transport and,
-              // if the device is really unavailable, turns the button off.
-              audioPublishInFlightRef.current = false
-              void mediaControls.recoverMic("join-republish-failed")
+              // Only flag it here — the call itself has to happen after `finally`
+              // releases the publish lock. Clearing the lock inside this catch and
+              // invoking recovery immediately was self-defeating in both
+              // directions: recoverMic() returns instantly while the lock is held,
+              // and once it did start, `finally` would clear the lock out from
+              // under the in-flight recovery, letting a concurrent toggle publish a
+              // second, orphaned audio producer that no mute ever reaches.
+              recoverMicAfterJoin = true
             } finally {
               audioPublishInFlightRef.current = false
+              // Lock is released, so recovery can actually run: it retries on the
+              // current transport and, if the device is really unavailable, turns
+              // the button off instead of leaving silent "mic on" UI.
+              if (recoverMicAfterJoin) void mediaControls.recoverMic("join-republish-failed")
             }
           }
 
