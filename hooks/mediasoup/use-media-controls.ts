@@ -121,14 +121,11 @@ export function useMediaControls({
 
     if (!existing) {
       try {
-        const constraints: MediaStreamConstraints = {
-          audio: getVoiceAudioConstraints(selectedMicIdRef.current),
-        }
-        const micStream = await navigator.mediaDevices.getUserMedia(constraints)
+        const capture = await captureMic(selectedMicIdRef.current)
         setPermissionError(null)
-        const track = micStream.getAudioTracks()[0]
+        const track = capture.track
         stream.addTrack(track)
-        const actualDeviceId = track.getSettings().deviceId ?? selectedMicIdRef.current ?? null
+        const actualDeviceId = capture.deviceId ?? selectedMicIdRef.current ?? null
         selectedMicIdRef.current = actualDeviceId ?? undefined
         setActiveMicId(actualDeviceId)
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
