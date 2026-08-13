@@ -24,9 +24,10 @@ export interface RoomSettingsState {
    */
   noiseGate: boolean
   /**
-   * Strength of the gate, 0..100 (integer). Interpolates the open threshold and
-   * the margin above the measured noise floor inside the worklet:
-   * 0 = cuts only true silence, 50 = default, 100 = only loud speech passes.
+   * Gate threshold as a POSITION ON THE MIC METER, 0..100 (integer). The meter
+   * maps -60..0 dBFS onto that range, so the number is literally where the
+   * handle sits on the bar in the settings dialog:
+   * 0 = never closes, 20 = default, 50 = cuts everything below -30 dBFS.
    */
   noiseGateStrength: number
   dirty: boolean
@@ -47,10 +48,12 @@ export interface RoomSettingsPayload {
   noiseGateStrength: number
 }
 
+export const DEFAULT_NOISE_GATE_THRESHOLD = 20
+
 const DEFAULTS: RoomSettingsPayload = {
   soundVolume: 80,
   noiseGate: true,
-  noiseGateStrength: 50,
+  noiseGateStrength: DEFAULT_NOISE_GATE_THRESHOLD,
 }
 
 export const useRoomSettingsStore = create<RoomSettingsState>()(
@@ -75,16 +78,16 @@ export const useRoomSettingsStore = create<RoomSettingsState>()(
     }),
     {
       name: "replixo:room-settings",
-      // v2 introduced noiseGateStrength. Older persisted state simply lacks the
-      // key, so merge it in from the defaults instead of leaving it undefined.
-      version: 2,
-      migrate: (persisted) => ({
-        ...(persisted as Partial<RoomSettingsState>),
-        noiseGateStrength:
-          typeof (persisted as Partial<RoomSettingsState>)?.noiseGateStrength === "number"
-            ? (persisted as RoomSettingsState).noiseGateStrength
-            : DEFAULTS.noiseGateStrength,
-      }) as RoomSettingsState,
+      // v2 introduced noiseGateStrength as an abstract 0..100 "strength".
+      // v3 redefined the same field as an absolute threshold on the mic meter,
+      // so old numbers mean something else entirely — drop them to the default
+      // and let the user re-place the handle on the (now visible) meter.
+      version: 3,
+      migrate: (persisted) =>
+        ({
+          ...(persisted as Partial<RoomSettingsState>),
+          noiseGateStrength: DEFAULTS.noiseGateStrength,
+        }) as RoomSettingsState,
     },
   ),
 )

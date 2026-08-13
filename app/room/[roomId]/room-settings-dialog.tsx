@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { useChatButtonStore } from "@/stores/chat-button-store"
 import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
-import { useRoomSettingsStore } from "@/stores/room-settings-store"
+import { DEFAULT_NOISE_GATE_THRESHOLD, useRoomSettingsStore } from "@/stores/room-settings-store"
 import { useRoomSettingsSync } from "@/hooks/use-room-settings-sync"
 import { useMicGateMeter } from "@/hooks/use-mic-gate-meter"
+import { MicGateThreshold } from "@/components/mic-gate-threshold"
 import { playJoinSound, playMessageSound, playScreenShareSound } from "@/lib/sounds"
 import { cn } from "@/lib/utils"
 
@@ -31,12 +32,14 @@ function formatHotkey(code: string | null): string {
   return ({ Space: "Пробел", Enter: "Enter", Escape: "Esc", Backquote: "`", Slash: "/" } as Record<string, string>)[code] ?? code
 }
 
-function strengthHint(strength: number): string {
-  if (strength <= 20) return "Мягко: режет только совсем тихие шумы."
-  if (strength <= 45) return "Ниже среднего: подойдёт для тихой комнаты."
-  if (strength <= 65) return "Базовая настройка: убирает клавиатуру и вентилятор."
-  if (strength <= 85) return "Сильно: пропускает только уверенную речь."
-  return "Максимум: тихую и далёкую речь может обрезать."
+// The hint describes the handle's position on the meter, not an abstract level.
+function strengthHint(threshold: number): string {
+  if (threshold === 0) return "Порог на нуле — гейт не закрывается."
+  if (threshold <= 12) return "Режет только совсем тихий шум."
+  if (threshold <= 30) return "Убирает клавиатуру и вентилятор."
+  if (threshold <= 55) return "Пропускает только уверенную речь."
+  if (threshold <= 80) return "Очень высоко — тихую речь обрежет."
+  return "Почти на максимуме — пройдёт только крик."
 }
 
 export function RoomSettingsDialog({ open, onOpenChange, initialTab = "chat" }: RoomSettingsDialogProps) {
@@ -108,33 +111,24 @@ export function RoomSettingsDialog({ open, onOpenChange, initialTab = "chat" }: 
             </button>
           </div>
 
-          <div className={cn("flex flex-col gap-3 transition-opacity", !sounds.noiseGate && "pointer-events-none opacity-50")}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">Сила подавления</span>
-                <span className="text-xs text-muted-foreground">{strengthHint(sounds.noiseGateStrength)}</span>
-              </div>
-              <span className="text-sm font-medium tabular-nums">{sounds.noiseGateStrength}%</span>
-            </div>
-            <Slider min={0} max={100} step={1} value={sounds.noiseGateStrength} onValueChange={(value) => sounds.setNoiseGateStrength(value as number)} aria-label="Сила шумоподавления" />
-
-            {/* Level vs. threshold on one bar: the filled part is what the mic
-                hears, the marker is where the gate opens. */}
-            <div className="flex flex-col gap-1.5">
-              <div className="relative h-2 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Уровень микрофона" aria-valuemin={0} aria-valuemax={100} aria-valuenow={meter.level}>
-                <div className={cn("h-full rounded-full transition-[width] duration-75", meter.open ? "bg-primary" : "bg-muted-foreground/50")} style={{ width: `${meter.level}%` }} />
-                {sounds.noiseGate && <div className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: `${meter.threshold}%` }} aria-hidden="true" />}
-              </div>
-              <p className="text-xs text-muted-foreground" aria-live="polite">
-                {!meter.live
-                  ? "Включите микрофон, чтобы увидеть уровень и проверить настройку."
-                  : sounds.noiseGate
-                    ? meter.open
-                      ? "Гейт открыт — вас слышно."
-                      : "Гейт закрыт — звук не передаётся."
-                    : "Шумоподавление выключено — передаётся всё."}
-              </p>
-            </div>
+          <div className={cn("flex flex-col gap-2 transition-opacity", !sounds.noiseGate && "pointer-events-none opacity-50")}>
+            <MicGateThreshold
+              value={sounds.noiseGateStrength}
+              onChange={sounds.setNoiseGateStrength}
+              level={meter.level}
+              open={meter.open}
+              live={meter.live}
+              disabled={!sounds.noiseGate}
+            />
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {!meter.live
+                ? "Включите микрофон, чтобы увидеть уровень и проверить настройку."
+                : !sounds.noiseGate
+                  ? "Шумоподавление выключено — передаётся всё."
+                  : meter.open
+                    ? `Гейт открыт — вас слышно. ${strengthHint(sounds.noiseGateStrength)}`
+                    : `Гейт закрыт — звук не передаётся. ${strengthHint(sounds.noiseGateStrength)}`}
+            </p>
           </div>
         </div>}
 
@@ -159,7 +153,7 @@ export function RoomSettingsDialog({ open, onOpenChange, initialTab = "chat" }: 
             // Only the gate — resetting the whole store here would also throw
             // away the user's sound volume, which lives on another tab.
             sounds.setNoiseGate(true)
-            sounds.setNoiseGateStrength(50)
+            sounds.setNoiseGateStrength(DEFAULT_NOISE_GATE_THRESHOLD)
             return
           }
           sounds.reset()
