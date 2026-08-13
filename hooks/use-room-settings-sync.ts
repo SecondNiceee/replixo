@@ -83,7 +83,7 @@ export function useRoomSettingsSync() {
 
     const unsubscribe = useRoomSettingsStore.subscribe((state, prev) => {
       if (!state.dirty) return
-      if (state.soundVolume === prev.soundVolume) return
+      if (state.soundVolume === prev.soundVolume && state.noiseGate === prev.noiseGate) return
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {

@@ -249,12 +249,14 @@ export const chatButtonSettings = pgTable('chat_button_settings', {
 // Общие настройки приложения для зарегистрированного пользователя.
 // Анонимные хранят то же самое в localStorage; при входе мёрджатся сюда.
 // soundVolume — громкость звуков приложения, 0..100 (целое число).
+// noiseGate — шумоподавление микрофона (гейт), включено по умолчанию.
 
 export const roomSettings = pgTable('room_settings', {
   userId: text('userId')
     .primaryKey()
     .references(() => user.id, { onDelete: 'cascade' }),
   soundVolume: integer('soundVolume').notNull().default(80),
+  noiseGate: boolean('noiseGate').notNull().default(true),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 })
 
