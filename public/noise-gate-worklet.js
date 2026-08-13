@@ -44,14 +44,46 @@
 
 const BLOCK = 128 // AudioWorklet render quantum
 
-// Absolute lower bound for the open threshold, in linear RMS (~ -52 dBFS).
-// Below this we're in the noise of the ADC itself; opening on it would defeat
-// the whole point.
-const ABSOLUTE_OPEN_RMS = 0.0025
+// --- user-adjustable strength ---------------------------------------------
+// The UI exposes ONE slider ("Сила шумоподавления", 0..100) instead of the four
+// numbers a gate really has, because those numbers are only meaningful
+// together: a threshold without its floor margin says nothing about whether a
+// whisper gets through. The slider therefore interpolates both.
+//
+//   0   — the gate barely ever closes (only true digital silence is cut).
+//   50  — default: kills a keyboard and a fan, keeps normal speech.
+//   100 — only clearly loud, close speech opens the channel.
+//
+// The absolute bound is interpolated GEOMETRICALLY (in dB), because loudness is
+// perceived logarithmically — a linear sweep would spend 90% of the slider in a
+// range the user cannot hear a difference in.
+const MIN_ABSOLUTE_OPEN_RMS = 0.0006 // ≈ -64 dBFS
+const MAX_ABSOLUTE_OPEN_RMS = 0.02 // ≈ -34 dBFS
+const MIN_FLOOR_MARGIN = 1.6 // ≈ +4 dB above the measured noise floor
+const MAX_FLOOR_MARGIN = 9 // ≈ +19 dB
+const DEFAULT_SENSITIVITY = 50
+
+function clampSensitivity(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return DEFAULT_SENSITIVITY
+  return Math.min(100, Math.max(0, value))
+}
+
+// Absolute lower bound for the open threshold, in linear RMS. Below this we're
+// in the noise of the ADC itself; opening on it would defeat the whole point.
+function absoluteOpenRms(sensitivity) {
+  const t = clampSensitivity(sensitivity) / 100
+  return MIN_ABSOLUTE_OPEN_RMS * Math.pow(MAX_ABSOLUTE_OPEN_RMS / MIN_ABSOLUTE_OPEN_RMS, t)
+}
 
 // How far above the measured noise floor the gate opens (linear multiplier).
-// 4x ≈ 12 dB — comfortably above hiss/fan, well below speech.
-const FLOOR_MARGIN = 4
+function floorMargin(sensitivity) {
+  const t = clampSensitivity(sensitivity) / 100
+  return MIN_FLOOR_MARGIN + (MAX_FLOOR_MARGIN - MIN_FLOOR_MARGIN) * t
+}
+
+// How often the processor reports its level to the main thread while a meter is
+// actually on screen. ~50 ms is smooth to the eye and ~20 messages/s at most.
+const LEVEL_REPORT_MS = 50
 
 // Closing needs the signal to drop this much below the open threshold (-6 dB).
 const HYSTERESIS = 0.5
@@ -82,10 +114,18 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
     const initial = options?.processorOptions ?? {}
 
     this.enabled = initial.enabled !== false
+    this.sensitivity = clampSensitivity(initial.sensitivity)
+    this.absoluteOpen = absoluteOpenRms(this.sensitivity)
+    this.margin = floorMargin(this.sensitivity)
+    // Metering is opt-in: nobody pays for postMessage traffic unless a meter is
+    // actually visible somewhere in the UI.
+    this.metering = initial.metering === true
+    this.meterElapsedMs = 0
+    this.meterPeak = 0
 
     // Envelope + floor state (linear RMS).
     this.env = 0
-    this.floor = ABSOLUTE_OPEN_RMS
+    this.floor = this.absoluteOpen
 
     // Gate state.
     this.open = false
@@ -106,18 +146,54 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (event) => {
       const data = event.data
       if (!data) return
-      if (data.type === "config" && typeof data.enabled === "boolean") {
-        this.enabled = data.enabled
-        if (!this.enabled) {
-          // Re-open immediately: a disabled gate must never hold the channel
-          // shut while it fades back to unity.
-          this.open = true
-          this.holdLeft = HOLD_MS
+      if (data.type === "config") {
+        if (typeof data.enabled === "boolean") {
+          this.enabled = data.enabled
+          if (!this.enabled) {
+            // Re-open immediately: a disabled gate must never hold the channel
+            // shut while it fades back to unity.
+            this.open = true
+            this.holdLeft = HOLD_MS
+          }
+        }
+        if (typeof data.sensitivity === "number") {
+          this.sensitivity = clampSensitivity(data.sensitivity)
+          this.absoluteOpen = absoluteOpenRms(this.sensitivity)
+          this.margin = floorMargin(this.sensitivity)
+          // Dragging the slider must not leave the gate stuck shut on a floor
+          // measured under the old settings: re-seat it at the new bound and let
+          // the follower settle again within a second.
+          if (this.floor < this.absoluteOpen) this.floor = this.absoluteOpen
+        }
+        if (typeof data.metering === "boolean") {
+          this.metering = data.metering
+          this.meterElapsedMs = 0
+          this.meterPeak = 0
         }
       } else if (data.type === "stop") {
         this.stopped = true
       }
     }
+  }
+
+  // Report the loudest RMS seen since the last report, together with the
+  // threshold it is being compared against. The UI draws both on one bar, so a
+  // user can see *why* the gate is closing instead of guessing at a number.
+  report(rms, threshold) {
+    if (!this.metering) return
+    if (rms > this.meterPeak) this.meterPeak = rms
+    this.meterElapsedMs += this.blockMs
+    if (this.meterElapsedMs < LEVEL_REPORT_MS) return
+    this.meterElapsedMs = 0
+    const peak = this.meterPeak
+    this.meterPeak = 0
+    this.port.postMessage({
+      type: "level",
+      rms: peak,
+      threshold,
+      open: this.enabled ? this.open : true,
+      gain: this.gain,
+    })
   }
 
   process(inputs, outputs) {
@@ -145,6 +221,14 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
       this.gain = 1
       outChannel.set(inChannel)
       for (let c = 1; c < output.length; c++) output[c].set(inChannel)
+      // The meter must keep working with the gate off — that's how the user
+      // compares "with" and "without" — so measure the level even here, but
+      // only while someone is watching.
+      if (this.metering) {
+        let sum = 0
+        for (let i = 0; i < n; i++) sum += inChannel[i] * inChannel[i]
+        this.report(Math.sqrt(sum / n), this.absoluteOpen)
+      }
       return true
     }
 
@@ -169,8 +253,9 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
           : this.floor + (this.env - this.floor) * this.floorRise
     }
 
-    const openThreshold = Math.max(ABSOLUTE_OPEN_RMS, this.floor * FLOOR_MARGIN)
+    const openThreshold = Math.max(this.absoluteOpen, this.floor * this.margin)
     const closeThreshold = openThreshold * HYSTERESIS
+    this.report(rms, openThreshold)
 
     // --- gate state machine ------------------------------------------------
     if (this.env >= openThreshold) {

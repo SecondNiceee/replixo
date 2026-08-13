@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils"
 import { OVERLAY_INTERACTIVE_ATTR } from "@/hooks/use-overlay-click-through"
 import { useChatPanel } from "./use-chat-panel"
 import { useAnnotationOverlay } from "./use-annotation-overlay"
-import { RoomSettingsDialog } from "./room-settings-dialog"
+import { RoomSettingsDialog, type Tab as SettingsTab } from "./room-settings-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -169,7 +169,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
   const [controlsCollapsed, setControlsCollapsed] = useState(false)
   const [participantsHidden, setParticipantsHidden] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<"chat" | "annotation" | "sounds">("chat")
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("mic")
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -208,7 +208,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
   // Перо включается/выключается сразу, без подсказки о двойном нажатии.
   const handleAnnotationButtonClick = toggleAnnotation
 
-  const openSettings = useCallback((tab: "chat" | "annotation" | "sounds" = "chat") => {
+  const openSettings = useCallback((tab: SettingsTab = "mic") => {
     setSettingsTab(tab)
     setSettingsOpen(true)
   }, [])
@@ -300,7 +300,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           isFixed={anyScreenShared}
           chatOpen={chatOpen}
           participantsOpen={!participantsHidden && anyScreenShared}
-          onOpenSettings={() => openSettings("chat")}
+          onOpenSettings={() => openSettings("mic")}
         />
       )}
 
