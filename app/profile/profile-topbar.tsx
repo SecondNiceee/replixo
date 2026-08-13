@@ -52,8 +52,10 @@ export function ProfileTopbar({
 
   return (
     <header className="topbar-surface flex shrink-0 items-center gap-2 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4">
+      {/* ?landing=1 — иначе / отправит авторизованного обратно в кабинет и
+          лендинг остался бы недоступен изнутри приложения. */}
       <a
-        href="/"
+        href="/?landing=1"
         className="mr-1 flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70"
       >
         <span

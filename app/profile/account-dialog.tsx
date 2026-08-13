@@ -1,7 +1,9 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { AtSign, Check, Loader2, Mail, Pencil, X } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { AtSign, Check, Loader2, LogOut, Mail, Pencil, Settings, X } from 'lucide-react'
+import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -31,7 +33,18 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    await authClient.signOut()
+    // refresh обязателен: без него серверный редирект с / на /profile всё ещё
+    // видел бы закешированную сессию и вернул бы нас обратно в кабинет.
+    router.push('/')
+    router.refresh()
+  }
 
   const startEdit = () => {
     setValue(displayName)
@@ -73,7 +86,7 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
     <Dialog>
       <DialogTrigger
         className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-foreground/5"
-        aria-label="Открыть настройки аккаунта"
+        aria-label="Открыть настройки"
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-sm font-semibold text-primary-foreground">
           {displayName.charAt(0).toUpperCase()}
@@ -82,13 +95,15 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
           <span className="truncate text-xs text-muted-foreground">{email}</span>
         </span>
-        <Pencil className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {/* Шестерёнка, а не карандаш: строка открывает настройки целиком —
+            и переименование, и выход, — а карандаш обещал бы только правку имени. */}
+        <Settings className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DialogTrigger>
 
       {/* app-dark обязателен: портал у <body> лежит вне <main class="app-dark">. */}
       <DialogContent className="app-dark bg-card sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Аккаунт</DialogTitle>
+          <DialogTitle>Настройки</DialogTitle>
           <DialogDescription>Ваш username виден друзьям и в заявках.</DialogDescription>
         </DialogHeader>
 
@@ -174,6 +189,24 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
               </Button>
             </div>
           )}
+        </div>
+
+        {/* Выход отделён линией: это единственное необратимое действие в панели,
+            и его нельзя ставить вплотную к безобидной правке username. */}
+        <div className="mt-1 border-t border-border/60 pt-4">
+          <Button
+            variant="ghost"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            {signingOut ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <LogOut className="size-4" aria-hidden="true" />
+            )}
+            Выйти из аккаунта
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
