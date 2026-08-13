@@ -8,6 +8,10 @@ import {
   releaseMicTrack,
   diagnoseMicTrack,
   isGatedMicTrack,
+  // Used by watchMicTrack to listen on the real device track behind the noise
+  // gate. This was missing, which made every watchMicTrack() call throw a
+  // ReferenceError — see the note there.
+  getRawMicTrack,
   type MicCapture,
 } from "@/lib/mic-gate"
 import { SCREEN_QUALITY_PRESETS } from "./types"
@@ -156,8 +160,18 @@ export function useMediaControls({
       void recoverMicRef.current("track-ended")
     }
     track.addEventListener("ended", onEnded)
-    const raw = getRawMicTrack(track)
-    if (raw && raw !== track) raw.addEventListener("ended", onEnded)
+    // Attaching a watcher is pure hardening — it must never be able to fail the
+    // publish that just succeeded. It previously could: `getRawMicTrack` wasn't
+    // imported, so this line threw a ReferenceError *after* produce() had already
+    // stored the producer, sending toggleMic into its rollback path. That killed
+    // the live track and showed "не удалось включить микрофон" while leaving an
+    // orphaned producer behind — a mic that was on, published, and silent.
+    try {
+      const raw = getRawMicTrack(track)
+      if (raw && raw !== track) raw.addEventListener("ended", onEnded)
+    } catch (err) {
+      console.error("[media] Failed to watch raw mic track", err)
+    }
   }, [localStreamRef])
 
   // ---------------------------------------------------------------------------
@@ -898,6 +912,11 @@ export function useMediaControls({
     micNotice,
     clearMicNotice: () => setMicNotice(null),
     recoverMic,
+    // Exposed so the join catch-up publish in use-mediasoup.ts can reuse the
+    // exact same track watching / transport readiness logic as toggleMic and
+    // recoverMic, instead of publishing the mic through an unguarded path.
+    watchMicTrack,
+    waitForSendTransport,
     screenQuality,
     isCamStarting,
     activeMicId,
