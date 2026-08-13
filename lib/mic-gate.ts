@@ -38,6 +38,10 @@ import { useRoomSettingsStore } from "@/stores/room-settings-store"
 // cached aggressively, so without this a deploy can keep running the old gate.
 const WORKLET_VERSION = "3"
 
+// How long we wait for a freshly granted device track to actually start flowing
+// before giving up on the gate. See `waitForTrackFlowing` below.
+const MUTED_TRACK_WAIT_MS = 1500
+
 export interface MicCapture {
   /** The track to publish and to keep inside the local stream. */
   track: MediaStreamTrack
@@ -114,10 +118,48 @@ async function ensureWorklet(ctx: AudioContext): Promise<boolean> {
   }
 }
 
+/**
+ * Resolve once the device track is actually delivering media (`muted === false`),
+ * or after `timeoutMs`.
+ *
+ * This is THE mitigation for the rare "I joined and nobody can hear me" bug:
+ * Chromium leaves a `MediaStreamAudioSourceNode` PERMANENTLY silent when it is
+ * created while its track is still `muted`, and a fresh getUserMedia track is
+ * born muted more often than one would like (microphone held by another app,
+ * Windows still switching the default device, a Bluetooth headset finishing its
+ * handshake, a cold Electron start). Building the gate in that window publishes
+ * a track that is alive, never ends and carries absolute silence — so the user
+ * sees "mic on", hears everyone else, and is inaudible until they rejoin.
+ *
+ * lib/audio-unlock.ts already defends against the same Chromium behaviour on the
+ * INCOMING side; this is the outgoing counterpart.
+ */
+function waitForTrackFlowing(track: MediaStreamTrack, timeoutMs: number): Promise<boolean> {
+  if (!track.muted) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (flowing: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      track.removeEventListener("unmute", onUnmute)
+      track.removeEventListener("ended", onEnded)
+      resolve(flowing)
+    }
+    const onUnmute = () => finish(true)
+    const onEnded = () => finish(false)
+    const timer = setTimeout(() => finish(!track.muted), timeoutMs)
+    track.addEventListener("unmute", onUnmute)
+    track.addEventListener("ended", onEnded)
+  })
+}
+
 async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null> {
   try {
     const ctx = getSharedAudioContext()
     if (!ctx) return null
+    // Never build on a muted device track (permanent-silence trap, see above).
+    if (raw.muted || raw.readyState !== "live") return null
     if (ctx.state === "suspended") {
       try {
         await ctx.resume()
@@ -129,6 +171,9 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
     // destination track would silence the user completely.
     if (ctx.state !== "running") return null
     if (!(await ensureWorklet(ctx))) return null
+    // Re-check: `resume()` / `addModule()` are awaited above, and the device may
+    // have gone muted meanwhile.
+    if (raw.muted || raw.readyState !== "live") return null
 
     const source = ctx.createMediaStreamSource(new MediaStream([raw]))
     const node = new AudioWorkletNode(ctx, "mic-noise-gate", {
@@ -221,9 +266,46 @@ export async function captureMic(deviceId?: string): Promise<MicCapture> {
 
   const grantedDeviceId = raw.getSettings().deviceId ?? deviceId ?? null
 
+  // Give the device a moment to actually start flowing. If it doesn't, we
+  // publish the RAW track: no noise gate, but guaranteed audible — infinitely
+  // better than a silent WebAudio graph nobody notices.
+  await waitForTrackFlowing(raw, MUTED_TRACK_WAIT_MS)
+
   const gated = await buildGate(raw)
   if (!gated) return { track: raw, deviceId: grantedDeviceId, gated: false }
   return { track: gated, deviceId: grantedDeviceId, gated: true }
+}
+
+/**
+ * The raw device track behind a published one (the published track itself when
+ * it isn't gated). Health checks must look here: a gate's destination track is
+ * always "live" and never "muted", so it hides device loss and device mutes.
+ */
+export function getRawMicTrack(track: MediaStreamTrack | null | undefined): MediaStreamTrack | null {
+  if (!track) return null
+  return pipelines.get(track)?.raw ?? track
+}
+
+/** True when `track` is a gate output rather than a plain device track. */
+export function isGatedMicTrack(track: MediaStreamTrack | null | undefined): boolean {
+  return !!track && pipelines.has(track)
+}
+
+/**
+ * Why a published microphone track cannot currently be carrying audio, or null
+ * when it looks healthy. Used by the mic watchdog to decide on re-capture.
+ */
+export function diagnoseMicTrack(track: MediaStreamTrack | null | undefined):
+  | "no-track" | "ended" | "device-muted" | "context-not-running" | null {
+  if (!track) return "no-track"
+  if (track.readyState === "ended") return "ended"
+  const pipeline = pipelines.get(track)
+  if (!pipeline) return track.muted ? "device-muted" : null
+  if (pipeline.raw.readyState === "ended") return "ended"
+  if (pipeline.raw.muted) return "device-muted"
+  const ctx = getSharedAudioContext()
+  if (!ctx || ctx.state !== "running") return "context-not-running"
+  return null
 }
 
 /**
