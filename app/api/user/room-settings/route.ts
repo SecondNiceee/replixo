@@ -8,9 +8,10 @@ import { roomSettings } from '@/lib/db/schema'
 export type RoomSettingsPayload = {
   soundVolume: number
   noiseGate: boolean
+  noiseGateStrength: number
 }
 
-function clampVolume(n: unknown, fallback: number): number {
+function clamp100(n: unknown, fallback: number): number {
   const v = typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : fallback
   return Math.min(100, Math.max(0, v))
 }
@@ -19,9 +20,10 @@ function parseBody(body: unknown): RoomSettingsPayload | null {
   if (!body || typeof body !== 'object') return null
   const b = body as Record<string, unknown>
   return {
-    soundVolume: clampVolume(b.soundVolume, 80),
+    soundVolume: clamp100(b.soundVolume, 80),
     // Gate is on by default, so anything that isn't an explicit `false` keeps it on.
     noiseGate: typeof b.noiseGate === 'boolean' ? b.noiseGate : true,
+    noiseGateStrength: clamp100(b.noiseGateStrength, 50),
   }
 }
 
@@ -46,6 +48,7 @@ export async function GET() {
     settings: {
       soundVolume: row.soundVolume,
       noiseGate: row.noiseGate,
+      noiseGateStrength: row.noiseGateStrength,
     } satisfies RoomSettingsPayload,
   })
 }
@@ -76,6 +79,7 @@ export async function PUT(req: NextRequest) {
     settings: {
       soundVolume: row.soundVolume,
       noiseGate: row.noiseGate,
+      noiseGateStrength: row.noiseGateStrength,
     } satisfies RoomSettingsPayload,
   })
 }

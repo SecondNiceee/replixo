@@ -36,7 +36,7 @@ import { useRoomSettingsStore } from "@/stores/room-settings-store"
 
 // Bump when public/noise-gate-worklet.js changes — AudioWorklet modules are
 // cached aggressively, so without this a deploy can keep running the old gate.
-const WORKLET_VERSION = "1"
+const WORKLET_VERSION = "2"
 
 export interface MicCapture {
   /** The track to publish and to keep inside the local stream. */
@@ -66,14 +66,20 @@ function gateEnabled(): boolean {
   return useRoomSettingsStore.getState().noiseGate
 }
 
-// Push the user's toggle into every live gate. Bound lazily (never at import
-// time) so nothing subscribes on the server or on pages without a call.
+function gateStrength(): number {
+  return useRoomSettingsStore.getState().noiseGateStrength
+}
+
+// Push the user's toggle / slider into every live gate. Bound lazily (never at
+// import time) so nothing subscribes on the server or on pages without a call.
 function bindStore() {
   if (storeBound) return
   storeBound = true
   useRoomSettingsStore.subscribe((state, prev) => {
-    if (state.noiseGate === prev.noiseGate) return
-    setNoiseGateEnabled(state.noiseGate)
+    if (state.noiseGate !== prev.noiseGate) setNoiseGateEnabled(state.noiseGate)
+    if (state.noiseGateStrength !== prev.noiseGateStrength) {
+      setNoiseGateStrength(state.noiseGateStrength)
+    }
   })
 }
 
@@ -132,8 +138,20 @@ async function buildGate(raw: MediaStreamTrack): Promise<MediaStreamTrack | null
       channelCount: 1,
       channelCountMode: "explicit",
       channelInterpretation: "speakers",
-      processorOptions: { enabled: gateEnabled() },
+      processorOptions: {
+        enabled: gateEnabled(),
+        sensitivity: gateStrength(),
+        // A gate created while the settings meter is already open must start
+        // reporting immediately, otherwise the bar stays dead until the user
+        // touches something.
+        metering: levelListeners.size > 0,
+      },
     })
+    node.port.onmessage = (event) => {
+      const data = event.data as GateLevelMessage | undefined
+      if (data?.type !== "level") return
+      emitLevel(data)
+    }
     const dest = ctx.createMediaStreamDestination()
     source.connect(node)
     node.connect(dest)
@@ -225,11 +243,98 @@ export function releaseMicTrack(track: MediaStreamTrack | null | undefined): voi
 
 /** Apply the user's Gate preference to every live microphone pipeline. */
 export function setNoiseGateEnabled(enabled: boolean): void {
+  broadcast({ enabled })
+}
+
+/** Apply the Gate strength slider (0..100) to every live pipeline. */
+export function setNoiseGateStrength(strength: number): void {
+  broadcast({ sensitivity: Math.min(100, Math.max(0, Math.round(strength))) })
+}
+
+function broadcast(config: { enabled?: boolean; sensitivity?: number; metering?: boolean }) {
   for (const pipeline of pipelines.values()) {
     try {
-      pipeline.node.port.postMessage({ type: "config", enabled })
+      pipeline.node.port.postMessage({ type: "config", ...config })
     } catch {
       /* ignore — the graph is being torn down */
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Live level metering (for the Gate settings UI)
+//
+// The settings dialog draws the microphone level against the threshold the gate
+// is actually using, which is the only honest way to explain the slider. The
+// numbers can only come from the worklet, so they are relayed here; while nobody
+// is listening the worklet posts nothing at all.
+// ---------------------------------------------------------------------------
+
+interface GateLevelMessage {
+  type: "level"
+  /** Peak RMS since the previous report, linear 0..1. */
+  rms: number
+  /** Open threshold the gate compared it against, linear 0..1. */
+  threshold: number
+  open: boolean
+  gain: number
+}
+
+export interface MicGateLevel {
+  /** Microphone level, 0..100 (mapped from dBFS so it reads like a VU meter). */
+  level: number
+  /** Where the gate's open threshold sits on the same 0..100 scale. */
+  threshold: number
+  /** True while the gate is letting audio through. */
+  open: boolean
+}
+
+type LevelListener = (level: MicGateLevel) => void
+
+const levelListeners = new Set<LevelListener>()
+
+// -60 dBFS is inaudible in practice, 0 dBFS is clipping — mapping that span onto
+// 0..100 makes quiet speech visible instead of a barely-moving nub.
+const METER_FLOOR_DB = -60
+
+function toMeterScale(rms: number): number {
+  if (!(rms > 0)) return 0
+  const db = 20 * Math.log10(rms)
+  const ratio = (db - METER_FLOOR_DB) / -METER_FLOOR_DB
+  return Math.min(100, Math.max(0, Math.round(ratio * 100)))
+}
+
+function emitLevel(message: GateLevelMessage) {
+  if (levelListeners.size === 0) return
+  const payload: MicGateLevel = {
+    level: toMeterScale(message.rms),
+    threshold: toMeterScale(message.threshold),
+    open: message.open,
+  }
+  for (const listener of levelListeners) {
+    try {
+      listener(payload)
+    } catch {
+      /* a broken consumer must not take the meter down */
+    }
+  }
+}
+
+/**
+ * Subscribe to the microphone level as measured inside the gate.
+ * Returns an unsubscribe function. Metering is turned on in the worklet for the
+ * first listener and off again after the last one leaves.
+ */
+export function subscribeMicGateLevel(listener: LevelListener): () => void {
+  levelListeners.add(listener)
+  if (levelListeners.size === 1) broadcast({ metering: true })
+  return () => {
+    levelListeners.delete(listener)
+    if (levelListeners.size === 0) broadcast({ metering: false })
+  }
+}
+
+/** True when at least one gated microphone pipeline is live. */
+export function hasActiveMicGate(): boolean {
+  return pipelines.size > 0
 }

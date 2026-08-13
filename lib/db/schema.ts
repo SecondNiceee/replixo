@@ -250,6 +250,7 @@ export const chatButtonSettings = pgTable('chat_button_settings', {
 // Анонимные хранят то же самое в localStorage; при входе мёрджатся сюда.
 // soundVolume — громкость звуков приложения, 0..100 (целое число).
 // noiseGate — шумоподавление микрофона (гейт), включено по умолчанию.
+// noiseGateStrength — сила гейта, 0..100 (50 — значение по умолчанию).
 
 export const roomSettings = pgTable('room_settings', {
   userId: text('userId')
@@ -257,6 +258,7 @@ export const roomSettings = pgTable('room_settings', {
     .references(() => user.id, { onDelete: 'cascade' }),
   soundVolume: integer('soundVolume').notNull().default(80),
   noiseGate: boolean('noiseGate').notNull().default(true),
+  noiseGateStrength: integer('noiseGateStrength').notNull().default(50),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 })
 

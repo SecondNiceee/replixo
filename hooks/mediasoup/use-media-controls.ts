@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
-import { getVoiceAudioConstraints } from "@/lib/media-constraints"
+import { captureMic, releaseMicTrack, type MicCapture } from "@/lib/mic-gate"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -170,15 +170,15 @@ export function useMediaControls({
     if (!stream || isMicSwitching) return false
 
     setIsMicSwitching(true)
-    let micStream: MediaStream | null = null
+    let capture: MicCapture | null = null
     try {
       const oldTrack = stream.getAudioTracks()[0]
       const wasEnabled = oldTrack?.enabled ?? true
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: getVoiceAudioConstraints(deviceId),
-      })
-      const newTrack = micStream.getAudioTracks()[0]
-      if (!newTrack || newTrack.readyState !== "live") throw new Error("Microphone track is not live")
+      // Goes through the gate as well — switching a device must never silently
+      // drop noise suppression.
+      capture = await captureMic(deviceId)
+      const newTrack = capture.track
+      if (newTrack.readyState !== "live") throw new Error("Microphone track is not live")
 
       newTrack.enabled = wasEnabled
       const producer = audioProducerRef.current
@@ -196,17 +196,19 @@ export function useMediaControls({
 
       if (oldTrack) {
         stream.removeTrack(oldTrack)
-        oldTrack.stop()
+        // Releases the hidden raw device track behind the gate too — stopping
+        // the published track alone would keep the old microphone open.
+        releaseMicTrack(oldTrack)
       }
       stream.addTrack(newTrack)
 
-      const actualDeviceId = newTrack.getSettings().deviceId ?? deviceId
+      const actualDeviceId = capture.deviceId ?? deviceId
       selectedMicIdRef.current = actualDeviceId
       setActiveMicId(actualDeviceId)
       dispatch({ type: "TOGGLE_MIC", isMuted: !wasEnabled, hasMic: true })
       return true
     } catch {
-      micStream?.getTracks().forEach((track) => track.stop())
+      releaseMicTrack(capture?.track)
       dispatch({ type: "ERROR", error: "Не удалось переключить микрофон" })
       return false
     } finally {

@@ -1,6 +1,6 @@
 "use client"
 
-import { getVoiceAudioConstraints } from "@/lib/media-constraints"
+import { captureMic, releaseMicTrack } from "@/lib/mic-gate"
 
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
@@ -279,7 +279,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     recvTransportRef.current?.close()
     sendTransportRef.current = null
     recvTransportRef.current = null
-    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    // `releaseMicTrack` also stops the raw device track hidden behind a gated
+    // audio track; for video (and an ungated mic) it is a plain `stop()`.
+    localStreamRef.current?.getTracks().forEach((t) => releaseMicTrack(t))
     localStreamRef.current = null
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
@@ -427,15 +429,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             if (!audioTrack || audioTrack.readyState === "ended") {
               try {
                 if (audioTrack) {
-                  audioTrack.stop()
                   localStreamRef.current?.removeTrack(audioTrack)
+                  releaseMicTrack(audioTrack)
                 }
-                const constraints: MediaStreamConstraints = {
-                  audio: getVoiceAudioConstraints(selectedMicIdRef.current),
-                }
-                const micStream = await navigator.mediaDevices.getUserMedia(constraints)
-                audioTrack = micStream.getAudioTracks()[0]
-                if (audioTrack) localStreamRef.current?.addTrack(audioTrack)
+                // Re-acquire through the gate, so a rejoin never republishes a
+                // raw (unsuppressed) microphone.
+                const capture = await captureMic(selectedMicIdRef.current)
+                audioTrack = capture.track
+                selectedMicIdRef.current = capture.deviceId ?? selectedMicIdRef.current
+                localStreamRef.current?.addTrack(audioTrack)
               } catch {
                 audioTrack = undefined
               }
