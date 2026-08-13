@@ -24,6 +24,7 @@ import {
   setPeerClient,
   getOrCreateRoom,
   evictPeer,
+  isRoomCreationAllowed,
 } from './room-registry'
 
 // ---------------------------------------------------------------------------
@@ -81,7 +82,11 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
           return err(callback as Callback<never>, 'Некорректные данные подключения')
         }
-        if (!create && !rooms.has(roomId)) {
+        // Комната ещё не поднята — пускаем только того, кто пришёл её создавать,
+        // либо по коду, который сервер сам выдал под звонок (там «создателя»
+        // нет: оба участника просто идут по ссылке, и кто успел первым, тот и
+        // поднимает комнату).
+        if (!create && !rooms.has(roomId) && !isRoomCreationAllowed(roomId)) {
           return err(callback as Callback<never>, 'Комната не найдена')
         }
 
