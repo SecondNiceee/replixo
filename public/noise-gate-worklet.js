@@ -15,14 +15,14 @@
 //
 //   mic ──▶ [this worklet] ──▶ MediaStreamDestination ──▶ published track
 //
-// WHY THE THRESHOLD IS ADAPTIVE
-// -----------------------------
-// A fixed threshold cannot work across setups: a condenser mic at high gain
-// idles 25 dB louder than a headset. So we continuously track the noise FLOOR
-// (a slow follower that falls fast and rises very slowly, i.e. it settles on
-// the quietest recent level) and place the open threshold a fixed margin above
-// it, never below an absolute minimum. On a quiet headset the gate stays at the
-// absolute floor; on a noisy mic it lifts itself out of the noise automatically.
+// WHY THE THRESHOLD IS MANUAL
+// ---------------------------
+// It used to adapt itself to the measured noise floor, which sounds clever but
+// is impossible to explain in a UI: the user drags a slider and the gate quietly
+// disagrees with it a second later. Now the threshold is exactly where the user
+// put it — one absolute level on the same dBFS scale the settings meter draws —
+// so the handle on the meter IS the cut-off line. Whatever sits left of the
+// handle never leaves the machine.
 //
 // SHAPE OF THE ENVELOPE (why hold + separate attack/release)
 // ---------------------------------------------------------
@@ -44,41 +44,33 @@
 
 const BLOCK = 128 // AudioWorklet render quantum
 
-// --- user-adjustable strength ---------------------------------------------
-// The UI exposes ONE slider ("Сила шумоподавления", 0..100) instead of the four
-// numbers a gate really has, because those numbers are only meaningful
-// together: a threshold without its floor margin says nothing about whether a
-// whisper gets through. The slider therefore interpolates both.
+// --- user-adjustable threshold --------------------------------------------
+// `sensitivity` is 0..100 and means POSITION ON THE METER, not an abstract
+// "strength": the settings UI maps -60..0 dBFS onto 0..100 and draws the mic
+// level on that scale, so the same number is the gate's cut-off line.
 //
-//   0   — the gate barely ever closes (only true digital silence is cut).
-//   50  — default: kills a keyboard and a fan, keeps normal speech.
-//   100 — only clearly loud, close speech opens the channel.
-//
-// The absolute bound is interpolated GEOMETRICALLY (in dB), because loudness is
-// perceived logarithmically — a linear sweep would spend 90% of the slider in a
-// range the user cannot hear a difference in.
-const MIN_ABSOLUTE_OPEN_RMS = 0.0006 // ≈ -64 dBFS
-const MAX_ABSOLUTE_OPEN_RMS = 0.02 // ≈ -34 dBFS
-const MIN_FLOOR_MARGIN = 1.6 // ≈ +4 dB above the measured noise floor
-const MAX_FLOOR_MARGIN = 9 // ≈ +19 dB
-const DEFAULT_SENSITIVITY = 50
+//   0   — the gate never closes (everything passes).
+//   ~20 — default: kills a keyboard, a fan and breathing.
+//   50  — cuts anything quieter than -30 dBFS, i.e. half the bar.
+//   100 — nothing gets through at all.
+const METER_FLOOR_DB = -60
+const DEFAULT_SENSITIVITY = 20
 
 function clampSensitivity(value) {
   if (typeof value !== "number" || Number.isNaN(value)) return DEFAULT_SENSITIVITY
   return Math.min(100, Math.max(0, value))
 }
 
-// Absolute lower bound for the open threshold, in linear RMS. Below this we're
-// in the noise of the ADC itself; opening on it would defeat the whole point.
-function absoluteOpenRms(sensitivity) {
-  const t = clampSensitivity(sensitivity) / 100
-  return MIN_ABSOLUTE_OPEN_RMS * Math.pow(MAX_ABSOLUTE_OPEN_RMS / MIN_ABSOLUTE_OPEN_RMS, t)
-}
-
-// How far above the measured noise floor the gate opens (linear multiplier).
-function floorMargin(sensitivity) {
-  const t = clampSensitivity(sensitivity) / 100
-  return MIN_FLOOR_MARGIN + (MAX_FLOOR_MARGIN - MIN_FLOOR_MARGIN) * t
+/**
+ * Open threshold in linear RMS for a meter position. Exactly the inverse of the
+ * UI's dBFS → 0..100 mapping, which is what keeps the handle honest.
+ * Position 0 returns 0: a gate that can never close.
+ */
+function openRmsFor(sensitivity) {
+  const position = clampSensitivity(sensitivity)
+  if (position <= 0) return 0
+  const db = METER_FLOOR_DB - (METER_FLOOR_DB * position) / 100
+  return Math.pow(10, db / 20)
 }
 
 // How often the processor reports its level to the main thread while a meter is
@@ -96,12 +88,6 @@ const HOLD_MS = 220
 const ENV_ATTACK_MS = 5
 const ENV_RELEASE_MS = 60
 
-// Noise-floor follower. Falls quickly towards a new quiet level, rises very
-// slowly — so a long silence re-measures the floor within a second, while
-// sustained speech barely lifts it.
-const FLOOR_FALL = 0.3
-const FLOOR_RISE_MS = 4000
-
 function onePoleCoef(ms, sampleRate) {
   const samples = (ms / 1000) * sampleRate
   if (samples <= 0) return 1
@@ -115,17 +101,15 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
 
     this.enabled = initial.enabled !== false
     this.sensitivity = clampSensitivity(initial.sensitivity)
-    this.absoluteOpen = absoluteOpenRms(this.sensitivity)
-    this.margin = floorMargin(this.sensitivity)
+    this.openThreshold = openRmsFor(this.sensitivity)
     // Metering is opt-in: nobody pays for postMessage traffic unless a meter is
     // actually visible somewhere in the UI.
     this.metering = initial.metering === true
     this.meterElapsedMs = 0
     this.meterPeak = 0
 
-    // Envelope + floor state (linear RMS).
+    // Envelope state (linear RMS).
     this.env = 0
-    this.floor = this.absoluteOpen
 
     // Gate state.
     this.open = false
@@ -134,7 +118,6 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
 
     this.envAttack = onePoleCoef(ENV_ATTACK_MS, sampleRate)
     this.envRelease = onePoleCoef(ENV_RELEASE_MS, sampleRate)
-    this.floorRise = onePoleCoef(FLOOR_RISE_MS, sampleRate)
 
     // Per-sample gain increments.
     this.attackStep = 1 / Math.max(1, (ATTACK_MS / 1000) * sampleRate)
@@ -158,12 +141,9 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
         }
         if (typeof data.sensitivity === "number") {
           this.sensitivity = clampSensitivity(data.sensitivity)
-          this.absoluteOpen = absoluteOpenRms(this.sensitivity)
-          this.margin = floorMargin(this.sensitivity)
-          // Dragging the slider must not leave the gate stuck shut on a floor
-          // measured under the old settings: re-seat it at the new bound and let
-          // the follower settle again within a second.
-          if (this.floor < this.absoluteOpen) this.floor = this.absoluteOpen
+          // Takes effect on the very next block: dragging the handle is meant to
+          // be audible while the finger is still down.
+          this.openThreshold = openRmsFor(this.sensitivity)
         }
         if (typeof data.metering === "boolean") {
           this.metering = data.metering
@@ -227,7 +207,7 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
       if (this.metering) {
         let sum = 0
         for (let i = 0; i < n; i++) sum += inChannel[i] * inChannel[i]
-        this.report(Math.sqrt(sum / n), this.absoluteOpen)
+        this.report(Math.sqrt(sum / n), this.openThreshold)
       }
       return true
     }
@@ -242,18 +222,9 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
         ? this.env + (rms - this.env) * this.envAttack
         : this.env + (rms - this.env) * this.envRelease
 
-    // --- adaptive noise floor ---------------------------------------------
-    // Only track the floor while the gate is CLOSED. Tracking during speech
-    // would let a long monologue drag the floor (and therefore the threshold)
-    // upward until the gate started cutting the speaker off.
-    if (!this.open) {
-      this.floor =
-        this.env < this.floor
-          ? this.floor + (this.env - this.floor) * FLOOR_FALL
-          : this.floor + (this.env - this.floor) * this.floorRise
-    }
-
-    const openThreshold = Math.max(this.absoluteOpen, this.floor * this.margin)
+    // --- threshold ---------------------------------------------------------
+    // Exactly where the user dropped the handle. No adaptation, no surprises.
+    const openThreshold = this.openThreshold
     const closeThreshold = openThreshold * HYSTERESIS
     this.report(rms, openThreshold)
 

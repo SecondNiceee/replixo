@@ -23,7 +23,8 @@ function parseBody(body: unknown): RoomSettingsPayload | null {
     soundVolume: clamp100(b.soundVolume, 80),
     // Gate is on by default, so anything that isn't an explicit `false` keeps it on.
     noiseGate: typeof b.noiseGate === 'boolean' ? b.noiseGate : true,
-    noiseGateStrength: clamp100(b.noiseGateStrength, 50),
+    // Threshold position on the mic meter (0..100 ≙ -60..0 dBFS).
+    noiseGateStrength: clamp100(b.noiseGateStrength, 20),
   }
 }
 

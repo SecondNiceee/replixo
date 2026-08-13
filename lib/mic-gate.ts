@@ -36,7 +36,7 @@ import { useRoomSettingsStore } from "@/stores/room-settings-store"
 
 // Bump when public/noise-gate-worklet.js changes — AudioWorklet modules are
 // cached aggressively, so without this a deploy can keep running the old gate.
-const WORKLET_VERSION = "2"
+const WORKLET_VERSION = "3"
 
 export interface MicCapture {
   /** The track to publish and to keep inside the local stream. */
@@ -246,7 +246,7 @@ export function setNoiseGateEnabled(enabled: boolean): void {
   broadcast({ enabled })
 }
 
-/** Apply the Gate strength slider (0..100) to every live pipeline. */
+/** Apply the Gate threshold handle (0..100 on the meter scale) to every live pipeline. */
 export function setNoiseGateStrength(strength: number): void {
   broadcast({ sensitivity: Math.min(100, Math.max(0, Math.round(strength))) })
 }
@@ -296,6 +296,16 @@ const levelListeners = new Set<LevelListener>()
 // -60 dBFS is inaudible in practice, 0 dBFS is clipping — mapping that span onto
 // 0..100 makes quiet speech visible instead of a barely-moving nub.
 const METER_FLOOR_DB = -60
+
+/**
+ * A meter position (0..100) back to dBFS — the UI labels the threshold handle
+ * with it, because "-42 dB" is the only number that means anything to someone
+ * who has tuned a mic before.
+ */
+export function meterPositionToDb(position: number): number {
+  const clamped = Math.min(100, Math.max(0, position))
+  return Math.round(METER_FLOOR_DB - (METER_FLOOR_DB * clamped) / 100)
+}
 
 function toMeterScale(rms: number): number {
   if (!(rms > 0)) return 0
