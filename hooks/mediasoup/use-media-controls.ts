@@ -1,9 +1,15 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import type { Socket } from "socket.io-client"
 import { playScreenShareSound, playScreenShareStopSound } from "@/lib/sounds"
-import { captureMic, releaseMicTrack, type MicCapture } from "@/lib/mic-gate"
+import {
+  captureMic,
+  releaseMicTrack,
+  diagnoseMicTrack,
+  isGatedMicTrack,
+  type MicCapture,
+} from "@/lib/mic-gate"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -40,6 +46,15 @@ function getScreenAudioConstraint(): boolean | MediaTrackConstraints {
   } as MediaTrackConstraints
 }
 
+// Single source of truth for the microphone producer options: the mic is
+// published from three places (toggle, device switch, recovery) and they must
+// not drift apart.
+const MIC_CODEC_OPTIONS = {
+  opusFec: true,
+  opusDtx: true,
+  opusMaxAverageBitrate: 64_000,
+} as const
+
 interface UseMediaControlsParams {
   roomId: string
   peerIdRef: React.MutableRefObject<string>
@@ -56,6 +71,17 @@ interface UseMediaControlsParams {
   // Reflects the user's camera intent, so recovery can republish paused
   // instead of unexpectedly turning the camera back on.
   isCamOffRef?: React.MutableRefObject<boolean>
+  // The user's mute intent, so mic recovery republishes paused instead of
+  // unexpectedly opening a live microphone.
+  isMicMutedRef?: React.MutableRefObject<boolean>
+  // Guards against two microphone producers being created at once. The join /
+  // rejoin catch-up publish in use-mediasoup shares this ref with `toggleMic`,
+  // because `!audioProducerRef.current` alone is not a lock: `produce()` is
+  // async, so a click during join used to create a second, orphaned producer
+  // that no mute ever reached ("I'm muted but they still hear me").
+  audioPublishInFlightRef?: React.MutableRefObject<boolean>
+  /** True while we're in a room; the mic watchdog only runs then. */
+  hasJoinedRef?: React.MutableRefObject<boolean>
   /**
    * Called when the user deliberately turns their camera ON. The weak-network
    * guard may have video suppressed at that moment, and without this signal it
@@ -80,6 +106,9 @@ export function useMediaControls({
   screenQualityRef,
   selectedMicIdRef,
   isCamOffRef,
+  isMicMutedRef,
+  audioPublishInFlightRef,
+  hasJoinedRef,
   onUserWantsVideo,
   dispatch,
 }: UseMediaControlsParams) {
@@ -89,9 +118,21 @@ export function useMediaControls({
   // few seconds). The UI shows a loader on the camera button during this window.
   const [isCamStarting, setIsCamStarting] = useState(false)
   const [activeMicId, setActiveMicId] = useState<string | null>(null)
+  // Non-fatal microphone problems (publish failed, device vanished, recovery
+  // gave up). Deliberately NOT dispatched as ERROR: that sets status="error" and
+  // replaces the whole room UI, which is far too destructive for "your mic did
+  // not come up" — and it also hides the fact that the call itself is fine.
+  const [micNotice, setMicNotice] = useState<string | null>(null)
   const [isMicSwitching, setIsMicSwitching] = useState(false)
   const screenRecoveryInFlightRef = useRef(false)
   const camRecoveryInFlightRef = useRef(false)
+  const micRecoveryInFlightRef = useRef(false)
+  // Fallback when the caller doesn't pass a shared publish lock.
+  const localAudioPublishLockRef = useRef(false)
+  const audioPublishLockRef = audioPublishInFlightRef ?? localAudioPublishLockRef
+  // Indirection so the microphone watchdog can call recovery even though
+  // recoverMic is declared further down.
+  const recoverMicRef = useRef<(reason: string) => Promise<boolean>>(async () => false)
   // Indirection so the camera track's "ended" watcher can call recovery even
   // though recoverCamera is declared further down.
   const recoverCameraRef = useRef<() => Promise<boolean>>(async () => false)
@@ -120,30 +161,56 @@ export function useMediaControls({
     const existing = stream.getAudioTracks()[0]
 
     if (!existing) {
+      // Turning the mic ON. Two things used to go wrong here and both left the
+      // user silent while the button showed "mic on":
+      //   * the optimistic TOGGLE_MIC was dispatched BEFORE produce(), and a
+      //     failed / timed-out publish was never rolled back;
+      //   * nothing serialised concurrent publishes.
+      if (audioPublishLockRef.current) return
+      audioPublishLockRef.current = true
+      let capture: MicCapture | null = null
       try {
-        const capture = await captureMic(selectedMicIdRef.current)
+        capture = await captureMic(selectedMicIdRef.current)
         setPermissionError(null)
+        setMicNotice(null)
         const track = capture.track
         stream.addTrack(track)
         const actualDeviceId = capture.deviceId ?? selectedMicIdRef.current ?? null
         selectedMicIdRef.current = actualDeviceId ?? undefined
         setActiveMicId(actualDeviceId)
         dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
+
         const transport = sendTransportRef.current ?? (await waitForSendTransport())
-        if (transport && !audioProducerRef.current && track.readyState === "live") {
-          const producer = await transport.produce({
-            track,
-            codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
-          })
+        if (!transport || transport.closed) throw new Error("send transport unavailable")
+        if (track.readyState !== "live") throw new Error("microphone track is not live")
+        if (!audioProducerRef.current) {
+          const producer = await transport.produce({ track, codecOptions: MIC_CODEC_OPTIONS })
           audioProducerRef.current = producer
         }
       } catch (err) {
+        // Roll the microphone back to a state that matches reality, so the user
+        // sees a mic-off button they can press again instead of believing they
+        // are live.
+        const track = capture?.track
+        if (track) {
+          try { stream.removeTrack(track) } catch { /* ignore */ }
+          releaseMicTrack(track)
+        }
+        setActiveMicId(null)
+        dispatch({ type: "TOGGLE_MIC", isMuted: true, hasMic: false })
         const name = (err as { name?: string })?.name
         if (name === "NotAllowedError" || name === "PermissionDeniedError") {
           setPermissionError("mic")
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          // The remembered device is gone — forget it so the next attempt asks
+          // for the system default instead of failing the same way forever.
+          selectedMicIdRef.current = undefined
+          setMicNotice("Микрофон не найден. Подключите устройство и нажмите кнопку микрофона снова.")
         } else {
-          dispatch({ type: "ERROR", error: "Нет доступа к микрофону" })
+          setMicNotice("Не удалось включить микрофон. Нажмите кнопку микрофона, чтобы попробовать снова.")
         }
+      } finally {
+        audioPublishLockRef.current = false
       }
       return
     }
@@ -168,6 +235,10 @@ export function useMediaControls({
   const switchMic = useCallback(async (deviceId: string): Promise<boolean> => {
     const stream = localStreamRef.current
     if (!stream || isMicSwitching) return false
+    // Share the publish lock with toggleMic / the join catch-up publish, so a
+    // device switch can never race a second audio producer into existence.
+    if (audioPublishLockRef.current) return false
+    audioPublishLockRef.current = true
 
     setIsMicSwitching(true)
     let capture: MicCapture | null = null
@@ -188,7 +259,7 @@ export function useMediaControls({
       } else if (sendTransport) {
         const newProducer = await sendTransport.produce({
           track: newTrack,
-          codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
+          codecOptions: MIC_CODEC_OPTIONS,
         })
         audioProducerRef.current = newProducer
         if (!wasEnabled) await newProducer.pause()
