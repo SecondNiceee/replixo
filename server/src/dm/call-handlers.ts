@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Namespace, Socket } from 'socket.io'
 import { createRateLimiter } from '../socket/helpers'
+import { allowRoomCreation, revokeRoomCreation, rooms } from '../socket/room-registry'
 import { areFriends } from './db'
 import { isOnline } from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
@@ -16,7 +17,10 @@ import { userRoom, type DmSocketData } from './namespace-types'
 // Комнату здесь НЕ создаём: корневой namespace поднимает её на первом
 // joinRoom. Мы лишь заранее договариваемся о коде, чтобы оба участника пришли
 // в одну и ту же комнату — иначе принявшему пришлось бы получать код отдельным
-// сообщением.
+// сообщением. Но код при этом сразу помечается в реестре комнат как
+// разрешённый к созданию (`allowRoomCreation`): по ссылке звонка идут оба
+// участника без флага `create`, и без этой пометки первый же из них получил бы
+// «Комната не найдена».
 // ---------------------------------------------------------------------------
 
 /**
@@ -74,6 +78,16 @@ function forget(call: PendingCall): void {
   pending.delete(call.callId)
 }
 
+/**
+ * Звонок закончился, не начавшись (отклонили, отменили, не дождались) — снять
+ * разрешение на создание комнаты, если в неё так никто и не зашёл. Если комната
+ * уже поднята, разрешение не трогаем: участник может обновить страницу и
+ * вернуться в неё.
+ */
+function dropUnusedRoom(roomId: string): void {
+  if (!rooms.has(roomId)) revokeRoomCreation(roomId)
+}
+
 /** Звонок между этой парой уже идёт? Повторный клик не должен звонить дважды. */
 function findBetween(fromUserId: string, toUserId: string): PendingCall | null {
   for (const call of pending.values()) {
@@ -92,6 +106,7 @@ function callsOf(userId: string): PendingCall[] {
 function endCallsForUser(nsp: Namespace, userId: string): void {
   for (const call of callsOf(userId)) {
     forget(call)
+    dropUnusedRoom(call.roomId)
     const otherId = call.fromUserId === userId ? call.toUserId : call.fromUserId
     nsp.to(userRoom(otherId)).emit('call:ended', { callId: call.callId, reason: 'gone' })
     // И собственным устройствам того, кто ушёл: они могли остаться открытыми.
@@ -174,7 +189,7 @@ function readCallId(payload: unknown): string | null {
 export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
   const data = socket.data as DmSocketData
   // Звонок — действие редкое и дорогое: пять попыток за десять секунд с
-  // запасом по��рывают «нажал ещё раз, потому что не дозвонился».
+  // за��асом по��рывают «нажал ещё раз, потому что не дозвонился».
   const allowInvite = createRateLimiter(5, 10_000)
   const allowAnswer = createRateLimiter(20, 10_000)
 
@@ -220,6 +235,11 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
 
     const callId = randomUUID()
     const roomId = generateRoomCode()
+    // Комнаты с этим кодом ещё нет, и создавать её здесь нечем: mediasoup-router
+    // живёт в корневом namespace. Поэтому разрешаем поднять её первому, кто
+    // придёт по коду — иначе и звонящий, и принявший получали бы «Комната не
+    // найдена», ведь ни один из них не заходит с флагом create.
+    allowRoomCreation(roomId)
     const fromName = data.username ?? data.name ?? ''
     const createdAt = Date.now()
     const expiresAt = createdAt + RING_TIMEOUT_MS
@@ -235,6 +255,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
       expiresAt,
       timer: setTimeout(() => {
         pending.delete(callId)
+        dropUnusedRoom(roomId)
         nsp.to(userRoom(peerId)).emit('call:ended', { callId, reason: 'timeout' })
         nsp.to(userRoom(fromUserId)).emit('call:ended', { callId, reason: 'timeout' })
       }, RING_TIMEOUT_MS),
@@ -302,6 +323,7 @@ export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
     }
 
     forget(call)
+    dropUnusedRoom(call.roomId)
 
     // Причина зависит от того, кто нажал: звонящий отменил вызов, адресат
     // отклонил. Клиент по ней выбирает текст уведомления.

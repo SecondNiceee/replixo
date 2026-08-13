@@ -140,6 +140,42 @@ export function evictPeer(io: Server, roomId: string, peerId: string, expectedSo
   cleanupRoomIfEmpty(roomId)
 }
 
+// ---------------------------------------------------------------------------
+// Разрешение на создание комнаты «по коду, о котором договорился сервер»
+//
+// joinRoom без флага `create` намеренно требует, чтобы комната уже
+// существовала: иначе опечатка в коде тихо создавала бы новую пустую комнату
+// вместо ошибки «Комната не найдена». Но у звонка из личного чата код
+// придумывает сам сервер, и НИ ОДНА из сторон не является «создателем»: оба
+// участника просто идут по ссылке. Поэтому такой код заранее помечается здесь
+// как разрешённый к созданию, и первый пришедший поднимает комнату.
+// ---------------------------------------------------------------------------
+
+/** Сколько живёт разрешение: время дозвона (минута) плюс запас на навигацию. */
+export const ROOM_CREATE_GRANT_MS = 5 * 60_000
+
+const creatableRooms = new Map<string, ReturnType<typeof setTimeout>>()
+
+export function allowRoomCreation(roomId: string, ttlMs: number = ROOM_CREATE_GRANT_MS): void {
+  const existing = creatableRooms.get(roomId)
+  if (existing) clearTimeout(existing)
+  const timer = setTimeout(() => creatableRooms.delete(roomId), ttlMs)
+  // Разрешение не должно держать процесс живым.
+  timer.unref?.()
+  creatableRooms.set(roomId, timer)
+}
+
+export function isRoomCreationAllowed(roomId: string): boolean {
+  return creatableRooms.has(roomId)
+}
+
+export function revokeRoomCreation(roomId: string): void {
+  const timer = creatableRooms.get(roomId)
+  if (!timer) return
+  clearTimeout(timer)
+  creatableRooms.delete(roomId)
+}
+
 export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
   if (rooms.has(roomId)) return Promise.resolve(rooms.get(roomId)!)
   return Room.create(roomId, worker).then(async (room) => {
