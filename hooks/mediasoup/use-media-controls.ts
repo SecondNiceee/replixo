@@ -142,6 +142,24 @@ export function useMediaControls({
   const recoverCameraRef = useRef<() => Promise<boolean>>(async () => false)
   const screenCaptureCleanupRef = useRef<(() => void) | null>(null)
 
+  // Mirror of watchCameraTrack for audio: react the instant the OS/browser kills
+  // the microphone (device unplugged, driver reset, exclusive-mode grab) instead
+  // of waiting up to 3 s for the watchdog poll.
+  //
+  // The published track is usually the noise gate's destination track, which
+  // NEVER fires "ended" — its device dying is invisible from the outside. So we
+  // listen on the raw device track behind the gate as well.
+  const watchMicTrack = useCallback((track: MediaStreamTrack) => {
+    const onEnded = () => {
+      // Only self-heal if this is still the track we're publishing.
+      if (localStreamRef.current?.getAudioTracks()[0] !== track) return
+      void recoverMicRef.current("track-ended")
+    }
+    track.addEventListener("ended", onEnded)
+    const raw = getRawMicTrack(track)
+    if (raw && raw !== track) raw.addEventListener("ended", onEnded)
+  }, [localStreamRef])
+
   // ---------------------------------------------------------------------------
   // Wait for the send transport to be ready (user can click mic/cam before join)
   // ---------------------------------------------------------------------------
@@ -186,7 +204,6 @@ export function useMediaControls({
         const actualDeviceId = capture.deviceId ?? selectedMicIdRef.current ?? null
         selectedMicIdRef.current = actualDeviceId ?? undefined
         setActiveMicId(actualDeviceId)
-        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
 
         const transport = sendTransportRef.current ?? (await waitForSendTransport())
         if (!transport || transport.closed) throw new Error("send transport unavailable")
@@ -195,6 +212,11 @@ export function useMediaControls({
           const producer = await transport.produce({ track, codecOptions: MIC_CODEC_OPTIONS })
           audioProducerRef.current = producer
         }
+        // Dispatched only now, once the microphone is genuinely published. The
+        // optimistic dispatch that used to sit before produce() was exactly what
+        // made a failed publish look like a working microphone.
+        watchMicTrack(track)
+        dispatch({ type: "TOGGLE_MIC", isMuted: false, hasMic: true })
       } catch (err) {
         // Roll the microphone back to a state that matches reality, so the user
         // sees a mic-off button they can press again instead of believing they
@@ -236,7 +258,7 @@ export function useMediaControls({
     }
     dispatch({ type: "TOGGLE_MIC", isMuted: !nextEnabled })
   }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, audioProducerRef,
-      selectedMicIdRef, dispatch, waitForSendTransport])
+      selectedMicIdRef, dispatch, waitForSendTransport, watchMicTrack])
 
   // Switch microphone device mid-call. The old track stays live until mediasoup
   // has accepted the replacement, so a failed device never breaks working audio.
@@ -280,15 +302,19 @@ export function useMediaControls({
         releaseMicTrack(oldTrack)
       }
       stream.addTrack(newTrack)
+      watchMicTrack(newTrack)
 
       const actualDeviceId = capture.deviceId ?? deviceId
       selectedMicIdRef.current = actualDeviceId
       setActiveMicId(actualDeviceId)
+      setMicNotice(null)
       dispatch({ type: "TOGGLE_MIC", isMuted: !wasEnabled, hasMic: true })
       return true
     } catch {
       releaseMicTrack(capture?.track)
-      dispatch({ type: "ERROR", error: "Не удалось переключить микрофон" })
+      // The old track is still published and working, so this is a notice rather
+      // than a room-level ERROR (which renders as a fatal connection failure).
+      setMicNotice("Не удалось переключить микрофон. Прежнее устройство продолжает работать.")
       return false
     } finally {
       setIsMicSwitching(false)
@@ -298,7 +324,8 @@ export function useMediaControls({
       audioPublishLockRef.current = false
       micFailuresRef.current = 0
     }
-  }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch, isMicSwitching])
+  }, [localStreamRef, sendTransportRef, audioProducerRef, selectedMicIdRef, dispatch,
+      isMicSwitching, watchMicTrack])
 
   // ---------------------------------------------------------------------------
   // Microphone recovery (the audio counterpart of recoverCamera)
@@ -370,6 +397,7 @@ export function useMediaControls({
           selectedMicIdRef.current = capture.deviceId ?? undefined
           setActiveMicId(capture.deviceId ?? null)
           stream.addTrack(track)
+          watchMicTrack(track)
         } catch {
           // The microphone is genuinely unavailable. Tell the truth in the UI
           // instead of pretending the user is live.
@@ -434,7 +462,7 @@ export function useMediaControls({
       audioPublishLockRef.current = false
     }
   }, [roomId, peerIdRef, socketRef, localStreamRef, sendTransportRef, audioProducerRef,
-      selectedMicIdRef, isMicMutedRef, dispatch, waitForSendTransport])
+      selectedMicIdRef, isMicMutedRef, dispatch, waitForSendTransport, watchMicTrack])
 
   // Keep the indirection ref pointing at the latest recovery closure.
   recoverMicRef.current = recoverMic
