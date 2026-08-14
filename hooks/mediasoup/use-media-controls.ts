@@ -14,6 +14,7 @@ import {
   getRawMicTrack,
   type MicCapture,
 } from "@/lib/mic-gate"
+import { rememberProducerTransport, isProducerOnStaleTransport } from "./producer-transport"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
@@ -57,6 +58,22 @@ const MIC_CODEC_OPTIONS = {
   opusFec: true,
   opusDtx: true,
   opusMaxAverageBitrate: 64_000,
+} as const
+
+// `stopTracks: false` is not a detail — it is the second half of the recovery
+// bug. mediasoup-client defaults to `stopTracks: true`, which makes
+// `producer.close()` call `track.stop()` on OUR track. Recovery closes the stale
+// producer and then republishes the SAME live track, so the default silently
+// ended the microphone one line before `produce()` — exactly the
+// "InvalidStateError: track ended" that showed up in the logs, after which the
+// watchdog saw an ended track, re-captured, and the loop started over.
+//
+// Track lifetime is owned by this hook anyway (`releaseMicTrack` /
+// `track.stop()` on toggle-off and on leaving the room), so nothing else relied
+// on close() stopping tracks for us.
+const MIC_PRODUCE_OPTIONS = {
+  codecOptions: MIC_CODEC_OPTIONS,
+  stopTracks: false,
 } as const
 
 interface UseMediaControlsParams {
@@ -234,7 +251,8 @@ export function useMediaControls({
         if (!transport || transport.closed) throw new Error("send transport unavailable")
         if (track.readyState !== "live") throw new Error("microphone track is not live")
         if (!audioProducerRef.current) {
-          const producer = await transport.produce({ track, codecOptions: MIC_CODEC_OPTIONS })
+          const producer = await transport.produce({ track, ...MIC_PRODUCE_OPTIONS })
+          rememberProducerTransport(producer, transport)
           audioProducerRef.current = producer
         }
         // Dispatched only now, once the microphone is genuinely published. The
@@ -314,8 +332,9 @@ export function useMediaControls({
       } else if (sendTransport) {
         const newProducer = await sendTransport.produce({
           track: newTrack,
-          codecOptions: MIC_CODEC_OPTIONS,
+          ...MIC_PRODUCE_OPTIONS,
         })
+        rememberProducerTransport(newProducer, sendTransport)
         audioProducerRef.current = newProducer
         if (!wasEnabled) await newProducer.pause()
       }
@@ -385,7 +404,7 @@ export function useMediaControls({
     const sendTransport = sendTransportRef.current
     const producerDead = !producer
       || producer.closed
-      || (!!sendTransport && producer.transport !== sendTransport)
+      || isProducerOnStaleTransport(producer, sendTransport)
     if (!diagnosis && !producerDead && !force) return false
 
     const now = Date.now()
@@ -455,7 +474,16 @@ export function useMediaControls({
         return false
       }
 
-      const nextProducer = await transport.produce({ track, codecOptions: MIC_CODEC_OPTIONS })
+      // Re-check right before publishing: `closeStaleProducer()` and awaiting the
+      // transport are both places where the device can die under us, and
+      // `produce()` throws InvalidStateError on an ended track.
+      if (track.readyState !== "live") {
+        micFailuresRef.current += 1
+        return false
+      }
+
+      const nextProducer = await transport.produce({ track, ...MIC_PRODUCE_OPTIONS })
+      rememberProducerTransport(nextProducer, transport)
       audioProducerRef.current = nextProducer
 
       const muted = isMicMutedRef?.current ?? false
@@ -525,7 +553,7 @@ export function useMediaControls({
       const sendTransport = sendTransportRef.current
       const producerDead = !producer
         || producer.closed
-        || (!!sendTransport && producer.transport !== sendTransport)
+        || isProducerOnStaleTransport(producer, sendTransport)
       if (!diagnosis && !producerDead) { issue = null; return }
 
       const key = diagnosis ?? "producer-dead"
@@ -685,7 +713,8 @@ export function useMediaControls({
         dispatch({ type: "TOGGLE_CAM", isOff: false, hasCam: true })
         const transport = sendTransportRef.current ?? (await waitForSendTransport())
         if (transport && !videoProducerRef.current && track.readyState === "live") {
-          const producer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
+          const producer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS, stopTracks: false })
+          rememberProducerTransport(producer, transport)
           videoProducerRef.current = producer
         }
       } catch (err) {
@@ -738,7 +767,7 @@ export function useMediaControls({
 
     // Nothing to do while the track is live and the producer is still attached
     // to the current send transport.
-    if (!trackDead && !producerDead && producer.transport === sendTransportRef.current) return false
+    if (!trackDead && !producerDead && !isProducerOnStaleTransport(producer, sendTransportRef.current)) return false
     // The user intentionally has no camera running — leave it that way.
     if (!existingTrack && !producer) return false
 
@@ -790,7 +819,9 @@ export function useMediaControls({
       const transport = sendTransportRef.current ?? (await waitForSendTransport())
       if (!transport || transport.closed) return false
 
-      const nextProducer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS })
+      if (track.readyState !== "live") return false
+      const nextProducer = await transport.produce({ track, ...CAMERA_PRODUCE_OPTIONS, stopTracks: false })
+      rememberProducerTransport(nextProducer, transport)
       videoProducerRef.current = nextProducer
 
       // Preserve the user's intent: if the camera was toggled off, republish
@@ -839,7 +870,11 @@ export function useMediaControls({
           videoGoogleMinBitrate: 600,
         },
         appData: { source: "screen" },
+        // Same reason as the microphone: screen recovery closes the stale
+        // producer and republishes the SAME live capture track.
+        stopTracks: false,
       })
+      rememberProducerTransport(producer, transport)
       screenVideoProducerRef.current = producer
       try {
         const sender = producer.rtpSender
@@ -852,7 +887,7 @@ export function useMediaControls({
     }
 
     if (audioTrack?.readyState === "live" && !screenAudioProducerRef.current) {
-      screenAudioProducerRef.current = await transport.produce({
+      const audioProducer = await transport.produce({
         track: audioTrack,
         codecOptions: {
           opusStereo: true,
@@ -862,7 +897,10 @@ export function useMediaControls({
           opusMaxAverageBitrate: 192_000,
         },
         appData: { source: "screen" },
+        stopTracks: false,
       })
+      rememberProducerTransport(audioProducer, transport)
+      screenAudioProducerRef.current = audioProducer
     }
   }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef])
 
@@ -907,7 +945,7 @@ export function useMediaControls({
     // belongs to the current send transport. Republishing here would interrupt
     // an ongoing presentation for every viewer, so bail out untouched.
     const liveProducer = screenVideoProducerRef.current
-    if (liveProducer && !liveProducer.closed && liveProducer.transport === sendTransportRef.current) {
+    if (liveProducer && !liveProducer.closed && !isProducerOnStaleTransport(liveProducer, sendTransportRef.current)) {
       return true
     }
 
@@ -918,11 +956,11 @@ export function useMediaControls({
 
       const currentVideo = screenVideoProducerRef.current
       const currentAudio = screenAudioProducerRef.current
-      if (currentVideo && (currentVideo.closed || currentVideo.transport !== transport)) {
+      if (currentVideo && (currentVideo.closed || isProducerOnStaleTransport(currentVideo, transport))) {
         currentVideo.close()
         screenVideoProducerRef.current = null
       }
-      if (currentAudio && (currentAudio.closed || currentAudio.transport !== transport)) {
+      if (currentAudio && (currentAudio.closed || isProducerOnStaleTransport(currentAudio, transport))) {
         currentAudio.close()
         screenAudioProducerRef.current = null
       }

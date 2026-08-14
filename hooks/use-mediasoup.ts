@@ -1,6 +1,7 @@
 "use client"
 
 import { captureMic, releaseMicTrack, diagnoseMicTrack } from "@/lib/mic-gate"
+import { rememberProducerTransport, isProducerOnStaleTransport } from "./mediasoup/producer-transport"
 
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
@@ -202,7 +203,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       diagnoseMicTrack(micTrack) !== null ||
       !micProducer ||
       micProducer.closed ||
-      (!!sendTransport && micProducer.transport !== sendTransport)
+      isProducerOnStaleTransport(micProducer, sendTransport)
     )
 
     // Camera: only "broken" when a camera is supposed to be running and either
@@ -216,7 +217,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       camTrack.readyState === "ended" ||
       !camProducer ||
       camProducer.closed ||
-      (!!sendTransport && camProducer.transport !== sendTransport)
+      isProducerOnStaleTransport(camProducer, sendTransport)
     )
 
     // Screen share: same idea. A live capture track with a live producer on the
@@ -229,7 +230,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       screenTrack.readyState === "ended" ||
       !screenProducer ||
       screenProducer.closed ||
-      (!!sendTransport && screenProducer.transport !== sendTransport)
+      isProducerOnStaleTransport(screenProducer, sendTransport)
     )
 
     return {
@@ -494,7 +495,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                 const producer = await transport.produce({
                   track: audioTrack,
                   codecOptions: { opusFec: true, opusDtx: true, opusMaxAverageBitrate: 64_000 },
+                  // Track lifetime belongs to us (releaseMicTrack); letting
+                  // producer.close() stop it is what made recovery republish an
+                  // already-ended track.
+                  stopTracks: false,
                 })
+                rememberProducerTransport(producer, transport)
                 audioProducerRef.current = producer
                 // The join path used to publish without ever watching the track,
                 // so a device dying right after entering the room was invisible
@@ -555,7 +561,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             }
             if (videoTrack && videoTrack.readyState === "live") {
               const { CAMERA_PRODUCE_OPTIONS } = await import("./mediasoup/types")
-              const producer = await newSendTransport.produce({ track: videoTrack, ...CAMERA_PRODUCE_OPTIONS })
+              const producer = await newSendTransport.produce({ track: videoTrack, ...CAMERA_PRODUCE_OPTIONS, stopTracks: false })
+              rememberProducerTransport(producer, newSendTransport)
               videoProducerRef.current = producer
               if (isCamOffRef.current) {
                 videoTrack.enabled = false
