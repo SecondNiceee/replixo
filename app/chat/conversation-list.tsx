@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react'
 import { Loader2, MessageSquarePlus, Search, Users, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useDmStore } from '@/stores/dm-store'
+import { usePresenceStatus } from '@/stores/dm-store'
+import { PresenceDot } from '@/components/chat/presence-dot'
 import type { Friend } from '@/app/profile/types'
 import { conversationTitle, normalizeAttachment, type DmConversation } from './types'
 
@@ -15,6 +16,29 @@ interface ConversationListProps {
   selfId: string
   onSelect: (conversationId: string) => void
   onStartWithFriend: (friendId: string) => void
+}
+
+/**
+ * Точка статуса одной строки списка.
+ *
+ * Обёртка нужна из-за правил хуков: подписаться на статус конкретного друга
+ * внутри map нельзя, а подписка на весь объект statuses перерисовывала бы список
+ * целиком при каждом чужом заходе-уходе.
+ *
+ * Подписи для скринридера нет намеренно: в списке статус текстом не написан, но
+ * строка и без него читается («Иван, 2 непрочитанных»), а «в сети» у каждой из
+ * десятков строк превратил бы обход списка в шум. Статус озвучивается в шапке
+ * диалога и в списке друзей, где он есть текстом.
+ */
+function FriendPresenceDot({
+  friendId,
+  ringClassName,
+}: {
+  friendId: string
+  ringClassName?: string
+}) {
+  const status = usePresenceStatus(friendId)
+  return <PresenceDot status={status} ringClassName={ringClassName} />
 }
 
 function formatListTime(iso: string | null): string {
@@ -47,7 +71,6 @@ export function ConversationList({
   onSelect,
   onStartWithFriend,
 }: ConversationListProps) {
-  const onlineIds = useDmStore((s) => s.onlineIds)
   const [query, setQuery] = useState('')
 
   const search = query.trim().toLowerCase()
@@ -143,15 +166,12 @@ export function ConversationList({
                         )}
                       >
                         {title.charAt(0).toUpperCase()}
-                        {onlineIds.has(c.friendId) && (
-                          <span
-                            className={cn(
-                              'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 bg-emerald-500',
-                              isActive ? 'border-primary' : 'border-card',
-                            )}
-                            aria-label="в сети"
-                          />
-                        )}
+                        {/* Обводка под подложку строки: у активной она красится
+                            акцентом, и border-card на нём был бы виден рамкой. */}
+                        <FriendPresenceDot
+                          friendId={c.friendId}
+                          ringClassName={isActive ? 'border-primary' : 'border-card'}
+                        />
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="flex items-baseline gap-2">
@@ -200,12 +220,7 @@ export function ConversationList({
                       >
                         <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
                           {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
-                          {onlineIds.has(f.friendId) && (
-                            <span
-                              className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
-                              aria-label="в сети"
-                            />
-                          )}
+                          <FriendPresenceDot friendId={f.friendId} />
                         </span>
                         <span className="truncate text-sm text-foreground">
                           {f.friendUsername ?? f.friendName}
@@ -219,7 +234,7 @@ export function ConversationList({
             )}
 
             {/* Пусто по двум разным причинам: либо друзей ещё нет, либо ничего
-                не нашлось по запросу. Один текст на оба случая сбивал бы с
+                не нашлось по запросу. Один текст на оба случая сби��ал бы с
                 толку — при активном поиске он советовал бы добавить друзей. */}
             {nothingFound && (
               <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">

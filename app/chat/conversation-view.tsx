@@ -9,7 +9,9 @@ import { useCallStore } from '@/stores/call-store'
 import { useConversationMessages } from '@/hooks/dm/use-conversation-messages'
 import { useDmRead } from '@/hooks/dm/use-dm-read'
 import { useTyping } from '@/hooks/dm/use-typing'
-import { useDmStore } from '@/stores/dm-store'
+import { useDmStore, usePresenceLastSeen, usePresenceStatus } from '@/stores/dm-store'
+import { useNow } from '@/hooks/use-now'
+import { PresenceDot } from '@/components/chat/presence-dot'
 import { cn } from '@/lib/utils'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
@@ -17,7 +19,7 @@ import { TypingIndicator } from './typing-indicator'
 import { EmptyState } from './empty-state'
 import {
   conversationTitle,
-  formatLastSeen,
+  presenceLabel,
   type DmAttachment,
   type DmConversation,
 } from './types'
@@ -75,12 +77,13 @@ export function ConversationView({
   const peerTyping = useDmStore((s) =>
     conversationId ? Boolean(s.typing[conversationId]?.[conversation?.friendId ?? '']) : false,
   )
-  const peerOnline = useDmStore((s) =>
-    conversation ? s.onlineIds.has(conversation.friendId) : false,
-  )
-  const peerLastSeen = useDmStore((s) =>
-    conversation ? s.lastSeenAt[conversation.friendId] : undefined,
-  )
+  const peerStatus = usePresenceStatus(conversation?.friendId)
+  const peerLastSeen = usePresenceLastSeen(conversation?.friendId)
+  // «был(а) N минут назад» должно стареть само: события об оффлайне больше не
+  // будет, и без тика шапка часами показывала бы «только что». Пока собеседник
+  // на связи, подписка не нужна — подпись там постоянная.
+  const now = useNow(peerStatus === 'offline')
+  const peerLabel = presenceLabel(peerStatus, peerLastSeen, now)
 
   // Отметка прочитанного: только когда вкладка видима и лента внизу.
   useDmRead({
@@ -156,22 +159,22 @@ export function ConversationView({
         </Button>
         <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/85 to-primary/60 text-sm font-semibold text-primary-foreground">
           {title.charAt(0).toUpperCase()}
-          {peerOnline && (
-            <span
-              className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card bg-emerald-500"
-              aria-hidden="true"
-            />
-          )}
+          {/* Статус тут же написан текстом, поэтому точка декоративна. */}
+          <PresenceDot status={peerStatus} />
         </span>
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
           <span
             className={cn(
               'truncate text-[11px]',
-              peerOnline ? 'text-emerald-400' : 'text-muted-foreground',
+              peerStatus === 'online'
+                ? 'text-emerald-400'
+                : peerStatus === 'idle'
+                  ? 'text-amber-400'
+                  : 'text-muted-foreground',
             )}
           >
-            {peerOnline ? 'в сети' : formatLastSeen(peerLastSeen)}
+            {peerLabel}
           </span>
         </div>
 
