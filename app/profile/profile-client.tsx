@@ -14,7 +14,13 @@ import { ConversationView } from '@/app/chat/conversation-view'
 import { ProfileTopbar } from './profile-topbar'
 import { AccountDialog } from './account-dialog'
 import { FriendsList } from './friends-list'
-import { fetcher, type User, type Friend, type PendingRequest, type SentRequest } from './types'
+import {
+  fetcher,
+  type User,
+  type FriendsResponse,
+  type PendingRequest,
+  type SentRequest,
+} from './types'
 
 type Pane = 'chats' | 'friends'
 
@@ -44,7 +50,7 @@ export function ProfileClient({ user }: { user: User }) {
   const { conversations, isLoading, zeroUnreadLocally, startWithFriend, markReadFallback } =
     useConversations(user.id, activeId)
 
-  const { data: friendsData, isLoading: friendsLoading } = useSWR<{ friends: Friend[] }>(
+  const { data: friendsData, isLoading: friendsLoading } = useSWR<FriendsResponse>(
     '/api/friends',
     fetcher,
   )
@@ -55,6 +61,19 @@ export function ProfileClient({ user }: { user: User }) {
     '/api/friends/sent',
     fetcher,
   )
+
+  // Статусы из HTTP-ответа кладём в тот же стор, что и события сокета: списки
+  // читают только его, поэтому им не нужно знать, откуда пришли данные.
+  //
+  // mergePresence не перетирает снапшот сокета (см. stores/dm-store): ответ
+  // /api/friends мог быть собран раньше и «оживил» бы уже ушедшего человека.
+  // Времена последнего присутствия берутся всегда — они из Postgres.
+  const mergePresence = useDmStore((s) => s.mergePresence)
+  const presence = friendsData?.presence
+  useEffect(() => {
+    if (!presence) return
+    mergePresence(presence.statuses ?? {}, presence.lastSeenAt ?? {})
+  }, [presence, mergePresence])
 
   const friends = friendsData?.friends ?? []
   const pending = pendingData?.pending ?? []
