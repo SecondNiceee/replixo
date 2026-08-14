@@ -27,6 +27,11 @@ import {
   ensureRoomDir,
   sweepOrphanUploads,
 } from './uploads'
+import {
+  contentDisposition,
+  decodeOriginalName,
+  safeAttachmentName,
+} from './upload-filename'
 import { isDmEnabled, isMember, validateSessionToken } from './dm/db'
 import { registerInternalRoutes } from './dm/internal-routes'
 import {
@@ -69,7 +74,13 @@ async function main(): Promise<void> {
         res.setHeader('Cache-Control', 'private, max-age=86400')
         const ext = path.extname(filePath).toLowerCase()
         const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'].includes(ext)
-        if (!isImage) res.setHeader('Content-Disposition', 'attachment')
+        if (!isImage) {
+          // На диске файл называется UUID'ом, поэтому без явного имени браузер
+          // сохранил бы «a1b2….pdf». Клиент передаёт исходное имя в ?name=;
+          // отдаём его через RFC 5987 (filename*), чтобы кириллица дожила до
+          // диалога сохранения (атрибут download работает только same-origin).
+          res.setHeader('Content-Disposition', contentDisposition(res.req?.query?.name))
+        }
       },
     }),
   )
@@ -92,7 +103,9 @@ async function main(): Promise<void> {
       }
     },
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).slice(0, 16)
+      // Имя от busboy приходит в latin1 — расширение берём из исправленного,
+      // иначе кириллица в нём («…копия.таблица») превратилась бы в мохибаку.
+      const ext = path.extname(decodeOriginalName(file.originalname)).slice(0, 16)
       cb(null, `${randomUUID()}${ext}`)
     },
   })
@@ -128,7 +141,7 @@ async function main(): Promise<void> {
         // не нужно: имя — это сгенерированный UUID + расширение.
         res.json({
           url: `/uploads/${roomId}/${file.filename}`,
-          name: file.originalname.slice(0, 255),
+          name: safeAttachmentName(file.originalname),
           size: file.size,
           mime: file.mimetype || 'application/octet-stream',
         })
@@ -160,7 +173,7 @@ async function main(): Promise<void> {
       }
     },
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).slice(0, 16)
+      const ext = path.extname(decodeOriginalName(file.originalname)).slice(0, 16)
       cb(null, `${randomUUID()}${ext}`)
     },
   })
@@ -225,7 +238,7 @@ async function main(): Promise<void> {
         // диалогу, так что подставить чужую не получится.
         res.json({
           url: `${dmUrlPrefix(conversationId)}${file.filename}`,
-          name: file.originalname.slice(0, 255),
+          name: safeAttachmentName(file.originalname),
           size: file.size,
           mime: file.mimetype || 'application/octet-stream',
         })

@@ -3,6 +3,7 @@
 import { Check, CheckCheck, Clock, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AttachmentView } from '@/components/chat/attachment-view'
+import { MessageText } from '@/components/chat/message-text'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatTime } from '@/lib/chat-format'
 import type { DmMessage } from './types'
@@ -81,9 +82,7 @@ export function DmMessageList({
                   />
                 )}
                 {/* Вложение без подписи — обычный случай, пустой абзац не рисуем. */}
-                {m.text && (
-                  <span className="select-text whitespace-pre-wrap break-words">{m.text}</span>
-                )}
+                {m.text && <MessageText text={m.text} />}
               </div>
 
               <div className="flex items-center gap-1.5 px-1">
