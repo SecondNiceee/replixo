@@ -1,16 +1,26 @@
-import { MessageSquare } from 'lucide-react'
-
 // Заглушка правой колонки, когда диалог не выбран. На мобильном не видна:
 // там колонка со списком и колонка с диалогом показываются по очереди.
+//
+// Иконки нет намеренно. Крупный значок в скруглённом квадрате по центру пустого
+// поля — заглушка, которую видно в каждом втором интерфейсе, и она ничего не
+// сообщает: место занято, а прочитать нечего. Вместо неё короткий текстовый
+// блок по левому краю — там, где начнётся сама переписка, — так пустая колонка
+// читается как ожидание выбора, а не как незагрузившийся экран.
 export function EmptyState() {
   return (
-    <section className="chat-surface flex min-h-0 w-full flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 px-6 text-center backdrop-blur-xl">
-      <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <MessageSquare className="size-8" aria-hidden="true" />
-      </span>
-      <p className="text-pretty text-sm text-muted-foreground">
-        Выберите диалог, чтобы начать переписку
-      </p>
+    <section className="chat-surface flex min-h-0 w-full flex-col justify-center rounded-2xl border border-border/60 px-8 backdrop-blur-xl lg:px-14">
+      {/* Ничего декоративного: ни штриха, ни значка. В пустой колонке любой
+          такой элемент — единственное, на что падает взгляд, и он обязан
+          что-то сообщать. Сообщает здесь только текст. */}
+      <div className="flex max-w-sm flex-col gap-2">
+        <h2 className="text-pretty text-base font-medium tracking-tight text-foreground">
+          Диалог не выбран
+        </h2>
+        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+          Откройте переписку из списка слева. Чтобы начать новую, выберите друга в разделе
+          «Друзья» — диалог создастся с первым сообщением.
+        </p>
+      </div>
     </section>
   )
 }

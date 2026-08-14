@@ -134,12 +134,13 @@ export function ProfileClient({ user }: { user: User }) {
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
 
-  // Иконок в табах нет намеренно: подпись + иконка + бейдж на два коротких
-  // слова — три способа сказать одно и то же. countLabel озвучивает цифру
-  // скринридеру: «7» без него не отличить от непрочитанных.
-  const panes: { id: Pane; label: string; count: number; countLabel: string }[] = [
-    { id: 'chats', label: 'Чаты', count: totalUnread, countLabel: 'непрочитанных' },
-    { id: 'friends', label: 'Друзья', count: friends.length, countLabel: 'друзей' },
+  // Ни иконок, ни цифр: на два коротких слова подпись + иконка + бейдж — три
+  // способа сказать одно и то же. Цифры убраны совсем — счёт друзей виден по
+  // самому списку, а непрочитанные и так стоят бейджами в строках диалогов.
+  // Здесь остаётся только факт «есть непрочитанные» точкой.
+  const panes: { id: Pane; label: string; dot: boolean }[] = [
+    { id: 'chats', label: 'Чаты', dot: totalUnread > 0 },
+    { id: 'friends', label: 'Друзья', dot: false },
   ]
 
   return (
@@ -173,8 +174,8 @@ export function ProfileClient({ user }: { user: User }) {
               градиентной сцене, и третий слой фона (серая подложка + белая
               карточка активного таба) читался бы как рамка внутри рамки. */}
           <div className="shrink-0 border-b border-border/60 px-3">
-            <div role="tablist" aria-label="Разделы кабинета" className="-mb-px flex gap-5">
-              {panes.map(({ id, label, count, countLabel }) => {
+            <div role="tablist" aria-label="Разделы кабинета" className="-mb-px flex gap-6">
+              {panes.map(({ id, label, dot }) => {
                 const selected = pane === id
                 return (
                   <button
@@ -188,27 +189,28 @@ export function ProfileClient({ user }: { user: User }) {
                     className={cn(
                       // Начертание одно на оба состояния: сменой на semibold
                       // активный таб менял бы ширину и сдвигал соседний.
-                      'flex items-baseline gap-1.5 border-b-2 pb-2 pt-2.5 text-[13px] font-medium tracking-tight transition-colors',
+                      'border-b-2 pb-2.5 pt-2 text-[13px] font-medium tracking-tight transition-colors',
                       selected
                         ? 'border-primary text-foreground'
                         : 'border-transparent text-muted-foreground hover:text-foreground',
                     )}
                   >
-                    <span>{label}</span>
-                    {/* Слот под счётчик всегда одной ширины и с табличными
-                        цифрами. Раньше это была пилюля по размеру содержимого:
-                        «7» и «15» давали разную ширину, поэтому подпись съезжала
-                        по горизонтали, а сам таб тянул за собой соседний.
-                        Базовая линия — общая с подписью, так что цифра стоит
-                        ровно по оптике, а не по центру рамки. */}
-                    <span
-                      className={cn(
-                        'min-w-[2ch] text-left text-[11px] tabular-nums',
-                        selected ? 'text-foreground/55' : 'text-muted-foreground/70',
+                    {/* Точка непрочитанных вынесена в надстрочный индекс и лежит
+                        в потоке отдельным слоем (absolute). В строке она
+                        добавляла табу ширину: стоило прийти сообщению — и
+                        «Друзья» уезжали правее сами по себе. Подчёркивание при
+                        этом обнимает ровно слово, без «хвоста» под индикатор. */}
+                    <span className="relative">
+                      {label}
+                      {dot && (
+                        <>
+                          <span
+                            className="absolute -right-2.5 top-px size-1.5 rounded-full bg-primary"
+                            aria-hidden="true"
+                          />
+                          <span className="sr-only">, есть непрочитанные</span>
+                        </>
                       )}
-                    >
-                      {count > 0 ? (count > 99 ? '99+' : count) : ''}
-                      {count > 0 && <span className="sr-only"> {countLabel}</span>}
                     </span>
                   </button>
                 )
