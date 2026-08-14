@@ -183,7 +183,7 @@ export interface StoredNotification {
 /**
  * Прочитать уведомление вместе с именем актора и счётчиком непрочитанных.
  *
- * `recipientId` в условии обязателен: id уведомления приходит от Next-роута, и
+ * `recipientId` в условии обязателен: id уведомления ��риходит от Next-роута, и
  * привязка к получателю гарантирует, что чужая запись не уйдёт в чужую комнату
  * даже при ошибке на стороне вызывающего.
  */
@@ -265,6 +265,63 @@ export async function listFriendIds(userId: string): Promise<string[]> {
   } catch (e) {
     console.error('[dm] listFriendIds failed:', (e as Error).message)
     return []
+  }
+}
+
+/**
+ * Записать время последнего присутствия.
+ *
+ * Вызывается не только при разрыве соединения, но и периодически, пока
+ * пользователь онлайн: иначе жёсткое падение процесса (kill -9, OOM, паника)
+ * не оставляло бы времени вообще, и после рестарта друзья видели бы «не в
+ * сети» без пояснения. Периодический сброс ограничивает потерю точности
+ * интервалом LAST_SEEN_FLUSH_MS.
+ *
+ * GREATEST защищает от отката назад: сокеты одного пользователя живут на
+ * разных таймерах, и запоздавший сброс от уже закрытой вкладки не должен
+ * перетирать более свежее время активного соединения.
+ */
+export async function touchLastSeen(userId: string, at: number): Promise<void> {
+  if (!dbPool) return
+  try {
+    await dbPool.query(
+      `UPDATE "user"
+       SET "lastSeenAt" = GREATEST("lastSeenAt", to_timestamp($2 / 1000.0))
+       WHERE "id" = $1`,
+      [userId, at],
+    )
+  } catch (e) {
+    // Presence — улучшение, а не критичный путь: ошибка записи не должна
+    // ломать ни соединение, ни рассылку статусов.
+    console.error('[dm] touchLastSeen failed:', (e as Error).message)
+  }
+}
+
+/**
+ * Время последнего присутствия для списка пользователей — одним запросом.
+ *
+ * Нужно для снапшота presence: при подключении клиент получает и статусы своих
+ * друзей, и время для тех, кто оффлайн. Раньше время читалось из Map в памяти,
+ * поэтому после рестарта сервера снапшот приходил пустым.
+ *
+ * id = ANY($1) вместо IN (...) — параметр один, поэтому размер списка друзей не
+ * меняет форму запроса и план переиспользуется.
+ */
+export async function getLastSeenBulk(userIds: string[]): Promise<Record<string, number>> {
+  if (!dbPool || userIds.length === 0) return {}
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT "id", (EXTRACT(EPOCH FROM "lastSeenAt") * 1000)::bigint AS "ts"
+       FROM "user"
+       WHERE "id" = ANY($1) AND "lastSeenAt" IS NOT NULL`,
+      [userIds],
+    )
+    const result: Record<string, number> = {}
+    for (const row of rows) result[row.id as string] = Number(row.ts)
+    return result
+  } catch (e) {
+    console.error('[dm] getLastSeenBulk failed:', (e as Error).message)
+    return {}
   }
 }
 

@@ -7,7 +7,14 @@ import {
   scheduleCallCleanup,
   syncCallsForSocket,
 } from './call-handlers'
-import { isOnline, trackConnect, trackDisconnect } from './presence'
+import {
+  isOnline,
+  setSocketStatus,
+  startPresenceSweeper,
+  trackConnect,
+  trackDisconnect,
+  trackPing,
+} from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
 
 // ---------------------------------------------------------------------------
@@ -73,8 +80,30 @@ export function setupDmNamespace(io: Server): void {
     // рассылался один раз, и подключившийся посреди звонка о нём бы не узнал.
     syncCallsForSocket(socket, userId)
 
+    // --- Прикладной heartbeat presence ------------------------------------
+    // Свой пинг поверх движкового нужен потому, что pingTimeout у Socket.IO —
+    // 30 секунд, и понижать его нельзя: на нём держится устойчивость звонков к
+    // мигнувшей сети. Presence же должен реагировать за секунды, поэтому у него
+    // отдельный, более чуткий таймер (см. PING_TIMEOUT_MS в presence.ts).
+    socket.on('dm:ping', () => {
+      // Изменение сводного статуса возможно и здесь: пинг оживляет соединение,
+      // которое свипер мог считать замолчавшим.
+      if (trackPing(userId, socket.id)) {
+        void setSocketStatus(nsp, socket, userId, 'online')
+      }
+    })
+
+    // Вкладка сообщает, что пользователь отошёл или вернулся. Статус хранится
+    // на каждый сокет: сводный считается по всем устройствам, поэтому «отошёл»
+    // на ноутбуке не гасит активность на телефоне.
+    socket.on('dm:status', (payload: unknown) => {
+      const raw = (payload ?? {}) as { status?: unknown }
+      if (raw.status !== 'online' && raw.status !== 'idle') return
+      void setSocketStatus(nsp, socket, userId, raw.status)
+    })
+
     socket.on('disconnect', () => {
-      void trackDisconnect(nsp, socket, userId)
+      trackDisconnect(nsp, socket.id, userId)
       // Учёт соединений trackDisconnect правит синхронно (до первого await),
       // поэтому isOnline здесь уже отвечает про состояние ПОСЛЕ разрыва.
       // Ушло последнее соединение — незавершённые звонки надо погасить, иначе у
@@ -85,6 +114,10 @@ export function setupDmNamespace(io: Server): void {
       console.log(`[dm] Отключён ${userId} (socket ${socket.id})`)
     })
   })
+
+  // Фоновая уборка замолчавших соединений: ловит убитый браузер и пропавшую
+  // сеть, о которых disconnect не приходит или приходит слишком поздно.
+  startPresenceSweeper(nsp)
 
   console.log('[dm] Namespace /dm поднят')
 }
