@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+import { StartCallDialog } from '@/components/start-call-dialog'
 import { cn } from '@/lib/utils'
 import { AddFriendForm } from './add-friend-form'
 import { PendingRequests } from './pending-requests'
@@ -44,6 +45,7 @@ export function ProfileTopbar({
   unavailable,
 }: ProfileTopbarProps) {
   const [requestsTab, setRequestsTab] = useState<RequestsTab>('incoming')
+  const [callOpen, setCallOpen] = useState(false)
 
   const tabs: { id: RequestsTab; label: string; count: number }[] = [
     { id: 'incoming', label: 'Входящие', count: pending.length },
@@ -71,6 +73,23 @@ export function ProfileTopbar({
       </a>
 
       <div className="ml-auto flex items-center gap-2">
+        {/* «Начать звонок» — главное действие приложения, поэтому стоит первым
+            и единственный из трёх кнопок имеет фон. Но не полный primary, как
+            на лендинге: там это единственная цель экрана, а здесь рядом список
+            диалогов, и сплошная синяя кнопка перетягивала бы на себя весь
+            верх. Достаточно подложки secondary с тонкой рамкой — заметно, но
+            не громко. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => setCallOpen(true)}
+          className="gap-1.5 border border-border/70 bg-secondary/70 text-foreground hover:bg-secondary"
+        >
+          <Video className="size-4" strokeWidth={2.25} aria-hidden="true" />
+          <span className="hidden sm:inline">Начать звонок</span>
+        </Button>
+
         {/* Добавить в друзья */}
         <Dialog>
           <DialogTrigger
@@ -171,39 +190,55 @@ export function ProfileTopbar({
           </DialogContent>
         </Dialog>
 
-        {/* Состояние соединения: без него непонятно, почему сообщения не уходят.
-            Все три состояния устроены одинаково — точка плюс подпись, которая
-            скрывается на узком экране. Раньше «Чат недоступен» было единственным
-            без точки и не скрывалось: красная строка выбивалась из шапки, а на
-            узком экране ещё и упиралась в её правый край. */}
-        <span
-          className={cn(
-            'ml-1 flex items-center gap-1.5 text-xs',
-            unavailable ? 'text-destructive' : 'text-muted-foreground',
-          )}
-          role="status"
-        >
+        {/* Индикатор соединения остаётся только на проблемном состоянии.
+            «На связи» — норма, а норму сообщать нечем: зелёная точка с подписью
+            стояла в шапке всегда и занимала место, ничего не меняя. А вот
+            «нет связи» объясняет, почему сообщения не уходят, поэтому этот
+            случай виден. */}
+        {(unavailable || !connected) && (
           <span
             className={cn(
-              'size-2 shrink-0 rounded-full',
-              unavailable
-                ? 'bg-destructive'
-                : connected
-                  ? 'bg-emerald-500'
-                  : 'bg-muted-foreground/40',
+              'ml-1 flex items-center gap-1.5 text-xs',
+              unavailable ? 'text-destructive' : 'text-muted-foreground',
             )}
-            aria-hidden="true"
-          />
-          {/* На узком экране остаётся только точка, поэтому подпись дублируется
-              для скринридера — цвет сам по себе ничего не сообщает. */}
-          <span className="sr-only md:hidden">
-            {unavailable ? 'Чат недоступен' : connected ? 'На связи' : 'Подключение'}
+            role="status"
+          >
+            <span
+              className={cn(
+                'size-2 shrink-0 rounded-full',
+                unavailable ? 'bg-destructive' : 'bg-muted-foreground/40',
+              )}
+              aria-hidden="true"
+            />
+            {/* На узком экране остаётся только точка, поэтому подпись дублируется
+                для скринридера — цвет сам по себе ничего не сообщает. */}
+            <span className="sr-only md:hidden">
+              {unavailable ? 'Чат недоступен' : 'Подключение'}
+            </span>
+            <span className="hidden md:inline">
+              {unavailable ? 'Чат недоступен' : 'Подключение…'}
+            </span>
           </span>
-          <span className="hidden md:inline">
-            {unavailable ? 'Чат недоступен' : connected ? 'На связи' : 'Подключение…'}
-          </span>
-        </span>
+        )}
       </div>
+
+      {/* Тот же диалог, что и на лендинге: код комнаты генерируется внутри,
+          а переход в комнату делаем так же — с ?create=true, иначе комната не
+          создастся и приглашённые попадут в пустоту.
+
+          Монтируем только на открытии: код живёт в useState-инициализаторе, и у
+          постоянно смонтированного диалога второй звонок за сессию получил бы
+          код от первого — то есть увёл бы в уже занятую комнату. */}
+      {callOpen && (
+        <StartCallDialog
+          open
+          contentClassName="app-dark bg-card"
+          onOpenChange={setCallOpen}
+          onStart={(roomCode) => {
+            window.location.href = `/room/${roomCode}?create=true`
+          }}
+        />
+      )}
     </header>
   )
 }
