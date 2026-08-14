@@ -101,7 +101,10 @@ export function ProfileTopbar({
             <span className="hidden sm:inline">Заявки</span>
             {pending.length > 0 && (
               <span
-                className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground"
+                // Как и счётчики в списке: фиксированный квадрат под круг и
+                // grid place-items-center. С min-w-4 + py-0.5 + leading-none
+                // высота зависела от кегля, и цифра сидела выше центра.
+                className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground"
                 aria-label={`${pending.length} входящих заявок`}
               >
                 {pending.length > 99 ? '99+' : pending.length}
@@ -116,31 +119,47 @@ export function ProfileTopbar({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex gap-1 rounded-lg border border-border/60 bg-secondary/20 p-1">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setRequestsTab(tab.id)}
-                  aria-current={requestsTab === tab.id ? 'true' : undefined}
-                  className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                    requestsTab === tab.id
-                      ? 'bg-card text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {tab.label}
-                  {tab.count > 0 && (
-                    <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground">
-                      {tab.count}
+            {/* Тот же рельс с подчёркиванием, что и в левой панели: два разных
+                вида табов на одном экране выдавали бы сборку из кусков. */}
+            <div role="tablist" aria-label="Заявки" className="flex gap-5 border-b border-border/60">
+              {tabs.map((tab) => {
+                const selected = requestsTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    id={`requests-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls="requests-panel"
+                    onClick={() => setRequestsTab(tab.id)}
+                    className={cn(
+                      '-mb-px flex items-baseline gap-1.5 border-b-2 pb-2 text-[13px] font-medium tracking-tight transition-colors',
+                      selected
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {tab.label}
+                    <span
+                      className={cn(
+                        'min-w-[2ch] text-left text-[11px] tabular-nums',
+                        selected ? 'text-foreground/55' : 'text-muted-foreground/70',
+                      )}
+                    >
+                      {tab.count > 0 ? tab.count : ''}
                     </span>
-                  )}
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
 
-            <div className="max-h-[60vh] overflow-y-auto">
+            <div
+              id="requests-panel"
+              role="tabpanel"
+              aria-labelledby={`requests-tab-${requestsTab}`}
+              className="max-h-[60vh] overflow-y-auto"
+            >
               {requestsTab === 'incoming' ? (
                 <PendingRequests pending={pending} isLoading={pendingLoading} />
               ) : (

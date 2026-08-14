@@ -78,7 +78,7 @@ export function PendingRequests({ pending, isLoading }: PendingRequestsProps) {
               className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2.5"
             >
               <div className="flex min-w-0 items-center gap-2.5">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-sm font-semibold text-primary-foreground">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
                   {(p.requesterUsername ?? p.requesterName).charAt(0).toUpperCase()}
                 </span>
                 <span className="truncate text-sm font-medium text-foreground">

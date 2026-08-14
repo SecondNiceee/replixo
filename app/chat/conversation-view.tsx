@@ -157,7 +157,9 @@ export function ConversationView({
         >
           <ArrowLeft className="size-4" />
         </Button>
-        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/85 to-primary/60 text-sm font-semibold text-primary-foreground">
+        {/* Тот же плоский аватар, что в списке слева: это один и тот же человек,
+            и разное оформление читалось бы как два разных компонента. */}
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
           {title.charAt(0).toUpperCase()}
           {/* Статус тут же написан текстом, поэтому точка декоративна. */}
           <PresenceDot status={peerStatus} />

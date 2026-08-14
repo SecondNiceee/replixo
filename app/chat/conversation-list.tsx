@@ -114,7 +114,9 @@ export function ConversationList({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Поиск"
             aria-label="Поиск по диалогам"
-            className="h-9 w-full rounded-full border border-transparent bg-foreground/5 pl-9 pr-9 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card [&::-webkit-search-cancel-button]:hidden"
+            // Не «пилюля»: у табов теперь прямой рельс с подчёркиванием, и
+            // капсульный инпут под ним смотрелся бы из другого набора.
+            className="h-9 w-full rounded-lg border border-transparent bg-foreground/5 pl-9 pr-9 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -157,12 +159,16 @@ export function ConversationList({
                           : 'hover:bg-foreground/5',
                       )}
                     >
+                      {/* Аватары плоские, буква моноширинная. Градиент на
+                          каждой строке спорил с акцентом активного диалога и
+                          бейджем непрочитанных — теперь синий в панели значит
+                          ровно одно: «здесь есть на что смотреть». */}
                       <span
                         className={cn(
-                          'relative flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold',
+                          'relative flex size-10 shrink-0 items-center justify-center rounded-full font-mono text-sm',
                           isActive
-                            ? 'bg-primary-foreground/20 text-primary-foreground'
-                            : 'bg-gradient-to-br from-primary/85 to-primary/60 text-primary-foreground',
+                            ? 'bg-primary-foreground/15 text-primary-foreground'
+                            : 'bg-secondary text-foreground ring-1 ring-inset ring-border',
                         )}
                       >
                         {title.charAt(0).toUpperCase()}
@@ -176,9 +182,12 @@ export function ConversationList({
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="flex items-baseline gap-2">
                           <span className="truncate text-sm font-medium">{title}</span>
+                          {/* tabular-nums: пропорциональные цифры дают «09:05»
+                              и «12:34» разной ширины, и время в столбце справа
+                              переставало выстраиваться по правому краю. */}
                           <span
                             className={cn(
-                              'ml-auto shrink-0 text-[10px]',
+                              'ml-auto shrink-0 text-[11px] tabular-nums',
                               isActive ? 'text-primary-foreground/70' : 'text-muted-foreground',
                             )}
                           >
@@ -195,7 +204,12 @@ export function ConversationList({
                         </span>
                       </span>
                       {c.unreadCount > 0 && !isActive && (
-                        <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground">
+                        // grid place-items-center вместо leading-none + py:
+                        // выключной интерлиньяж с асимметричными паддингами
+                        // ставил цифру примерно на пиксель выше центра кружка.
+                        // Фиксированные h-5/min-w-5 дают ровный круг на одной
+                        // цифре и капсулу на двух.
+                        <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground">
                           {c.unreadCount > 99 ? '99+' : c.unreadCount}
                         </span>
                       )}
@@ -218,7 +232,7 @@ export function ConversationList({
                         onClick={() => onStartWithFriend(f.friendId)}
                         className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-foreground/5"
                       >
-                        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
+                        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
                           {(f.friendUsername ?? f.friendName).charAt(0).toUpperCase()}
                           <FriendPresenceDot friendId={f.friendId} />
                         </span>
