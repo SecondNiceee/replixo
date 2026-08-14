@@ -8,15 +8,21 @@
 // читается как ожидание выбора, а не как незагрузившийся экран.
 export function EmptyState() {
   return (
-    <section className="chat-surface flex min-h-0 w-full flex-col justify-center rounded-2xl border border-border/60 px-8 backdrop-blur-xl lg:px-14">
+    <section className="chat-surface flex min-h-0 w-full flex-col items-center justify-center rounded-2xl border border-border/60 px-8 backdrop-blur-xl lg:px-14">
       {/* Ничего декоративного: ни штриха, ни значка. В пустой колонке любой
           такой элемент — единственное, на что падает взгляд, и он обязан
-          что-то сообщать. Сообщает здесь только текст. */}
-      <div className="flex max-w-sm flex-col gap-2">
-        <h2 className="text-pretty text-base font-medium tracking-tight text-foreground">
+          что-то сообщать. Сообщает здесь только текст.
+
+          Блок стоит по центру колонки и по центру строк: пустая колонка широкая,
+          и текст, прижатый к левому краю, читался как обрезанный кусок разметки,
+          а не как самостоятельное сообщение. Кегль поднят на два шага — на всю
+          колонку прежние 14–16px выглядели подписью под несуществующей
+          картинкой. */}
+      <div className="flex max-w-xl flex-col items-center gap-3 text-center">
+        <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground lg:text-3xl">
           Диалог не выбран
         </h2>
-        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+        <p className="text-pretty text-base leading-relaxed text-muted-foreground lg:text-lg">
           Откройте переписку из списка слева. Чтобы начать новую, выберите друга в разделе
           «Друзья» — диалог создастся с первым сообщением.
         </p>

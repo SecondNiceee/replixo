@@ -11,11 +11,18 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/clipboard"
+import { cn } from "@/lib/utils"
 
 interface StartCallDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onStart: (roomCode: string) => void
+  /**
+   * Классы для содержимого диалога. Нужны кабинету: DialogContent уходит в
+   * портал у <body>, вне <main class="app-dark">, и без явного класса берёт
+   * палитру :root — то есть без синего акцента кабинета.
+   */
+  contentClassName?: string
 }
 
 function generateRoomCode(): string {
@@ -28,7 +35,12 @@ function generateRoomCode(): string {
   return code
 }
 
-export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialogProps) {
+export function StartCallDialog({
+  open,
+  onOpenChange,
+  onStart,
+  contentClassName,
+}: StartCallDialogProps) {
   const [roomCode] = useState(() => generateRoomCode())
   const [copied, setCopied] = useState(false)
 
@@ -46,7 +58,7 @@ export function StartCallDialog({ open, onOpenChange, onStart }: StartCallDialog
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={cn('sm:max-w-md', contentClassName)}>
         <DialogHeader>
           <DialogTitle>Новая конференция</DialogTitle>
           <DialogDescription>
