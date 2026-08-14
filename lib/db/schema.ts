@@ -13,6 +13,15 @@ export const user = pgTable('user', {
   image: text('image'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  // Когда пользователя видели последний раз. Пишет только сокет-сервер (см.
+  // server/src/dm/presence.ts): периодически, пока соединение живо, и в момент
+  // разрыва. NULL — пользователь ни разу не подключался после добавления
+  // колонки; UI тогда показывает просто «не в сети», без времени.
+  //
+  // Колонка добавлена нами и в схеме Better Auth не числится, но лежит в его
+  // таблице. Переименовывать нельзя: на неё смотрит SQL сокет-сервера, который
+  // работает с таблицами напрямую, без drizzle.
+  lastSeenAt: timestamp('lastSeenAt'),
 })
 
 export const session = pgTable('session', {
