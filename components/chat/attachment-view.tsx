@@ -38,9 +38,15 @@ export function AttachmentView({
     )
   }
 
+  // На диске файл лежит под UUID'ом, поэтому без подсказки браузер сохранил бы
+  // «a1b2c3.pdf». Атрибут download задаёт имя только для same-origin ссылок, а
+  // сервер вложений может быть на другом домене — поэтому исходное имя ещё и
+  // передаём в ?name=, откуда сервер собирает Content-Disposition (RFC 5987).
+  const downloadHref = `${href}${href.includes('?') ? '&' : '?'}name=${encodeURIComponent(attachment.name)}`
+
   return (
     <a
-      href={href}
+      href={downloadHref}
       target="_blank"
       rel="noopener noreferrer"
       download={attachment.name}

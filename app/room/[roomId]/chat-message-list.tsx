@@ -2,6 +2,7 @@ import { Check, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
 import { AttachmentView } from "@/components/chat/attachment-view"
+import { MessageText } from "@/components/chat/message-text"
 import { formatTime } from "@/lib/chat-format"
 import { colorForPeer, isReadByEveryone } from "./chat-helpers"
 
@@ -86,9 +87,7 @@ export function ChatMessageList({
                   self={m.self}
                   />
                 )}
-                {m.text && (
-                  <span className="select-text whitespace-pre-wrap break-words">{m.text}</span>
-                )}
+                {m.text && <MessageText text={m.text} />}
               </div>
             </div>
           </li>
