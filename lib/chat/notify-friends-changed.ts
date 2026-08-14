@@ -20,6 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import { after } from 'next/server'
+import { serverBaseUrl } from './internal-url'
 
 export type FriendsChangeReason =
   | 'requested'
@@ -27,19 +28,6 @@ export type FriendsChangeReason =
   | 'declined'
   | 'cancelled'
   | 'removed'
-
-/**
- * Базовый адрес сокет-сервера для запроса «сервер → сервер».
- *
- * Фолбэком нельзя брать NEXT_PUBLIC_MEDIASOUP_URL: в проде это публичный origin,
- * а nginx не проксирует /internal/ на порт 3001 — запрос ушёл бы в Next и молча
- * получил 404 (то же, что ломало загрузку файлов). К тому же /internal/ и не
- * должен быть доступен извне. Ходим напрямую внутри VPS.
- */
-function serverBaseUrl(): string {
-  const raw = process.env.MEDIASOUP_URL ?? 'http://127.0.0.1:3001'
-  return raw.replace(/\/+$/, '')
-}
 
 // Realtime не стоит того, чтобы держать ответ API: в БД всё записано ещё до
 // вызова хука, и клик «Принять» не должен ждать сокет-сервер.
@@ -137,7 +125,7 @@ export async function notifyFriendsChanged(
   const url = `${serverBaseUrl()}/internal/friends/changed`
   // notificationId — id УЖЕ сохранённой записи уведомления. Сервер по нему
   // перечитает запись из БД и запушит её получателю. Содержимое уведомления в
-  // payload не передаём: сервер не должен верить тексту, пришедшему по HTTP.
+  // payload не ��ередаём: сервер не должен верить тексту, пришедшему по HTTP.
   //
   // originSocketId — соединение, из которого пришло действие. Нужен, чтобы
   // сокет-сервер не ��тправлял эхо ровно в ту вкладку, которая уже обновила

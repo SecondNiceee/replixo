@@ -4,6 +4,7 @@ import { useCallback, useEffect } from 'react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useUnreadTotal } from '@/hooks/dm/use-unread-total'
 import { useFriendsRealtime } from '@/hooks/dm/use-friends-realtime'
+import { usePresenceHeartbeat } from '@/hooks/dm/use-presence-heartbeat'
 import {
   useNotificationsRealtime,
   type StoredNotification,
@@ -77,6 +78,13 @@ function toastFor(n: StoredNotification): void {
 export function DmNotifier({ selfId }: { selfId: string }) {
   const { socket } = useDmSocket()
   const totalUnread = useUnreadTotal()
+
+  // Наша половина presence: heartbeat, «отошёл» по скрытой вкладке и
+  // бездействию, уход по закрытию вкладки. Живёт здесь по той же причине, что и
+  // остальные подписки: соединение одно на вкладку, и второй экземпляр слал бы
+  // те же события дважды. Заодно статус поддерживается на любой странице —
+  // человек в звонке или на лендинге тоже «в сети».
+  usePresenceHeartbeat(socket)
 
   // Тост теперь производная от СОХРАНЁННОГО уведомления, а не от события
   // дружбы: раз запись уже в БД, тост можно спокойно потерять — центр
