@@ -100,7 +100,7 @@
   - `getCursorPoint()`
   - `writeClipboardText(text)`
 
-Renderer везде проверяет `window.electronAPI?.isElectron`, чтобы один и ��от же
+Renderer везде проверяет `window.electronAPI?.isElectron`, чтобы один и тот же
 код работал и в браузере (где API отсутствует), и в Electron.
 
 ---
@@ -166,7 +166,7 @@ Electron 42 = **Chromium 148**, где `restrictOwnAudio` уже поддерж�
   всё равно отдаёт как часть системного loopback-микса.
 
 В этих случаях штатного вычитания недостаточно и остаётся только DSP-путь
-(адаптивный AEC-воркл��т, см. `about/AEC/`). Практический вывод: тестировать
+(адаптивный AEC-ворклет, см. `about/AEC/`). Практический вывод: тестировать
 эхо в Electron нужно, когда **весь звонок сидит в одном и том же окне Electron**,
 а не «звонок в браузере + демонстрация в приложении».
 
@@ -267,7 +267,7 @@ overlay-режиме Electron.
 1. **нативный clipboard Electron** (`electronAPI.writeClipboardText`) — основной
    путь в десктопе, т.к. `navigator.clipboard` в безрамочном/прозрачном окне
    ненадёжен;
-2. `navigator.clipboard.writeText` — ��бычный веб;
+2. `navigator.clipboard.writeText` — обычный веб;
 3. `document.execCommand("copy")` через скрытый `textarea` — запасной путь.
 
 ---
@@ -279,7 +279,7 @@ overlay-режиме Electron.
 | Скрипт | Команда | Что делает |
 |---|---|---|
 | `electron` | `electron .` | Запуск десктоп-оболочки локально (грузит `APP_URL`). |
-| `dist` | `electron-builder --win --config electron-builder.yml` | Сборка NSIS-инсталлято��а `.exe` под Windows x64. |
+| `dist` | `electron-builder --win --config electron-builder.yml` | Сборка NSIS-инсталлятора `.exe` под Windows x64. |
 | `dist:dir` | `electron-builder --win --dir ...` | Сборка распакованной папки (без инсталлятора) для отладки. |
 
 `electron-builder.yml`:

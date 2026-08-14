@@ -308,7 +308,7 @@ async function main(): Promise<void> {
   // rejoinProbe/joinRoom. Реальное закрытие вкладки/браузера — никто не
   // вернётся, и остальные увидят выход почти сразу (а не через полное
   // grace-окно, как при обычном обрыве сети). sendBeacon шлёт POST; мы читаем
-  // peerId из query, те��а нет — парсер не нужен.
+  // peerId из query, тела нет — парсер не нужен.
   // ---------------------------------------------------------------------------
   app.post('/rooms/:roomId/leave', (req: Request, res: Response) => {
     const roomId = canonicalRoomCode(req.params.roomId)

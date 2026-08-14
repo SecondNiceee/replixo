@@ -130,7 +130,7 @@ export function registerInternalRoutes(app: Express, io: Server): void {
   // Лимиты навешиваем на весь префикс, а не на конкретный маршрут: любой
   // будущий /internal/* получит защиту автоматически, включая запросы к
   // несуществующим путям под этим префиксом: 404 — это неудачный ответ, значит
-  // он попадает в ��имит и перебор путей тоже глохнет.
+  // он попадает в лимит и перебор путей тоже глохнет.
   app.use('/internal', BURST_LIMITER, FAILURE_LIMITER)
 
   app.post('/internal/friends/changed', (req: Request, res: Response) => {

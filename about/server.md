@@ -99,7 +99,7 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 | `socket/room-registry.ts` | In-memory хранилище: `rooms` (`Map<roomId, Room>`), `peerSockets` (peerId → socketId), таймеры grace-window, `getOrCreateRoom` (с гидрацией доски и рисунков из БД), `cleanupRoomIfEmpty` (удаляет пустую комнату + историю чата и вложения), `authedRoom` (проверка, что отправитель владеет peerId), `allowRoomCreation`/`isRoomCreationAllowed`/`revokeRoomCreation` (коды комнат, которые разрешено поднять без флага `create` — используется звонками из личного чата, TTL 5 мин). |
 | `socket/media-handlers.ts` | WebRTC-сигналинг (см. ниже). |
 | `socket/chat-handlers.ts` | Текстовый чат комнаты. |
-| `socket/whiteboard-handlers.ts` | Совместна�� доска (tldraw). |
+| `socket/whiteboard-handlers.ts` | Совместная доска (tldraw). |
 | `socket/presentation-handlers.ts` | Синхронизация слайдов + рисование поверх слайдов. |
 | `socket/annotation-handlers.ts` | Эфемерное рисование поверх демонстрации экрана. |
 | `socket/lifecycle-handlers.ts` | Переподключение и выход (`rejoinProbe`, `leaveRoom`, `disconnect`). |
@@ -112,8 +112,8 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
   звонков из личного чата: туда оба участника приходят без `create`), иначе
   «Комната не найдена»; комната не должна быть полной
   (макс. 5). Если этот `peerId` уже подключён с другого сокета (другая
-  вкладка/устройство), ��тарая сессия «кикается» (`kicked`). Добавляет
-  участника, уведомляет остальных `peerJoined`, возвра��ает RTP-capabilities,
+  вкладка/устройство), старая сессия «кикается» (`kicked`). Добавляет
+  участника, уведомляет остальных `peerJoined`, возвращает RTP-capabilities,
   список участников, историю чата, отметки о прочтении, состояние доски,
   текущий слайд презентации и рисунки по слайдам.
 - **`createWebRtcTransport`** — создаёт транспорт нужного направления.
@@ -212,14 +212,14 @@ producer'ов, consumer'ов и `close()` для очистки (закрыва�
 Слой работы с PostgreSQL (та же БД, что у Next.js-приложения): сохраняет
 историю чата (`saveMessage`), маркеры прочтения (`saveReadMarker`), состояние
 и снапшот доски (`saveWhiteboard`), состояние презентации и рисунки по слайдам.
-Используется для гидрации комнат�� при её пересо��дании (`getOrCreateRoom`) и
+Используется для гидрации комнаты при её пересоздании (`getOrCreateRoom`) и
 чистки при уничтожении пустой комнаты.
 
 ---
 
 ## `server/src/types.ts`
 
-Содержит TypeScript-типы для payload'ов ��сех Socket.io-событий и моделей
+Содержит TypeScript-типы для payload'ов всех Socket.io-событий и моделей
 (`JoinRoomPayload`, `ProducePayload`, `ConsumePayload`, `ExistingPeerPayload`,
 `PeerData` и др.), обеспечивая типобезопасность обмена клиент↔сервер.
 

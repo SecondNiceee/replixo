@@ -439,7 +439,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
 
           OVERLAY_INTERACTIVE_ATTR: в overlay-режиме (Electron) панель и её
           стрелка-хэндл должны «ловить» клики, иначе hit-test через
-          elementFromPoint не ��айдёт интерактивный маркер и клик уйдёт сквозь
+          elementFromPoint не найдёт интерактивный маркер и клик уйдёт сквозь
           окно на рабочий стол. */}
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}

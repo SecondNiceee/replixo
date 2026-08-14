@@ -189,7 +189,7 @@ function readCallId(payload: unknown): string | null {
 export function registerCallHandlers(nsp: Namespace, socket: Socket): void {
   const data = socket.data as DmSocketData
   // Звонок — действие редкое и дорогое: пять попыток за десять секунд с
-  // за��асом по��рывают «нажал ещё раз, потому что не дозвонился».
+  // запасом покрывают «нажал ещё раз, потому что не дозвонился».
   const allowInvite = createRateLimiter(5, 10_000)
   const allowAnswer = createRateLimiter(20, 10_000)
 

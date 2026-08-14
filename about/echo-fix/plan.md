@@ -177,7 +177,7 @@
 1. **Основной (детерминированный):** WASAPI Process Loopback, exclude своего PID
    (Вариант A). Убирает эхо физически.
 2. **Fallback для старых ОС:** виртуальный драйвер через NSIS (Вариант B).
-3. **Fallback без DSP:** сырой loopback с `restrictOwnAudio: true`. AEC-воркл��т
+3. **Fallback без DSP:** сырой loopback с `restrictOwnAudio: true`. AEC-ворклет
    не импортируется активным медиатрактом и не должен включаться даже при
    недоступности нативного захвата: виртуальный аудиокабель должен передаваться
    без echo cancellation, noise suppression и automatic gain control.

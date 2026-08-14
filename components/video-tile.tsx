@@ -362,7 +362,7 @@ export function VideoTile({
       <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between gap-2 px-4 py-4">
         <span className="max-w-[70%] truncate rounded-md bg-black/50 px-2.5 py-1 text-sm font-semibold leading-tight text-white backdrop-blur-sm shadow-sm">
           {isScreen
-            ? `${displayName}${isLocal ? " (вы)" : ""} — эк��ан`
+            ? `${displayName}${isLocal ? " (вы)" : ""} — экран`
             : isLocal
               ? `${displayName} (вы)`
               : displayName}
