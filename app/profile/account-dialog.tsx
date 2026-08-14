@@ -88,12 +88,16 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-foreground/5"
         aria-label="Открыть настройки"
       >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-sm font-semibold text-primary-foreground">
+        {/* Аватар плоский, с моноширинной буквой и тонким кольцом: градиент
+            остался только у логотипа, чтобы акцент в панели был один. */}
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm font-medium text-foreground ring-1 ring-inset ring-border">
           {displayName.charAt(0).toUpperCase()}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="truncate text-xs text-muted-foreground">{email}</span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium leading-tight text-foreground">
+            {displayName}
+          </span>
+          <span className="truncate text-[11px] leading-tight text-muted-foreground">{email}</span>
         </span>
         {/* Шестерёнка, а не карандаш: строка открывает настройки целиком —
             и переименование, и выход, — а карандаш обещал бы только правку имени. */}
@@ -108,7 +112,7 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         </DialogHeader>
 
         <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-secondary/20 p-3">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/75 text-lg font-semibold text-primary-foreground">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-lg text-foreground ring-1 ring-inset ring-border">
             {displayName.charAt(0).toUpperCase()}
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">

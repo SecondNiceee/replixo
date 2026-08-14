@@ -70,7 +70,7 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
                 )}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
                     {(s.addresseeUsername ?? s.addresseeName).charAt(0).toUpperCase()}
                   </span>
                   <div className="flex min-w-0 flex-col">

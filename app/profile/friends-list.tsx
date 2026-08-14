@@ -101,9 +101,12 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
   const label = presenceLabel(status, lastSeenAt, now)
 
   return (
-    <li className="group flex items-center justify-between rounded-lg px-2 py-2 hover:bg-secondary/50">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-medium text-foreground">
+    // Геометрия строки та же, что у списка чатов (gap-3, аватар size-10,
+    // rounded-xl, px-2 py-2): панель одна, и при переключении табов колонка
+    // аватаров не должна прыгать влево-вправо.
+    <li className="group flex items-center justify-between rounded-xl px-2 py-2 hover:bg-foreground/5">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
           {name.charAt(0).toUpperCase()}
           {/* label пустой: статус уже написан текстом ниже, и озвучивать его
               скринридеру дважды не нужно. */}
@@ -138,9 +141,15 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
           disabled={removing}
           // Пока запрос летит, кнопку показываем и без ховера: иначе
           // спиннер прячется, стоит увести курсор со строки.
+          //
+          // Прячем прозрачностью, а не display: на hidden кнопка выпадала из
+          // потока, и «Написать» прыгало вправо ровно в момент наведения.
+          // pointer-events снимаем, чтобы невидимая кнопка не ловила клики.
           className={cn(
-            'text-muted-foreground transition-colors hover:text-destructive disabled:opacity-60',
-            removing ? 'flex' : 'hidden group-hover:flex',
+            'flex text-muted-foreground transition-[color,opacity] hover:text-destructive disabled:opacity-60',
+            removing
+              ? 'opacity-100'
+              : 'opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100',
           )}
           aria-label="Удалить из друзей"
         >

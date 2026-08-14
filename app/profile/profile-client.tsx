@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
-import { MessageSquare, Users } from 'lucide-react'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
 import { useConversations } from '@/hooks/dm/use-conversations'
@@ -135,9 +134,12 @@ export function ProfileClient({ user }: { user: User }) {
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
 
-  const panes: { id: Pane; label: string; icon: typeof MessageSquare; count: number }[] = [
-    { id: 'chats', label: 'Чаты', icon: MessageSquare, count: totalUnread },
-    { id: 'friends', label: 'Друзья', icon: Users, count: friends.length },
+  // Иконок в табах нет намеренно: подпись + иконка + бейдж на два коротких
+  // слова — три способа сказать одно и то же. countLabel озвучивает цифру
+  // скринридеру: «7» без него не отличить от непрочитанных.
+  const panes: { id: Pane; label: string; count: number; countLabel: string }[] = [
+    { id: 'chats', label: 'Чаты', count: totalUnread, countLabel: 'непрочитанных' },
+    { id: 'friends', label: 'Друзья', count: friends.length, countLabel: 'друзей' },
   ]
 
   return (
@@ -160,61 +162,84 @@ export function ProfileClient({ user }: { user: User }) {
             active ? 'hidden md:flex' : 'flex',
           )}
         >
-          <div className="shrink-0 border-b border-border/60 p-2">
+          {/* Своей линии снизу у блока аккаунта больше нет: её роль взял на себя
+              рельс табов, а две горизонтальные линии в 60px друг от друга
+              выглядели бы как случайная полоса. */}
+          <div className="shrink-0 p-2 pb-1">
             <AccountDialog displayName={displayName} email={user.email} />
           </div>
 
-          <div className="shrink-0 px-2 pt-2">
-            <div className="flex gap-1 rounded-xl bg-foreground/5 p-1">
-              {panes.map(({ id, label, icon: Icon, count }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setPane(id)}
-                  aria-current={pane === id ? 'true' : undefined}
-                  className={cn(
-                    'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                    pane === id
-                      ? 'bg-card text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Icon className="size-3.5" aria-hidden="true" />
-                  {label}
-                  {count > 0 && (
+          {/* Подчёркивание вместо «плашки в плашке»: панель уже лежит на
+              градиентной сцене, и третий слой фона (серая подложка + белая
+              карточка активного таба) читался бы как рамка внутри рамки. */}
+          <div className="shrink-0 border-b border-border/60 px-3">
+            <div role="tablist" aria-label="Разделы кабинета" className="-mb-px flex gap-5">
+              {panes.map(({ id, label, count, countLabel }) => {
+                const selected = pane === id
+                return (
+                  <button
+                    key={id}
+                    id={`pane-tab-${id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls={`pane-panel-${id}`}
+                    onClick={() => setPane(id)}
+                    className={cn(
+                      // Начертание одно на оба состояния: сменой на semibold
+                      // активный таб менял бы ширину и сдвигал соседний.
+                      'flex items-baseline gap-1.5 border-b-2 pb-2 pt-2.5 text-[13px] font-medium tracking-tight transition-colors',
+                      selected
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <span>{label}</span>
+                    {/* Слот под счётчик всегда одной ширины и с табличными
+                        цифрами. Раньше это была пилюля по размеру содержимого:
+                        «7» и «15» давали разную ширину, поэтому подпись съезжала
+                        по горизонтали, а сам таб тянул за собой соседний.
+                        Базовая линия — общая с подписью, так что цифра стоит
+                        ровно по оптике, а не по центру рамки. */}
                     <span
                       className={cn(
-                        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none',
-                        id === 'chats'
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-secondary text-secondary-foreground',
+                        'min-w-[2ch] text-left text-[11px] tabular-nums',
+                        selected ? 'text-foreground/55' : 'text-muted-foreground/70',
                       )}
                     >
-                      {count > 99 ? '99+' : count}
+                      {count > 0 ? (count > 99 ? '99+' : count) : ''}
+                      {count > 0 && <span className="sr-only"> {countLabel}</span>}
                     </span>
-                  )}
-                </button>
-              ))}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {pane === 'chats' ? (
-            <ConversationList
-              conversations={conversations}
-              friends={friends}
-              activeId={activeId}
-              isLoading={isLoading}
-              selfId={user.id}
-              onSelect={openConversation}
-              onStartWithFriend={openWithFriend}
-            />
-          ) : (
-            <FriendsList
-              friends={friends}
-              isLoading={friendsLoading}
-              onMessage={openWithFriend}
-            />
-          )}
+          <div
+            id={`pane-panel-${pane}`}
+            role="tabpanel"
+            aria-labelledby={`pane-tab-${pane}`}
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
+            {pane === 'chats' ? (
+              <ConversationList
+                conversations={conversations}
+                friends={friends}
+                activeId={activeId}
+                isLoading={isLoading}
+                selfId={user.id}
+                onSelect={openConversation}
+                onStartWithFriend={openWithFriend}
+              />
+            ) : (
+              <FriendsList
+                friends={friends}
+                isLoading={friendsLoading}
+                onMessage={openWithFriend}
+              />
+            )}
+          </div>
         </aside>
 
         <div className={cn('min-h-0', active ? 'flex' : 'hidden md:flex')}>
