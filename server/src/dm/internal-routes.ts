@@ -3,8 +3,9 @@ import type { Express, Request, Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import type { Server } from 'socket.io'
 import { INTERNAL_HOOK_SECRET } from '../config'
-import { isDmEnabled, userExists } from './db'
+import { getLastSeenBulk, isDmEnabled, userExists } from './db'
 import { broadcastFriendsChanged, type FriendsChangeReason } from './friends-events'
+import { statusesFor, trackDisconnect } from './presence'
 
 // ---------------------------------------------------------------------------
 // Внутренние маршруты «Next-сервер → сокет-сервер».
@@ -129,7 +130,7 @@ export function registerInternalRoutes(app: Express, io: Server): void {
   // Лимиты навешиваем на весь префикс, а не на конкретный маршрут: любой
   // будущий /internal/* получит защиту автоматически, включая запросы к
   // несуществующим путям под этим префиксом: 404 — это неудачный ответ, значит
-  // он попадает в лимит и перебор путей тоже глохнет.
+  // он попадает в ��имит и перебор путей тоже глохнет.
   app.use('/internal', BURST_LIMITER, FAILURE_LIMITER)
 
   app.post('/internal/friends/changed', (req: Request, res: Response) => {
@@ -196,5 +197,100 @@ export function registerInternalRoutes(app: Express, io: Server): void {
       console.error('[internal] friends/changed failed:', (e as Error).message)
       if (!res.headersSent) res.status(500).json({ error: 'internal_error' })
     })
+  })
+
+  // -------------------------------------------------------------------------
+  // Чтение статусов: Next спрашивает, кто из перечисленных людей сейчас в сети.
+  //
+  // Зачем это нужно, если статусы и так приходят по websocket: снапшот
+  // доставляется только ПОСЛЕ подключения, а список друзей рисуется сразу по
+  // HTTP-ответу. Без этого маршрута первый кадр всегда показывал всех «не в
+  // сети», и точки «доезжали» через полсекунды-секунду — заметное мигание на
+  // каждой навигации.
+  //
+  // Статусы живут в памяти этого процесса (см. presence.ts), поэтому спросить
+  // их можно только у него: в Postgres их нет и быть не должно. lastSeenAt,
+  // наоборот, лежит в БД, но отдаём его здесь же — иначе Next пришлось бы
+  // делать второй запрос ради половины того же ответа.
+  // -------------------------------------------------------------------------
+
+  /** Потолок на размер списка: у одного пользователя друзей заведомо меньше. */
+  const MAX_PRESENCE_IDS = 500
+
+  app.post('/internal/presence', (req: Request, res: Response) => {
+    void (async () => {
+      if (!isAuthorized(req)) {
+        res.status(INTERNAL_HOOK_SECRET ? 401 : 503).json({ error: 'unauthorized' })
+        return
+      }
+      if (!isDmEnabled()) {
+        res.status(503).json({ error: 'dm_disabled' })
+        return
+      }
+
+      const { userIds } = (req.body ?? {}) as Record<string, unknown>
+      if (!Array.isArray(userIds) || userIds.length > MAX_PRESENCE_IDS) {
+        res.status(400).json({ error: 'bad_payload' })
+        return
+      }
+      // Кривые элементы отбрасываем, а не роняем весь запрос: presence —
+      // улучшение поверх списка, и один битый id не повод остаться без точек.
+      const ids = [...new Set(userIds.filter(isId))]
+      if (ids.length === 0) {
+        res.json({ statuses: {}, lastSeenAt: {} })
+        return
+      }
+
+      // Существование пользователей не проверяем: statusesFor промолчит о
+      // незнакомом id, а getLastSeenBulk просто его не найдёт. Лишний запрос к
+      // БД ради валидации того, что и так деградирует в пустоту, не нужен.
+      const lastSeenAt = await getLastSeenBulk(ids)
+      res.json({ statuses: statusesFor(ids), lastSeenAt })
+    })().catch((e: unknown) => {
+      console.error('[internal] presence failed:', (e as Error).message)
+      if (!res.headersSent) res.status(500).json({ error: 'internal_error' })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // «Вкладку закрывают» — beacon, проксированный через Next.
+  //
+  // Браузер не даёт доставить socket.emit во время выгрузки страницы, а сервер
+  // сам заметит разрыв только по pingTimeout движка (30 с). Всё это время
+  // собеседник видит «в сети» у человека, который уже ушёл. navigator.sendBeacon
+  // при выгрузке доставляется надёжно — но шлёт его браузер, а браузеру этот
+  // маршрут доверять нельзя.
+  //
+  // Поэтому beacon летит в Next (POST /api/chat/presence/leave), тот достаёт
+  // личность из сессии и дёргает уже этот маршрут. Два следствия:
+  //   • userId приходит от доверенной стороны, а не из браузера — иначе одним
+  //     POST'ом можно было бы «выключить» любого пользователя;
+  //   • путь идёт через тот же origin, что и приложение, а его nginx проксирует
+  //     всегда (location /). Прямой POST на порт 3001 в проде не проходит:
+  //     под /dm/ у nginx location'а нет, и запрос ушёл бы в Next и получил 404.
+  // -------------------------------------------------------------------------
+  app.post('/internal/presence/leave', (req: Request, res: Response) => {
+    if (!isAuthorized(req)) {
+      res.status(INTERNAL_HOOK_SECRET ? 401 : 503).json({ error: 'unauthorized' })
+      return
+    }
+    if (!isDmEnabled()) {
+      res.status(503).json({ error: 'dm_disabled' })
+      return
+    }
+
+    const { userId, socketId } = (req.body ?? {}) as Record<string, unknown>
+    if (!isId(userId) || !isSocketId(socketId)) {
+      res.status(400).json({ error: 'bad_payload' })
+      return
+    }
+
+    // socketId обязателен: снимаем с учёта именно закрывающуюся вкладку, а
+    // остальные устройства того же пользователя должны остаться в сети.
+    //
+    // immediate: закрытие вкладки — осознанный уход, ждать возврата (grace-окно
+    // на случай reload) незачем, точка у собеседника гаснет сразу.
+    trackDisconnect(io.of('/dm'), socketId, userId, true)
+    res.status(204).end()
   })
 }

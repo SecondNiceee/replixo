@@ -10,11 +10,29 @@ import { create } from 'zustand'
 // сообщения, список диалогов) здесь НЕ хранятся — они живут в SWR.
 // ---------------------------------------------------------------------------
 
+/**
+ * Что видно про человека. Три состояния, а не флаг «онлайн»:
+ *   • online  — активная вкладка;
+ *   • idle    — соединение есть, но пользователь отошёл (вкладка скрыта или
+ *               долго без действий);
+ *   • offline — соединений нет, показываем «был(а) N минут назад».
+ */
+export type PresenceStatus = 'online' | 'idle' | 'offline'
+
+/** Статусы в сторе без 'offline': отсутствие ключа и есть оффлайн. */
+export type LivePresenceStatus = Exclude<PresenceStatus, 'offline'>
+
 interface DmStore {
-  /** Друзья, у которых сейчас есть хотя бы одно живое соединение. */
-  onlineIds: Set<string>
-  /** userId → когда его видели последний раз (мс). Только для оффлайн-друзей. */
+  /** userId → статус. Оффлайн-друзей здесь нет: пустой ключ дешевле явного. */
+  statuses: Record<string, LivePresenceStatus>
+  /** userId → когда его видели последний раз (мс). */
   lastSeenAt: Record<string, number>
+  /**
+   * Пришёл ли снапшот от сокета. Нужен, чтобы данные из HTTP-ответа не
+   * «оживляли» человека, о котором сокет уже сказал, что он оффлайн: сокет
+   * авторитетнее, а HTTP-ответ мог быть собран на полсекунды раньше.
+   */
+  snapshotApplied: boolean
   /** conversationId → userId → печатает ли. */
   typing: Record<string, Record<string, boolean>>
   /** conversationId → lastReadAt собеседника (мс), по нему рисуются галочки. */
@@ -28,37 +46,72 @@ interface DmStore {
   activeConversationId: string | null
 
   setActiveConversationId: (conversationId: string | null) => void
-  applyPresenceSnapshot: (onlineUserIds: string[], lastSeenAt: Record<string, number>) => void
-  setPresence: (userId: string, online: boolean, lastSeenAt?: number) => void
+  applyPresenceSnapshot: (
+    statuses: Record<string, LivePresenceStatus>,
+    lastSeenAt: Record<string, number>,
+  ) => void
+  mergePresence: (
+    statuses: Record<string, LivePresenceStatus>,
+    lastSeenAt: Record<string, number>,
+  ) => void
+  setPresence: (userId: string, status: PresenceStatus, lastSeenAt?: number) => void
   setTyping: (conversationId: string, userId: string, typing: boolean) => void
   setPeerReadAt: (conversationId: string, ts: number) => void
   reset: () => void
 }
 
+/** Слить времена, оставив более свежее: события могут прийти не по порядку. */
+function mergeLastSeen(
+  current: Record<string, number>,
+  incoming: Record<string, number>,
+): Record<string, number> {
+  const result = { ...current }
+  for (const [id, ts] of Object.entries(incoming)) {
+    if (!(id in result) || ts > result[id]) result[id] = ts
+  }
+  return result
+}
+
 export const useDmStore = create<DmStore>((set) => ({
-  onlineIds: new Set<string>(),
+  statuses: {},
   lastSeenAt: {},
+  snapshotApplied: false,
   typing: {},
   peerReadAt: {},
   activeConversationId: null,
 
   setActiveConversationId: (conversationId) => set({ activeConversationId: conversationId }),
 
-  applyPresenceSnapshot: (onlineUserIds, lastSeenAt) =>
-    set({ onlineIds: new Set(onlineUserIds), lastSeenAt }),
+  // Снапшот от сокета — истина в последней инстанции: он перечисляет ВСЕХ, кто
+  // сейчас в сети, поэтому статусы заменяем целиком. Времена сливаем: снапшот
+  // мог не включать человека, о котором мы уже что-то знаем.
+  applyPresenceSnapshot: (statuses, lastSeenAt) =>
+    set((state) => ({
+      statuses,
+      lastSeenAt: mergeLastSeen(state.lastSeenAt, lastSeenAt),
+      snapshotApplied: true,
+    })),
 
-  setPresence: (userId, online, lastSeenAt) =>
+  // Данные из HTTP-ответа (/api/friends) — только чтобы точки были на первом
+  // кадре, до подключения сокета. Как только снапшот пришёл, статусы оттуда
+  // игнорируем: HTTP-ответ мог быть собран раньше и «оживил» бы ушедшего.
+  // Времена берём всегда — они из Postgres и от сокета не зависят.
+  mergePresence: (statuses, lastSeenAt) =>
+    set((state) => ({
+      statuses: state.snapshotApplied ? state.statuses : { ...statuses, ...state.statuses },
+      lastSeenAt: mergeLastSeen(state.lastSeenAt, lastSeenAt),
+    })),
+
+  setPresence: (userId, status, lastSeenAt) =>
     set((state) => {
-      // Set пересоздаём: zustand сравнивает по ссылке, мутация не вызвала бы
-      // перерисовку подписчиков.
-      const onlineIds = new Set(state.onlineIds)
-      if (online) onlineIds.add(userId)
-      else onlineIds.delete(userId)
+      const statuses = { ...state.statuses }
+      if (status === 'offline') delete statuses[userId]
+      else statuses[userId] = status
       return {
-        onlineIds,
+        statuses,
         lastSeenAt:
-          !online && lastSeenAt !== undefined
-            ? { ...state.lastSeenAt, [userId]: lastSeenAt }
+          lastSeenAt !== undefined
+            ? mergeLastSeen(state.lastSeenAt, { [userId]: lastSeenAt })
             : state.lastSeenAt,
       }
     }),
@@ -79,6 +132,29 @@ export const useDmStore = create<DmStore>((set) => ({
       return { peerReadAt: { ...state.peerReadAt, [conversationId]: ts } }
     }),
 
+  // Статусы достоверны только при живом соединении, поэтому после разрыва их
+  // сбрасываем. lastSeenAt, наоборот, оставляем: это история из Postgres, она
+  // не портится от того, что websocket отвалился, и «был(а) 5 минут назад»
+  // лучше пустого «не в сети».
   reset: () =>
-    set({ onlineIds: new Set<string>(), lastSeenAt: {}, typing: {}, peerReadAt: {} }),
+    set((state) => ({
+      statuses: {},
+      snapshotApplied: false,
+      typing: {},
+      peerReadAt: {},
+      lastSeenAt: state.lastSeenAt,
+    })),
 }))
+
+/**
+ * Статус одного человека одним значением. Отдельный хук, потому что подписка на
+ * весь объект statuses перерисовывала бы компонент на любое чужое изменение.
+ */
+export function usePresenceStatus(userId: string | null | undefined): PresenceStatus {
+  return useDmStore((s) => (userId ? (s.statuses[userId] ?? 'offline') : 'offline'))
+}
+
+/** Когда человека видели последний раз (мс), либо undefined. */
+export function usePresenceLastSeen(userId: string | null | undefined): number | undefined {
+  return useDmStore((s) => (userId ? s.lastSeenAt[userId] : undefined))
+}

@@ -4,6 +4,7 @@ import { eq, or, and } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { friendship, user } from '@/lib/db/schema'
+import { fetchPresence } from '@/lib/chat/presence'
 
 // GET /api/friends — accepted friends list
 export async function GET() {
@@ -38,5 +39,17 @@ export async function GET() {
       ),
     )
 
-  return NextResponse.json({ friends: rows })
+  // Статусы кладём в тот же ответ, что и сам список: точки «в сети» должны быть
+  // на первом кадре. Снапшот по websocket приходит только после подключения
+  // сокета, поэтому раньше список секунду показывал всех «не в сети».
+  //
+  // Запрос к сокет-серверу ошибок не бросает и ограничен коротким таймаутом:
+  // если он недоступен, вернётся пустой presence, а статусы доедут по websocket.
+  const presence = await fetchPresence(rows.map((r) => r.friendId))
+
+  return NextResponse.json(
+    { friends: rows, presence },
+    // Статусы живут секунды — кэшировать этот ответ нельзя ни на шаг.
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
 }

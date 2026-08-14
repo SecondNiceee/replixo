@@ -1,3 +1,5 @@
+import type { PresenceStatus } from '@/stores/dm-store'
+
 // Формы данных личного чата на клиенте.
 //
 // Время всюду нормализовано в миллисекунды: HTTP-роуты отдают ISO-строку
@@ -93,16 +95,55 @@ export function conversationTitle(c: Pick<DmConversation, 'friendName' | 'friend
 }
 
 /**
- * Человекочитаемый статус оффлайн-собеседника. Точное время не показываем:
- * presence живёт в памяти сервера и после его перезапуска неизвестно, так что
- * формулировки намеренно расплывчатые.
+ * Человекочитаемое «был(а) N назад».
+ *
+ * `now` передаётся аргументом, а не берётся из Date.now() внутри: строку нужно
+ * обновлять по тику (см. useNow), а чистая функция от времени делает это
+ * предсказуемым — тот же вход даёт тот же текст.
+ *
+ * Формулировки округлены до минут и часов: точное время присутствия никому не
+ * нужно, а «был(а) 3 мин назад» читается быстрее любой даты.
  */
-export function formatLastSeen(ts: number | undefined): string {
+export function formatLastSeen(ts: number | undefined, now: number = Date.now()): string {
   if (!ts) return 'не в сети'
-  const minutes = Math.floor((Date.now() - ts) / 60_000)
+
+  const minutes = Math.floor((now - ts) / 60_000)
+  // Часы клиента могут немного опережать серверные — отрицательную разницу
+  // показываем как «только что», а не как «был(а) -1 мин назад».
   if (minutes < 1) return 'был(а) только что'
-  if (minutes < 60) return `был(а) ${minutes} мин назад`
+  if (minutes < 60) return `был(а) ${minutes} ${plural(minutes, 'минуту', 'минуты', 'минут')} назад`
+
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `был(а) ${hours} ч назад`
+  if (hours < 24) return `был(а) ${hours} ${plural(hours, 'час', 'часа', 'часов')} назад`
+
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `был(а) ${days} ${plural(days, 'день', 'дня', 'дней')} назад`
   return 'был(а) давно'
+}
+
+/** Русские числительные: 1 минуту, 2 минуты, 5 минут. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 14) return many
+  const mod10 = n % 10
+  if (mod10 === 1) return one
+  if (mod10 >= 2 && mod10 <= 4) return few
+  return many
+}
+
+/**
+ * Подпись под именем собеседника. Три состояния вместо «в сети / не в сети»:
+ * живой websocket ещё не значит, что человек за компьютером, поэтому отошедшего
+ * подписываем отдельно — иначе зелёная точка обещала бы быстрый ответ.
+ */
+export function presenceLabel(
+  status: PresenceStatus,
+  lastSeenAt: number | undefined,
+  now?: number,
+): string {
+  if (status === 'online') return 'в сети'
+  // У отошедшего время последнего действия есть, но показывать его незачем:
+  // соединение живо, сообщение он получит — важно лишь, что ответит не сразу.
+  if (status === 'idle') return 'отошёл(ла)'
+  return formatLastSeen(lastSeenAt, now)
 }

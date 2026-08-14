@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { Socket } from 'socket.io-client'
-import { useDmStore } from '@/stores/dm-store'
+import { useDmStore, type LivePresenceStatus } from '@/stores/dm-store'
 
 // ---------------------------------------------------------------------------
 // Приём эфемерных событий: presence, «печатает…», прочитано.
@@ -41,21 +41,28 @@ export function useDmPresence(socket: Socket | null, selfId: string): void {
     }
 
     const onSnapshot = (payload: unknown) => {
-      const { onlineUserIds, lastSeenAt } = (payload ?? {}) as {
-        onlineUserIds?: string[]
+      const { statuses, lastSeenAt } = (payload ?? {}) as {
+        statuses?: Record<string, unknown>
         lastSeenAt?: Record<string, number>
       }
-      applyPresenceSnapshot(onlineUserIds ?? [], lastSeenAt ?? {})
+      // Значения приходят по сети, поэтому фильтруем: в стор должны попасть
+      // только известные статусы, иначе рендер получит строку, которой не знает.
+      const safe: Record<string, LivePresenceStatus> = {}
+      for (const [id, value] of Object.entries(statuses ?? {})) {
+        if (value === 'online' || value === 'idle') safe[id] = value
+      }
+      applyPresenceSnapshot(safe, lastSeenAt ?? {})
     }
 
     const onPresence = (payload: unknown) => {
-      const { userId, online, lastSeenAt } = (payload ?? {}) as {
+      const { userId, status, lastSeenAt } = (payload ?? {}) as {
         userId?: string
-        online?: boolean
+        status?: unknown
         lastSeenAt?: number
       }
-      if (!userId || typeof online !== 'boolean') return
-      setPresence(userId, online, lastSeenAt)
+      if (!userId) return
+      if (status !== 'online' && status !== 'idle' && status !== 'offline') return
+      setPresence(userId, status, lastSeenAt)
     }
 
     const onTyping = (payload: unknown) => {
