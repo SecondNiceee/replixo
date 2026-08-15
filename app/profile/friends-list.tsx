@@ -135,7 +135,7 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
   const status = usePresenceStatus(friend.friendId)
   const lastSeenAt = usePresenceLastSeen(friend.friendId)
   // Тикающее «сейчас» нужно только оффлайн-строкам: у остальных подпись
-  // постоянная («в сети», «отошёл(ла)»), и обновлять её незачем.
+  // постоянная («в сети»), и обновлять её незачем.
   const now = useNow(status === 'offline')
   const label = presenceLabel(status, lastSeenAt, now)
 
@@ -165,10 +165,9 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm text-foreground">{name}</span>
-          {/* Подпись всегда приглушённая. Зелёное «в сети» и жёлтое
-              «отошёл(ла)» повторяли цвет точки на аватаре тем же смыслом —
-              два носителя одного сигнала, и в списке из семи строк это
-              рассыпалось цветными пятнами по всей колонке. */}
+          {/* Подпись всегда приглушённая. Зелёное «в сети» повторяло цвет точки
+              на аватаре тем же смыслом — два носителя одного сигнала, и в списке
+              из семи строк это рассыпалось цветными пятнами по всей колонке. */}
           <span className="truncate text-[11px] text-muted-foreground">{label}</span>
         </span>
       </button>

@@ -10,13 +10,14 @@
 // и точки «доезжали» через полсекунды — заметное мигание на каждой навигации.
 //
 // Источник истины у двух половин ответа разный (см. server/src/dm/presence.ts):
-// статус online/idle живёт в памяти сокет-сервера, lastSeenAt — в Postgres.
+// статус online живёт в памяти сокет-сервера, lastSeenAt — в Postgres.
 // Спросить их одним запросом можно только у сокет-сервера, поэтому ходим туда.
 // ---------------------------------------------------------------------------
 
 import { serverBaseUrl } from './internal-url'
 
-export type PresenceStatus = 'online' | 'idle' | 'offline'
+/** Статусов два: см. PresenceStatus в server/src/dm/presence.ts. */
+export type PresenceStatus = 'online' | 'offline'
 
 export interface PresenceSnapshot {
   /** userId → статус. Оффлайн не передаётся: это состояние по умолчанию. */
@@ -54,7 +55,9 @@ function parseSnapshot(raw: unknown): PresenceSnapshot {
   const safeStatuses: PresenceSnapshot['statuses'] = {}
   if (statuses && typeof statuses === 'object') {
     for (const [id, value] of Object.entries(statuses as Record<string, unknown>)) {
-      if (value === 'online' || value === 'idle') safeStatuses[id] = value
+      // 'idle' мог прийти от ещё не перезапущенного сокет-сервера: статус
+      // означал присутствие, поэтому и трактуем его как 'online', а не как мусор.
+      if (value === 'online' || value === 'idle') safeStatuses[id] = 'online'
     }
   }
 

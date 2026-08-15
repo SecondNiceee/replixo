@@ -167,7 +167,7 @@ export function ConversationView({
             и разное оформление читалось бы как два разных компонента. */}
         <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
           {title.charAt(0).toUpperCase()}
-          {/* Статус тут же написан текстом, поэтому точка декоративна. */}
+          {/* Статус тут же напис��н текстом, поэтому точка декоративна. */}
           <PresenceDot status={peerStatus} />
         </span>
         <div className="flex min-w-0 flex-col">
@@ -175,11 +175,7 @@ export function ConversationView({
           <span
             className={cn(
               'truncate text-[11px]',
-              peerStatus === 'online'
-                ? 'text-emerald-400'
-                : peerStatus === 'idle'
-                  ? 'text-amber-400'
-                  : 'text-muted-foreground',
+              peerStatus === 'online' ? 'text-emerald-400' : 'text-muted-foreground',
             )}
           >
             {peerLabel}

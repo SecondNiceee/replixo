@@ -5,8 +5,11 @@ import type { PresenceStatus } from '@/stores/dm-store'
 
 // ---------------------------------------------------------------------------
 // Точка статуса на аватаре. Одна на все списки: раньше эта разметка была
-// скопирована в четырёх местах, и «жёлтый для отошедших» пришлось бы добавлять
-// в каждое — с неизбежным расхождением оттенков и размеров.
+// скопирована в четырёх местах, и любая правка оттенка или размера расходилась
+// по копиям.
+//
+// Цвет ровно один: статусов всего два (см. PresenceStatus в stores/dm-store), и
+// зелёная точка отвечает на единственный вопрос — «он на месте?».
 //
 // Оффлайн рисуем ОТСУТСТВИЕМ точки, а не серой точкой: серая на сером аватаре
 // читается как «что-то есть», а её и не должно быть видно — за оффлайн отвечает
@@ -29,13 +32,6 @@ interface PresenceDotProps {
   label?: string
 }
 
-const COLORS: Record<Exclude<PresenceStatus, 'offline'>, string> = {
-  online: 'bg-emerald-500',
-  // Жёлтый — общепринятый «отошёл»: тот же смысловой код, что в Slack и Discord,
-  // поэтому объяснять его пользователю не нужно.
-  idle: 'bg-amber-400',
-}
-
 export function PresenceDot({
   status,
   ringClassName = 'border-card',
@@ -47,8 +43,7 @@ export function PresenceDot({
   return (
     <span
       className={cn(
-        'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2',
-        COLORS[status],
+        'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 bg-emerald-500',
         ringClassName,
         className,
       )}
