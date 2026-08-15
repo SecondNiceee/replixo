@@ -11,6 +11,7 @@ import { useDmRead } from '@/hooks/dm/use-dm-read'
 import { useTyping } from '@/hooks/dm/use-typing'
 import { useDmStore, usePresenceLastSeen, usePresenceStatus } from '@/stores/dm-store'
 import { useNow } from '@/hooks/use-now'
+import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { PresenceDot } from '@/components/chat/presence-dot'
 import { cn } from '@/lib/utils'
 import { DmMessageList } from './dm-message-list'
@@ -99,6 +100,11 @@ export function ConversationView({
     if (!el) return
     setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX)
   }, [])
+
+  // Полоса прокрутки ленты проявляется только на время скролла. Переподписка по
+  // conversationId нужна потому, что без открытого диалога на этом месте стоит
+  // EmptyState и ref пустой — иначе слушатель не навесился бы никогда.
+  useScrollbarAutohide(scrollRef, [conversationId])
 
   // Автоскролл вниз при новом сообщении и при открытии диалога. Догрузка
   // старых сообщений сюда не попадает: последний id не меняется.
@@ -198,7 +204,7 @@ export function ConversationView({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="chat-canvas min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        className="chat-canvas scroll-slim min-h-0 flex-1 overflow-y-auto px-4 py-3"
       >
         {hasMore && (
           <div className="flex justify-center pb-3">

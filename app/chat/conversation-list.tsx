@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Loader2, MessageSquarePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { usePresenceStatus } from '@/stores/dm-store'
 import { ListSearch } from '@/components/chat/list-search'
 import { PresenceDot } from '@/components/chat/presence-dot'
@@ -74,6 +75,10 @@ export function ConversationList({
 }: ConversationListProps) {
   const [query, setQuery] = useState('')
 
+  // Полоса прокрутки списка проявляется только на время скролла (.scroll-slim).
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useScrollbarAutohide(scrollRef)
+
   const search = query.trim().toLowerCase()
 
   // Фильтрация по имени собеседника. Отдельного поиска по сообщениям нет: в
@@ -112,7 +117,7 @@ export function ConversationList({
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="scroll-slim min-h-0 flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />

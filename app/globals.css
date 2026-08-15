@@ -345,6 +345,80 @@ html[data-overlay='1'] .desktop-titlebar {
   }
 }
 
+@layer utilities {
+  /* ---------------------------------------------------------------------------
+     Автоскрывающийся скролл (.scroll-slim)
+     ---------------------------------------------------------------------------
+     Дефолтная полоса ОС — самый заметный чужеродный элемент в мессенджере: она
+     светлая, широкая и в тёмной панели читается как вертикальная линейка сбоку.
+     Здесь она тонкая, скруглённая и по умолчанию ПОЛНОСТЬЮ прозрачная —
+     проявляется только пока пользователь скроллит.
+
+     «Пока скроллит» ставит JS: атрибут data-scrolling на контейнере
+     (см. hooks/use-scrollbar-autohide.ts). Чистым CSS этого не выразить —
+     :hover проявлял бы полосу всё время, пока курсор над лентой, то есть
+     практически всегда.
+
+     Ширину полосы резервируем всегда (8px, прозрачные), а не показываем по
+     требованию: иначе появление thumb сужало бы контент и вся лента дёргалась
+     бы на каждый скролл. Прозрачный thumb места не занимает визуально, но
+     гуттер уже учтён в раскладке.
+     --------------------------------------------------------------------------- */
+  .scroll-slim {
+    /* Firefox: своих псевдоэлементов нет, только эти два свойства. */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .scroll-slim[data-scrolling] {
+    scrollbar-color: oklch(1 0 0 / 24%) transparent;
+  }
+
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scroll-slim::-webkit-scrollbar-thumb {
+    /* background-clip: content-box + прозрачный border даёт визуальный отступ
+       от края: без него полоса прилипает к рамке панели. */
+    background-color: transparent;
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    transition: background-color 200ms ease;
+  }
+
+  .scroll-slim[data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: oklch(1 0 0 / 24%);
+  }
+
+  /* Под курсором — контрастнее: значит, thumb можно тащить. */
+  .scroll-slim[data-scrolling]::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(1 0 0 / 38%);
+  }
+
+  /* Уголок между вертикальной и горизонтальной полосой (появляется у textarea
+     с длинной строкой) по умолчанию рисуется светлым квадратом. */
+  .scroll-slim::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Внутри синего баббла своих сообщений белый thumb сливается с фоном —
+     там он тёмный. */
+  .scroll-slim-invert[data-scrolling] {
+    scrollbar-color: oklch(0 0 0 / 30%) transparent;
+  }
+
+  .scroll-slim-invert[data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: oklch(0 0 0 / 30%);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

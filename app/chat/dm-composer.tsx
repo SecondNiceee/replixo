@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Loader2, Paperclip, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatFileSize, isImageAttachment } from '@/lib/chat-format'
 import { normalizeAttachment, type DmAttachment } from './types'
