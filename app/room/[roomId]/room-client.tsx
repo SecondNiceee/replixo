@@ -7,6 +7,7 @@ import { NetworkBanner } from "@/components/network-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
 import { useAudioDevices } from "@/hooks/use-audio-devices"
 import { getSavedDisplayName, setDisplayName } from "@/lib/display-name"
+import { setInCall } from "@/lib/chat/tab-status"
 import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
@@ -182,6 +183,17 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
   }, [])
+
+  // Пока идёт разговор, вкладка считается присутствующей для personal presence,
+  // даже если её свернули. Иначе получалось наоборот: в разговоре мышь не
+  // двигают и окно уводят в фон, поэтому heartbeat объявлял человека ушедшим — и
+  // в списке друзей «был(а) только что» показывалось у того, с кем прямо сейчас
+  // говорят. Флаг снимается на выходе из комнаты и при уходе со страницы.
+  useEffect(() => {
+    if (status !== "connected") return
+    setInCall(true)
+    return () => setInCall(false)
+  }, [status])
 
   // Annotation (drawing over the shared screen) + Electron overlay lifecycle.
   const {

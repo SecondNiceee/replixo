@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
+import { currentTabStatus } from '@/lib/chat/tab-status'
 
 // ---------------------------------------------------------------------------
 // Подключение к namespace /dm mediasoup-сервера.
@@ -60,7 +61,19 @@ async function openShared() {
     if (refCount === 0) return
 
     const socket = io(`${SERVER_URL}/dm`, {
-      auth: { token },
+      // Статус вкладки идёт вместе с токеном, а не первым событием после
+      // подключения: без него сервер обязан был предполагать 'online', и
+      // открытая в фоне вкладка (Ctrl+click, восстановление сессии, реконнект
+      // свёрнутого браузера) давала у друзей вспышку зелёной точки, которая
+      // через мгновение сменялась на «был(а) только что».
+      //
+      // auth здесь ФУНКЦИЯ, а не объект: объект socket.io запоминает один раз и
+      // переиспользует при каждом реконнекте, поэтому статус приезжал бы
+      // устаревшим — как раз в самом частом случае, когда браузер свёрнут и
+      // соединение поднимается заново. Функция вызывается на каждую попытку.
+      auth: (cb: (data: Record<string, unknown>) => void) => {
+        cb({ token, status: currentTabStatus() })
+      },
       withCredentials: true,
       // Тот же путь /socket.io/, что и у звонков: nginx уже проксирует его.
       transports: ['websocket', 'polling'],
