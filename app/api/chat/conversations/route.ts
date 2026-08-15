@@ -5,7 +5,7 @@ import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { conversation, conversationMember, friendship } from '@/lib/db/schema'
 import { directConversationId } from '@/lib/chat/conversation-id'
-import { listConversations } from '@/lib/chat/conversations'
+import { ensureSelfConversation, listConversations } from '@/lib/chat/conversations'
 
 // ---------------------------------------------------------------------------
 // GET /api/chat/conversations — список личных диалогов текущего пользователя
@@ -39,8 +39,11 @@ export async function POST(req: NextRequest) {
   if (!friendId) {
     return NextResponse.json({ error: 'friendId обязателен' }, { status: 400 })
   }
+  // Диалог с самим собой — это чат «Избранное», а не ошибка: так глубокая
+  // ссылка «открыть чат с пользователем X», где X — я сам, ведёт в заметки.
   if (friendId === userId) {
-    return NextResponse.json({ error: 'Нельзя написать самому себе' }, { status: 400 })
+    const conversationId = await ensureSelfConversation(userId)
+    return NextResponse.json({ conversationId })
   }
 
   // Право на чат = принятая дружба (в любом направлении).

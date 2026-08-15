@@ -1,4 +1,5 @@
 import type { PresenceStatus } from '@/stores/dm-store'
+import { SELF_CONVERSATION_TITLE } from '@/lib/chat/conversation-id'
 
 // Формы данных личного чата на клиенте.
 //
@@ -11,6 +12,12 @@ export interface DmConversation {
   friendId: string
   friendName: string
   friendUsername: string | null
+  /**
+   * Чат «Избранное» — заметки самому себе. Собеседника нет, поэтому friendId
+   * здесь равен своему же id, а presence, звонки и галочки прочтения в таком
+   * диалоге не имеют смысла и не рисуются.
+   */
+  isSelf?: boolean
   unreadCount: number
   /** Маркер прочтения собеседника (ISO). Живые обновления идут через dm-store. */
   peerLastReadAt: string | null
@@ -90,7 +97,12 @@ export const chatFetcher = (url: string) =>
     return r.json()
   })
 
-export function conversationTitle(c: Pick<DmConversation, 'friendName' | 'friendUsername'>): string {
+export function conversationTitle(
+  c: Pick<DmConversation, 'friendName' | 'friendUsername' | 'isSelf'>,
+): string {
+  // У «Избранного» friendName — это имя самого владельца, поэтому без этой
+  // ветки чат подписывался бы собственным ником пользователя.
+  if (c.isSelf) return SELF_CONVERSATION_TITLE
   return c.friendUsername ?? c.friendName
 }
 

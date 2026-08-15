@@ -11,6 +11,21 @@ export function directConversationId(a: string, b: string): string {
   return `direct:${min}:${max}`
 }
 
+// Чат «Избранное» — заметки самому себе. Участник в нём один, поэтому id не
+// пара, а один пользователь: `self:<userId>`. Отдельный префикс (а не
+// `direct:<id>:<id>`) выбран сознательно — по нему видно с первого взгляда, что
+// собеседника нет, и проверки дружбы такой id не проходят по построению.
+export function selfConversationId(userId: string): string {
+  return `self:${userId}`
+}
+
+export function isSelfConversationId(id: string): boolean {
+  return id.startsWith('self:')
+}
+
+/** Название чата «Избранное» в списке и в шапке диалога. */
+export const SELF_CONVERSATION_TITLE = 'Избранное'
+
 /** Достаёт id второго участника из детерминированного id диалога. */
 export function otherUserIdFrom(conversationId: string, selfId: string): string | null {
   if (!conversationId.startsWith('direct:')) return null
