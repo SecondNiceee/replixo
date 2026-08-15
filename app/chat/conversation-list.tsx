@@ -1,14 +1,19 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Loader2, MessageSquarePlus } from 'lucide-react'
+import { Bookmark, Loader2, MessageSquarePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { usePresenceStatus } from '@/components/chat/presence-provider'
 import { ListSearch } from '@/components/chat/list-search'
 import { PresenceDot } from '@/components/chat/presence-dot'
 import type { Friend } from '@/app/profile/types'
-import { conversationTitle, normalizeAttachment, type DmConversation } from './types'
+import {
+  FAVORITES_HINT,
+  conversationTitle,
+  normalizeAttachment,
+  type DmConversation,
+} from './types'
 
 interface ConversationListProps {
   conversations: DmConversation[]
@@ -60,7 +65,12 @@ function formatListTime(iso: string | null): string {
 function formatPreview(c: DmConversation, selfId: string): string {
   const attachment = normalizeAttachment(c.lastMessageAttachment)
   const body = c.lastMessageText || (attachment ? `Файл: ${attachment.name}` : '')
-  if (!body) return 'Нет сообщений'
+  // «Избранное» пустым описывает себя, а не отчитывается об отсутствии
+  // сообщений: строка стоит в списке всегда, в том числе до первой заметки, и
+  // «Нет сообщений» не объясняло бы, зачем она там.
+  if (!body) return c.isSelf ? FAVORITES_HINT : 'Нет сообщений'
+  // Префикс «Вы:» в «Избранном» бессмысленен — других авторов там не бывает.
+  if (c.isSelf) return body
   return `${c.lastMessageSenderId === selfId ? 'Вы: ' : ''}${body}`
 }
 
@@ -157,13 +167,23 @@ export function ConversationList({
                             : 'bg-secondary text-foreground ring-1 ring-inset ring-border',
                         )}
                       >
-                        {title.charAt(0).toUpperCase()}
-                        {/* Обводка под подложку строки: у активной она красится
-                            акцентом, и border-card на нём был бы виден рамкой. */}
-                        <FriendPresenceDot
-                          friendId={c.friendId}
-                          ringClassName={isActive ? 'border-primary' : 'border-card'}
-                        />
+                        {/* «Избранное» — не человек: буква «И» в кружке читалась
+                            бы как ещё один собеседник в списке, поэтому здесь
+                            закладка. Точки присутствия нет по той же причине —
+                            статуса у собственных заметок не бывает. */}
+                        {c.isSelf ? (
+                          <Bookmark className="size-4.5" aria-hidden="true" />
+                        ) : (
+                          <>
+                            {title.charAt(0).toUpperCase()}
+                            {/* Обводка под подложку строки: у активной она красится
+                                акцентом, и border-card на нём был бы виден рамкой. */}
+                            <FriendPresenceDot
+                              friendId={c.friendId}
+                              ringClassName={isActive ? 'border-primary' : 'border-card'}
+                            />
+                          </>
+                        )}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="flex items-baseline gap-2">
@@ -189,7 +209,12 @@ export function ConversationList({
                           {preview}
                         </span>
                       </span>
-                      {c.unreadCount > 0 && !isActive && (
+                      {/* В «Избранном» непрочитанных не бывает по определению:
+                          автор единственный, и сервер счётчик там не поднимает
+                          (инкремент идёт участникам с userId <> senderId).
+                          Условие оставлено явным, чтобы кривое значение из БД не
+                          нарисовало бейдж на собственных заметках. */}
+                      {!c.isSelf && c.unreadCount > 0 && !isActive && (
                         // grid place-items-center вместо leading-none + py:
                         // выключной интерлиньяж с асимметричными паддингами
                         // ставил цифру примерно на пиксель выше центра кружка.

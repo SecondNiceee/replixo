@@ -7,7 +7,7 @@ import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
 import { useConversations } from '@/hooks/dm/use-conversations'
 import { useDmStore } from '@/stores/dm-store'
-import { isSelfConversationId } from '@/lib/chat/conversation-id'
+import { isSelfConversationId, selfConversationId } from '@/lib/chat/conversation-id'
 import { cn } from '@/lib/utils'
 import { ConversationList } from '@/app/chat/conversation-list'
 import { ConversationView } from '@/app/chat/conversation-view'
@@ -111,19 +111,26 @@ export function ProfileClient({ user }: { user: User }) {
 
   const openConversation = useCallback(
     (conversationId: string) => {
-      if (isSelfConversationId(conversationId) && !favoritesReady.current) {
+      if (isSelfConversationId(conversationId)) {
+        // Открываем не тот id, что пришёл, а тот, что вернул сервер: ссылка
+        // ?c=self:<чужой-id> так приводит в собственное «Избранное», а не в
+        // пустой диалог, к которому всё равно нет членства.
+        const ownId = selfConversationId(user.id)
+        if (favoritesReady.current) {
+          setActiveId(ownId)
+          return
+        }
         void ensureFavorites().then((id) => {
           if (!id) return
           favoritesReady.current = true
           setActiveId(id)
-          zeroUnreadLocally(id)
         })
         return
       }
       setActiveId(conversationId)
       zeroUnreadLocally(conversationId)
     },
-    [ensureFavorites, zeroUnreadLocally],
+    [ensureFavorites, zeroUnreadLocally, user.id],
   )
 
   // Создать диалог и сразу открыть его. Обёртка над startWithFriend из хука:
