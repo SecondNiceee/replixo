@@ -66,6 +66,21 @@ const conversations = [
     lastMessageText: 'Нет сообщений',
     lastMessageSenderId: null,
   },
+  // «Избранное» в том виде, в каком его отдаёт listConversations: friendId — сам
+  // владелец, собеседника нет. Стоит в общем списке по времени, поэтому здесь
+  // оно между c3 и c4 по lastMessageAt.
+  {
+    id: 'self:self',
+    friendId: 'self',
+    friendName: 'Избранное',
+    friendUsername: null,
+    unreadCount: 0,
+    peerLastReadAt: null,
+    lastMessageAt: iso(300),
+    lastMessageText: 'Пароль от вайфая в офисе: 1234',
+    lastMessageSenderId: 'self',
+    isSelf: true,
+  },
 ]
 
 const pending = [
@@ -99,7 +114,33 @@ const fallback = {
   },
   '/api/friends/pending': { pending },
   '/api/friends/sent': { sent },
-  '/api/chat/conversations': { conversations },
+  // Сортировка повторяет запрос списка (lastMessageAt DESC NULLS LAST): в
+  // превью строки перечислены руками, а «Избранное» обязано встать в общий
+  // порядок по времени, а не в конец массива.
+  '/api/chat/conversations': {
+    conversations: [...conversations].sort(
+      (a, b) =>
+        new Date(b.lastMessageAt ?? 0).getTime() - new Date(a.lastMessageAt ?? 0).getTime(),
+    ),
+  },
+}
+
+// В превью нет ни БД, ни сокета, а «Избранное» открывается только после
+// POST /api/chat/conversations { self: true } (лениво создаёт диалог). Без
+// заглушки запрос падает, и строка не открывается — проверить шапку нельзя.
+// Ровно этот один роут и подменяем, остальные запросы уходят как есть.
+if (typeof window !== 'undefined') {
+  const original = window.fetch
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.includes('/api/chat/conversations') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ conversationId: 'self:self' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return original(input, init)
+  }
 }
 
 export default function DesignPreviewPage() {

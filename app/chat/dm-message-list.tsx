@@ -6,13 +6,18 @@ import { AttachmentView } from '@/components/chat/attachment-view'
 import { MessageText } from '@/components/chat/message-text'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatTime, isImageAttachment } from '@/lib/chat-format'
-import type { DmMessage } from './types'
+import { FAVORITES_EMPTY_TEXT, type DmMessage } from './types'
 
 interface DmMessageListProps {
   messages: DmMessage[]
   selfId: string
-  /** До какого момента собеседник прочитал диалог (мс). */
+  /**
+   * До какого момента собеседник прочитал диалог (мс). В «Избранном» это
+   * Infinity — галочки там всегда двойные, ждать прочтения не от кого.
+   */
   peerReadAt: number
+  /** Чат «Избранное»: заметки самому себе, без второго участника. */
+  isSelfChat?: boolean
   onRetry: (id: string) => void
 }
 
@@ -31,13 +36,16 @@ export function DmMessageList({
   messages,
   selfId,
   peerReadAt,
+  isSelfChat = false,
   onRetry,
 }: DmMessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-center">
         <p className="text-pretty text-sm text-muted-foreground">
-          Сообщений пока нет. Напишите первым!
+          {/* «Напишите первым» подразумевает второго — в «Избранном» его нет, и
+              фраза читалась бы как ожидание чужого ответа. */}
+          {isSelfChat ? FAVORITES_EMPTY_TEXT : 'Сообщений пока нет. Напишите первым!'}
         </p>
       </div>
     )
@@ -115,7 +123,12 @@ export function DmMessageList({
                   // Прочитано — не по каждому сообщению, а по маркеру времени
                   // собеседника: одна отметка закрывает всю ленту до неё.
                   (m.createdAt <= peerReadAt ? (
-                    <CheckCheck className="size-3 text-primary" aria-label="Прочитано" />
+                    <CheckCheck
+                      className="size-3 text-primary"
+                      // Скринридеру «Прочитано» в «Избранном» обещало бы чужое
+                      // прочтение; там двойная галочка значит только «записано».
+                      aria-label={isSelfChat ? 'Сохранено' : 'Прочитано'}
+                    />
                   ) : (
                     <Check className="size-3 text-muted-foreground/70" aria-label="Отправлено" />
                   ))}

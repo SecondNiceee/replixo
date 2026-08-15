@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Socket } from 'socket.io-client'
-import { ArrowLeft, Loader2, Phone } from 'lucide-react'
+import { ArrowLeft, Bookmark, Loader2, Phone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useCallActions } from '@/hooks/dm/use-calls'
 import { useCallStore } from '@/stores/call-store'
@@ -24,6 +24,7 @@ import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
 import { EmptyState } from './empty-state'
 import {
+  FAVORITES_HINT,
   conversationTitle,
   presenceLabel,
   type DmAttachment,
@@ -51,6 +52,10 @@ export function ConversationView({
   onReadFallback,
 }: ConversationViewProps) {
   const conversationId = conversation?.id ?? null
+  // «Избранное»: собеседника нет, поэтому всё, что описывает второго человека
+  // (звонок, presence, «печатает…», ожидание его галочек), здесь не просто
+  // лишнее — оно врало бы про несуществующего участника.
+  const isSelfChat = conversation?.isSelf === true
   const { messages, loading, loadingMore, hasMore, error, send, retry, loadMore } =
     useConversationMessages(conversationId, socket, selfId)
 
@@ -62,7 +67,10 @@ export function ConversationView({
   // именно этот момент нужно скомпенсировать скроллом.
   const firstMessageId = messages.length > 0 ? messages[0].id : null
 
-  const { notifyTyping, stopTyping } = useTyping(socket, conversationId)
+  // Своё «печатает…» в «Избранном» не рассылаем: сервер разослал бы событие
+  // всем участникам, а участник там ровно один — я сам. Индикатор загорелся бы
+  // в собственной шапке от собственного набора.
+  const { notifyTyping, stopTyping } = useTyping(socket, isSelfChat ? null : conversationId)
 
   // Звонок собеседнику. Состояние вызова глобальное (экраны звонка живут в
   // корневом layout), здесь нужно только действие и признак «уже звоним» —
@@ -78,13 +86,25 @@ export function ConversationView({
   const httpPeerReadAt = conversation?.peerLastReadAt
     ? new Date(conversation.peerLastReadAt).getTime()
     : 0
-  const peerReadAt = Math.max(livePeerReadAt, httpPeerReadAt)
+  // В «Избранном» ждать чужого прочтения не от кого, а одинарная галочка читалась
+  // бы как «не доставлено». Infinity даёт двойную всегда: любое сообщение
+  // оказывается созданным раньше маркера.
+  const peerReadAt = isSelfChat
+    ? Number.POSITIVE_INFINITY
+    : Math.max(livePeerReadAt, httpPeerReadAt)
 
   const peerTyping = useDmStore((s) =>
-    conversationId ? Boolean(s.typing[conversationId]?.[conversation?.friendId ?? '']) : false,
+    conversationId && !isSelfChat
+      ? Boolean(s.typing[conversationId]?.[conversation?.friendId ?? ''])
+      : false,
   )
-  const peerStatus = usePresenceStatus(conversation?.friendId)
-  const peerLastSeen = usePresenceLastSeen(conversation?.friendId)
+  // В «Избранном» friendId — это сам владелец, и подписка на него дала бы в
+  // шапке собственный статус («в сети» самому себе). Поэтому там id не
+  // передаём: хуки на undefined возвращают 'unknown', а подпись мы и так
+  // заменяем на FAVORITES_HINT.
+  const peerId = isSelfChat ? undefined : conversation?.friendId
+  const peerStatus = usePresenceStatus(peerId)
+  const peerLastSeen = usePresenceLastSeen(peerId)
   // «был(а) N минут назад» должно стареть само: события об оффлайне больше не
   // будет, и без тика шапка часами показывала бы «только что». Пока собеседник
   // на связи, подписка не нужна — подпись там постоянная.
@@ -186,34 +206,50 @@ export function ConversationView({
         {/* Тот же плоский аватар, что в списке слева: это один и тот же человек,
             и разное оформление читалось бы как два разных компонента. */}
         <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
-          {title.charAt(0).toUpperCase()}
-          {/* Статус тут же напис��н текстом, поэтому точка декоративна. */}
-          <PresenceDot status={peerStatus} />
+          {/* Та же закладка, что в строке списка: открытый диалог обязан
+              выглядеть продолжением строки, по которой в него вошли. */}
+          {isSelfChat ? (
+            <Bookmark className="size-4.5" aria-hidden="true" />
+          ) : (
+            <>
+              {title.charAt(0).toUpperCase()}
+              {/* Статус тут же написан текстом, поэтому точка декоративна. */}
+              <PresenceDot status={peerStatus} />
+            </>
+          )}
         </span>
         <div className="flex min-w-0 flex-col">
           <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
           <span
             className={cn(
               'truncate text-[11px]',
-              peerStatus === 'online' ? 'text-emerald-400' : 'text-muted-foreground',
+              !isSelfChat && peerStatus === 'online'
+                ? 'text-emerald-400'
+                : 'text-muted-foreground',
             )}
           >
-            {peerLabel}
+            {/* Место подписи не пустует: вместо статуса, которого у заметок нет,
+                она объясняет сам чат — «Заметки только для вас». */}
+            {isSelfChat ? FAVORITES_HINT : peerLabel}
           </span>
         </div>
 
         {/* Позвонить — единственное действие в шапке, поэтому оно и есть её
-            акцент: сплошной кружок в фирменном цвете у правого края. */}
-        <button
-          type="button"
-          onClick={() => invite(conversation.friendId, title)}
-          disabled={!connected || calling}
-          aria-label={`Позвонить ${title}`}
-          title={`Позвонить ${title}`}
-          className="ml-auto flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-primary/40 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-        >
-          <Phone className="size-4.5" aria-hidden="true" />
-        </button>
+            акцент: сплошной кружок в фирменном цвете у правого края. В
+            «Избранном» кнопки нет вовсе: звонить самому себе некуда, а
+            выключенная кнопка обещала бы действие, которого не существует. */}
+        {!isSelfChat && (
+          <button
+            type="button"
+            onClick={() => invite(conversation.friendId, title)}
+            disabled={!connected || calling}
+            aria-label={`Позвонить ${title}`}
+            title={`Позвонить ${title}`}
+            className="ml-auto flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/25 ring-1 ring-primary/40 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Phone className="size-4.5" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {/* Лента */}
@@ -249,6 +285,7 @@ export function ConversationView({
             messages={messages}
             selfId={selfId}
             peerReadAt={peerReadAt}
+            isSelfChat={isSelfChat}
             onRetry={retry}
           />
         )}
@@ -261,10 +298,14 @@ export function ConversationView({
       )}
 
       {/* Место под индикатор зарезервировано всегда: его появление не должно
-          дёргать ленту и композер вверх-вниз. */}
-      <div className="flex h-5 shrink-0 items-center px-4">
-        {peerTyping && <TypingIndicator name={title} />}
-      </div>
+          дёргать ленту и композер вверх-вниз. В «Избранном» полосы нет совсем —
+          там индикатор не загорится никогда, и пустые 20px просто отодвигали бы
+          композер от ленты без причины. */}
+      {!isSelfChat && (
+        <div className="flex h-5 shrink-0 items-center px-4">
+          {peerTyping && <TypingIndicator name={title} />}
+        </div>
+      )}
 
       <DmComposer
         conversationId={conversation.id}
