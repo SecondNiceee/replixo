@@ -52,7 +52,11 @@ function registerMediaHandlers(ctx, worker) {
             if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
                 return (0, helpers_1.err)(callback, 'Некорректные данные подключения');
             }
-            if (!create && !room_registry_1.rooms.has(roomId)) {
+            // Комната ещё не поднята — пускаем только того, кто пришёл её создавать,
+            // либо по коду, который сервер сам выдал под звонок (там «создателя»
+            // нет: оба участника просто идут по ссылке, и кто успел первым, тот и
+            // поднимает комнату).
+            if (!create && !room_registry_1.rooms.has(roomId) && !(0, room_registry_1.isRoomCreationAllowed)(roomId)) {
                 return (0, helpers_1.err)(callback, 'Комната не найдена');
             }
             if (session.roomId && session.peerId && (session.roomId !== roomId || session.peerId !== peerId)) {

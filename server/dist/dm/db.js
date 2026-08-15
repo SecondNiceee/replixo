@@ -19,6 +19,8 @@ exports.notificationForPush = notificationForPush;
 exports.listMemberIds = listMemberIds;
 exports.isMember = isMember;
 exports.listFriendIds = listFriendIds;
+exports.touchLastSeen = touchLastSeen;
+exports.getLastSeenBulk = getLastSeenBulk;
 exports.markRead = markRead;
 exports.insertMessage = insertMessage;
 const db_1 = require("../db");
@@ -215,6 +217,60 @@ async function listFriendIds(userId) {
     catch (e) {
         console.error('[dm] listFriendIds failed:', e.message);
         return [];
+    }
+}
+/**
+ * Записать время последнего присутствия.
+ *
+ * Вызывается не только при разрыве соединения, но и периодически, пока
+ * пользователь онлайн: иначе жёсткое падение процесса (kill -9, OOM, паника)
+ * не оставляло бы времени вообще, и после рестарта друзья видели бы «не в
+ * сети» без пояснения. Периодический сброс ограничивает потерю точности
+ * интервалом LAST_SEEN_FLUSH_MS.
+ *
+ * GREATEST защищает от отката назад: сокеты одного пользователя живут на
+ * разных таймерах, и запоздавший сброс от уже закрытой вкладки не должен
+ * перетирать более свежее время активного соединения.
+ */
+async function touchLastSeen(userId, at) {
+    if (!db_1.dbPool)
+        return;
+    try {
+        await db_1.dbPool.query(`UPDATE "user"
+       SET "lastSeenAt" = GREATEST("lastSeenAt", to_timestamp($2 / 1000.0))
+       WHERE "id" = $1`, [userId, at]);
+    }
+    catch (e) {
+        // Presence — улучшение, а не критичный путь: ошибка записи не должна
+        // ломать ни соединение, ни рассылку статусов.
+        console.error('[dm] touchLastSeen failed:', e.message);
+    }
+}
+/**
+ * Время последнего присутствия для списка пользователей — одним запросом.
+ *
+ * Нужно для снапшота presence: при подключении клиент получает и статусы своих
+ * друзей, и время для тех, кто оффлайн. Раньше время читалось из Map в памяти,
+ * поэтому после рестарта сервера снапшот приходил пустым.
+ *
+ * id = ANY($1) вместо IN (...) — параметр один, поэтому размер списка друзей не
+ * меняет форму запроса и план переиспользуется.
+ */
+async function getLastSeenBulk(userIds) {
+    if (!db_1.dbPool || userIds.length === 0)
+        return {};
+    try {
+        const { rows } = await db_1.dbPool.query(`SELECT "id", (EXTRACT(EPOCH FROM "lastSeenAt") * 1000)::bigint AS "ts"
+       FROM "user"
+       WHERE "id" = ANY($1) AND "lastSeenAt" IS NOT NULL`, [userIds]);
+        const result = {};
+        for (const row of rows)
+            result[row.id] = Number(row.ts);
+        return result;
+    }
+    catch (e) {
+        console.error('[dm] getLastSeenBulk failed:', e.message);
+        return {};
     }
 }
 /**

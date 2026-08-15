@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CLEAN_CLOSE_GRACE_MS = exports.CLOSE_GRACE_MS = exports.DISCONNECT_GRACE_MS = exports.peerSockets = exports.rooms = void 0;
+exports.ROOM_CREATE_GRANT_MS = exports.CLEAN_CLOSE_GRACE_MS = exports.CLOSE_GRACE_MS = exports.DISCONNECT_GRACE_MS = exports.peerSockets = exports.rooms = void 0;
 exports.roomPeerKey = roomPeerKey;
 exports.getPeerSocket = getPeerSocket;
 exports.setPeerSocket = setPeerSocket;
@@ -12,6 +12,9 @@ exports.clearPendingDisconnect = clearPendingDisconnect;
 exports.scheduleEviction = scheduleEviction;
 exports.deletePendingDisconnect = deletePendingDisconnect;
 exports.evictPeer = evictPeer;
+exports.allowRoomCreation = allowRoomCreation;
+exports.isRoomCreationAllowed = isRoomCreationAllowed;
+exports.revokeRoomCreation = revokeRoomCreation;
 exports.getOrCreateRoom = getOrCreateRoom;
 exports.cleanupRoomIfEmpty = cleanupRoomIfEmpty;
 exports.authedRoom = authedRoom;
@@ -134,6 +137,38 @@ function evictPeer(io, roomId, peerId, expectedSocketId) {
     peerClients.delete(roomPeerKey(roomId, peerId));
     console.log(`[room] Peer ${peerId} evicted from room ${roomId}`);
     cleanupRoomIfEmpty(roomId);
+}
+// ---------------------------------------------------------------------------
+// Разрешение на создание комнаты «по коду, о котором договорился сервер»
+//
+// joinRoom без флага `create` намеренно требует, чтобы комната уже
+// существовала: иначе опечатка в коде тихо создавала бы новую пустую комнату
+// вместо ошибки «Комната не найдена». Но у звонка из личного чата код
+// придумывает сам сервер, и НИ ОДНА из сторон не является «создателем»: оба
+// участника просто идут по ссылке. Поэтому такой код заранее помечается здесь
+// как разрешённый к созданию, и первый пришедший поднимает комнату.
+// ---------------------------------------------------------------------------
+/** Сколько живёт разрешение: время дозвона (минута) плюс запас на навигацию. */
+exports.ROOM_CREATE_GRANT_MS = 5 * 60000;
+const creatableRooms = new Map();
+function allowRoomCreation(roomId, ttlMs = exports.ROOM_CREATE_GRANT_MS) {
+    const existing = creatableRooms.get(roomId);
+    if (existing)
+        clearTimeout(existing);
+    const timer = setTimeout(() => creatableRooms.delete(roomId), ttlMs);
+    // Разрешение не должно держать процесс живым.
+    timer.unref?.();
+    creatableRooms.set(roomId, timer);
+}
+function isRoomCreationAllowed(roomId) {
+    return creatableRooms.has(roomId);
+}
+function revokeRoomCreation(roomId) {
+    const timer = creatableRooms.get(roomId);
+    if (!timer)
+        return;
+    clearTimeout(timer);
+    creatableRooms.delete(roomId);
 }
 function getOrCreateRoom(roomId, worker) {
     if (exports.rooms.has(roomId))
