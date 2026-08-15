@@ -36,6 +36,12 @@ export function DmComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Поле ввода — такой же скроллируемый контейнер, как лента и список диалогов,
+  // поэтому и полоса у него та же: тонкая, проявляющаяся на время скролла
+  // (.scroll-slim + этот хук). Без хука класс сам по себе бесполезен — он рисует
+  // thumb прозрачным, а показать его может только атрибут data-scrolling.
+  useScrollbarAutohide(textareaRef)
+
   // Подгонка высоты под содержимое.
   //
   // Здесь же решается, нужен ли textarea скролл. Полагаться на CSS нельзя: у
@@ -239,19 +245,19 @@ export function DmComposer({
         <textarea
           ref={textareaRef}
           value={text}
+          // Высоту здесь не правим: этим занимается resize в эффекте по text.
+          // Второй, урезанный пересчёт на месте выставлял высоту, но не трогал
+          // overflowY — и после него в невыросшем поле оставалась полоса.
           onChange={(e) => {
             setText(e.target.value)
             if (e.target.value.trim()) onTyping()
-            const el = e.target
-            el.style.height = 'auto'
-            el.style.height = `${Math.min(el.scrollHeight, 140)}px`
           }}
           onKeyDown={handleKeyDown}
           rows={1}
           maxLength={MAX_LENGTH}
           placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
           aria-label="Текст сообщения"
-          className="max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
+          className="scroll-slim max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
         />
         <Button
           type="submit"
