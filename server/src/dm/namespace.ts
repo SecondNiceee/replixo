@@ -8,6 +8,7 @@ import {
   syncCallsForSocket,
 } from './call-handlers'
 import {
+  broadcastCurrentStatus,
   isOnline,
   setSocketStatus,
   startPresenceSweeper,
@@ -88,17 +89,19 @@ export function setupDmNamespace(io: Server): void {
     socket.on('dm:ping', () => {
       // Изменение сводного статуса возможно и здесь: пинг оживляет соединение,
       // которое свипер мог считать замолчавшим.
+      // Статус вкладки при этом НЕ переписываем: свёрнутая вкладка тоже шлёт
+      // пинги (соединение живо), и «online» здесь вернул бы ей зелёную точку.
       if (trackPing(userId, socket.id)) {
-        void setSocketStatus(nsp, socket, userId, 'online')
+        void broadcastCurrentStatus(nsp, userId)
       }
     })
 
-    // Вкладка сообщает, что пользователь отошёл или вернулся. Статус хранится
-    // на каждый сокет: сводный считается по всем устройствам, поэтому «отошёл»
-    // на ноутбуке не гасит активность на телефоне.
+    // Вкладка сообщает, что пользователь отошёл, вернулся или ушёл в фон.
+    // Статус хранится на каждый сокет: сводный считается по всем устройствам,
+    // поэтому свёрнутая вкладка на ноутбуке не гасит активность на телефоне.
     socket.on('dm:status', (payload: unknown) => {
       const raw = (payload ?? {}) as { status?: unknown }
-      if (raw.status !== 'online' && raw.status !== 'idle') return
+      if (raw.status !== 'online' && raw.status !== 'idle' && raw.status !== 'hidden') return
       void setSocketStatus(nsp, socket, userId, raw.status)
     })
 

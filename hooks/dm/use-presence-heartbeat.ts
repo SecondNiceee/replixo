@@ -18,9 +18,11 @@ import type { Socket } from 'socket.io-client'
 //     секунды, поэтому у него отдельный, более чуткий таймер (см.
 //     PING_TIMEOUT_MS в server/src/dm/presence.ts).
 //
-//  2. dm:status online/idle. Живой websocket ещё не значит «человек за
+//  2. dm:status online/idle/hidden. Живой websocket ещё не значит «человек за
 //     компьютером»: вкладку свернули, ноутбук закрыли, ушли пить чай. Без этого
 //     зелёная точка врала бы сутками — по ней нельзя было понять, ответят ли.
+//     Уход в фон (hidden) сервер трактует как оффлайн, поэтому переключение на
+//     другую вкладку сразу превращается у друзей в «был(а) в сети только что».
 //
 //  3. sendBeacon при выгрузке страницы. socket.emit в этот момент доставить
 //     нельзя (браузер убивает соединения не дожидаясь отправки), а движок
@@ -58,22 +60,35 @@ const ACTIVITY_EVENTS = [
   'scroll',
 ] as const
 
+/**
+ * Что вкладка сообщает о себе серверу.
+ *
+ *   online — видима и человек что-то делал недавно;
+ *   idle   — видима, но человек молчит дольше IDLE_AFTER_MS;
+ *   hidden — ушла в фон. Сервер считает это оффлайном (см. statusOf в
+ *            server/src/dm/presence.ts), поэтому «ушёл в другой таб» выглядит у
+ *            друзей как «был(а) в сети только что», а не как зелёная точка.
+ */
+type TabStatus = 'online' | 'idle' | 'hidden'
+
 export function usePresenceHeartbeat(socket: Socket | null): void {
   // Последний отправленный статус: dm:status шлём только на изменении, иначе на
   // каждое движение мыши уходило бы событие, а сервер рассылал бы его друзьям.
-  const sentStatus = useRef<'online' | 'idle' | null>(null)
+  const sentStatus = useRef<TabStatus | null>(null)
 
   useEffect(() => {
     if (!socket) return
 
     let lastActivityAt = Date.now()
 
-    const desiredStatus = (): 'online' | 'idle' =>
-      // Скрытая вкладка — сразу idle: ждать бездействия незачем, пользователь
-      // смотрит куда-то ещё. Иначе решает время с последнего действия.
-      document.visibilityState === 'hidden' || Date.now() - lastActivityAt >= IDLE_AFTER_MS
-        ? 'idle'
-        : 'online'
+    const desiredStatus = (): TabStatus => {
+      // Вкладка в фоне (переключились на другую, свернули окно) — hidden, и для
+      // друзей это ровно оффлайн: точка гаснет, вместо неё «был(а) в сети только
+      // что». Соединение при этом живёт, поэтому сообщения и звонки доходят.
+      if (document.visibilityState === 'hidden') return 'hidden'
+      // Вкладка на экране, но человек молчит — «отошёл».
+      return Date.now() - lastActivityAt >= IDLE_AFTER_MS ? 'idle' : 'online'
+    }
 
     const syncStatus = () => {
       if (!socket.connected) return
@@ -87,7 +102,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       lastActivityAt = Date.now()
       // Возврат к активности показываем сразу: собеседник должен видеть, что
       // человек вернулся, не дожидаясь следующей проверки.
-      if (sentStatus.current === 'idle') syncStatus()
+      if (sentStatus.current !== 'online') syncStatus()
     }
 
     const onVisibility = () => {
@@ -153,7 +168,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
 
     const leave = () => {
       // pagehide может прийти и при уходе страницы в фоновый кэш, и следом
-      // beforeunload — второй запрос ничего не добавит.
+      // beforeunload — вто��ой запрос ничего не добавит.
       if (sent) return
       const socketId = socket.id
       if (!socketId) return
