@@ -3,7 +3,11 @@ import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
+import { listFriends } from '@/lib/chat/friends'
+import { listConversations } from '@/lib/chat/conversations'
+import { fetchPresence } from '@/lib/chat/presence'
 import { ProfileClient } from './profile-client'
+import { ProfileBoot } from './profile-boot'
 
 export const metadata: Metadata = {
   title: 'Кабинет — Replixo',
@@ -16,6 +20,20 @@ export default async function ProfilePage() {
   if (!session?.user) {
     redirect('/sign-in')
   }
+
+  // Списки и статусы снимаем здесь, а не в браузере: пока запросы летели с
+  // клиента, первый кадр рисовался без статусов вовсе, и у людей в сети на
+  // долю секунды мигало «не в сети».
+  const [friends, conversations] = await Promise.all([
+    listFriends(session.user.id),
+    listConversations(session.user.id),
+  ])
+
+  // Собеседники диалогов — это друзья, поэтому один список id покрывает и чаты.
+  // fetchPresence не бросает и ограничен таймаутом 500 мс: недоступный
+  // сокет-сервер не задержит страницу и не сломает её — вернётся ok: false, и
+  // подпись честно скажет «Подключение…».
+  const presence = await fetchPresence(friends.map((f) => f.friendId))
 
   return (
     // h-dvh + flex: переписка должна скроллиться внутри своей колонки, а не

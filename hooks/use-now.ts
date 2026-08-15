@@ -49,9 +49,15 @@ function subscribe(fn: (now: number) => void): () => void {
  *
  * `enabled: false` отключает подписку, не меняя правила хуков: строку времени
  * видно только у оффлайн-собеседника, и обновлять её для остальных незачем.
+ *
+ * @param initialNow «Сейчас» для первого кадра. Нужен там, где время участвует в
+ *   серверном рендере: часы сервера и клиента расходятся, и посчитанные от них
+ *   подписи («был(а) только что» против «был(а) 1 минуту назад») отличались бы
+ *   текстом — то есть ошибкой гидрации. Ноль и undefined означают «нет
+ *   серверного времени», тогда берём своё, как и раньше.
  */
-export function useNow(enabled = true): number {
-  const [now, setNow] = useState(() => Date.now())
+export function useNow(enabled = true, initialNow?: number): number {
+  const [now, setNow] = useState(() => initialNow || Date.now())
 
   useEffect(() => {
     if (!enabled) return

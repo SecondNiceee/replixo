@@ -20,13 +20,20 @@ import { serverBaseUrl } from './internal-url'
 export type PresenceStatus = 'online' | 'offline'
 
 export interface PresenceSnapshot {
+  /**
+   * Ответил ли сокет-сервер. Пустой снапшот значит одно из двух — «никого нет в
+   * сети» или «спросить не удалось», и различать их обязательно: в первом случае
+   * про человека честно известно, что он оффлайн, во втором про него не известно
+   * ничего, и рисовать «не в сети» нельзя (см. presenceLabel: 'unknown').
+   */
+  ok: boolean
   /** userId → статус. Оффлайн не передаётся: это состояние по умолчанию. */
   statuses: Record<string, Exclude<PresenceStatus, 'offline'>>
   /** userId → когда его видели последний раз (мс). */
   lastSeenAt: Record<string, number>
 }
 
-export const EMPTY_PRESENCE: PresenceSnapshot = { statuses: {}, lastSeenAt: {} }
+export const EMPTY_PRESENCE: PresenceSnapshot = { ok: false, statuses: {}, lastSeenAt: {} }
 
 /**
  * Список друзей не должен ждать сокет-сервер: запрос локальный, поэтому щедрый
@@ -68,7 +75,7 @@ function parseSnapshot(raw: unknown): PresenceSnapshot {
     }
   }
 
-  return { statuses: safeStatuses, lastSeenAt: safeLastSeen }
+  return { ok: true, statuses: safeStatuses, lastSeenAt: safeLastSeen }
 }
 
 /**
@@ -79,7 +86,9 @@ function parseSnapshot(raw: unknown): PresenceSnapshot {
  * возвращается пустой снапшот, а клиент дождётся статусов по websocket.
  */
 export async function fetchPresence(userIds: string[]): Promise<PresenceSnapshot> {
-  if (userIds.length === 0) return EMPTY_PRESENCE
+  // Спрашивать не о ком — а значит и «не удалось спросить» тут не про что:
+  // отдаём ok, иначе пустой список друзей навсегда остался бы в «Подключение…».
+  if (userIds.length === 0) return { ok: true, statuses: {}, lastSeenAt: {} }
 
   const secret = process.env.INTERNAL_HOOK_SECRET
   if (!secret) {
