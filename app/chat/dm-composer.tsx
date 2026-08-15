@@ -360,7 +360,11 @@ export function DmComposer({
           // form выравнивает по нижнему краю, скрепка оказывалась выше центра
           // строки. Теперь одна строка совпадает с кнопкой по высоте, а при
           // росте поля кнопки остаются по центру последней строки.
-          className="scroll-slim max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
+          // scroll-slim-inset: в скруглённом поле полоса прокрутки прижималась
+          // к самому изгибу правого края и торчала за рамкой — класс сдвигает
+          // thumb внутрь. pr-3 (вместо px-4) отдаёт эти 8px под гуттер полосы,
+          // чтобы текст длинной строки под ней не проезжал.
+          className="scroll-slim scroll-slim-inset max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 py-2.5 pl-4 pr-3 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
         />
         <Button
           type="submit"
