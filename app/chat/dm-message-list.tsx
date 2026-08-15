@@ -69,8 +69,13 @@ export function DmMessageList({
             <div className={cn('flex flex-col gap-0.5', self ? 'items-end' : 'items-start')}>
               <div
                 className={cn(
-                  'flex max-w-[85%] flex-col overflow-hidden rounded-2xl text-sm leading-relaxed',
-                  self ? 'rounded-br-md bubble-self' : 'rounded-bl-md bubble-peer',
+                  // rounded-lg вместо rounded-2xl: у пузыря шириной в пару слов
+                  // радиус 16px съедал почти всю боковую грань, из-за чего
+                  // короткие сообщения выглядели капсулами. 8px оставляет форму
+                  // прямоугольной и читаемой, а «хвост» у своего угла
+                  // (rounded-b*-sm) продолжает указывать на автора.
+                  'flex max-w-[85%] flex-col overflow-hidden rounded-lg text-sm leading-relaxed',
+                  self ? 'rounded-br-sm bubble-self' : 'rounded-bl-sm bubble-peer',
                   // Фотография занимает пузырь целиком: без отступов и зазора
                   // цветная рамка баббла вокруг неё не проглядывает, а
                   // overflow-hidden выше скругляет саму картинку по его форме.
