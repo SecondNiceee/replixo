@@ -31,10 +31,17 @@ import type { SocketStatus } from './presence'
  * звонке для сервера выглядела как вкладка, которая о себе вообще ничего не
  * сказала.
  */
-const KNOWN_STATUSES: readonly SocketStatus[] = ['online', 'idle', 'hidden', 'call']
+const KNOWN_STATUSES: readonly SocketStatus[] = ['online', 'hidden', 'call']
 
 function readStatus(value: unknown): SocketStatus | undefined {
-  return KNOWN_STATUSES.includes(value as SocketStatus) ? (value as SocketStatus) : undefined
+  if (KNOWN_STATUSES.includes(value as SocketStatus)) return value as SocketStatus
+  // 'idle' присылают бандлы, закэшированные до отказа от статуса «отошёл».
+  // Такая вкладка открыта на экране и сообщает о себе честно — она лишь называет
+  // бездействие отдельным словом, которого у нас больше нет. Трактуем как
+  // присутствие: иначе у пользователя со старой вкладкой точка гасла бы через
+  // минуту тишины и не зажигалась до перезагрузки страницы.
+  if (value === 'idle') return 'online'
+  return undefined
 }
 
 // ---------------------------------------------------------------------------

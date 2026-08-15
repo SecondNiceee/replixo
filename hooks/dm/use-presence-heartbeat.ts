@@ -5,7 +5,7 @@ import type { Socket } from 'socket.io-client'
 import { computeTabStatus, subscribeInCall, type TabStatus } from '@/lib/chat/tab-status'
 
 // ---------------------------------------------------------------------------
-// Своя половина presence на клиенте: heartbeat, статус «отошёл» и уход по
+// Своя половина presence на клиенте: heartbeat, статус вкладки и уход по
 // закрытию вкладки.
 //
 // Монтируется РОВНО ОДИН раз на приложение (в DmNotifier), потому что соединение
@@ -19,7 +19,7 @@ import { computeTabStatus, subscribeInCall, type TabStatus } from '@/lib/chat/ta
 //     секунды, поэтому у него отдельный, более чуткий таймер (см.
 //     PING_TIMEOUT_MS в server/src/dm/presence.ts).
 //
-//  2. dm:status online/idle/hidden. Живой websocket ещё не значит «человек за
+//  2. dm:status online/hidden/call. Живой websocket ещё не значит «человек за
 //     компьютером»: вкладку свернули, ноутбук закрыли, ушли пить чай. Без этого
 //     зелёная точка врала бы сутками — по ней нельзя было понять, ответят ли.
 //     Уход в фон (hidden) сервер трактует как оффлайн, поэтому переключение на
