@@ -24,6 +24,12 @@ import type { Socket } from 'socket.io-client'
 //     Уход в фон (hidden) сервер трактует как оффлайн, поэтому переключение на
 //     другую вкладку сразу превращается у друзей в «был(а) в сети только что».
 //
+//     Присутствие складывается из ТРЁХ признаков, и одного visibilityState не
+//     хватает: вкладка, открытая в неактивном окне поверх которого идёт игра,
+//     остаётся 'visible', и человек «сидел в сети», играя. Поэтому учитываются
+//     видимость вкладки, фокус окна (уход в другое приложение) и активность
+//     человека (ушёл из-за стола, не тронув вкладку).
+//
 //  3. sendBeacon при выгрузке страницы. socket.emit в этот момент доставить
 //     нельзя (браузер убивает соединения не дожидаясь отправки), а движок
 //     заметит разрыв только через свой pingTimeout — все 30 секунд собеседник
@@ -42,6 +48,31 @@ const PING_INTERVAL_MS = 7_000
  * ждать нечего.
  */
 const IDLE_AFTER_MS = 60_000
+
+/**
+ * Через сколько тишины человек считается ушедшим совсем (для друзей — оффлайн,
+ * «был(а) N минут назад»).
+ *
+ * Без этого порога тот, кто оставил вкладку открытой и ушёл, навсегда оставался
+ * бы жёлтым «отошёл(ла)»: idle сообщает «ответит не сразу», а через пять минут
+ * тишины честный ответ — «его тут нет».
+ */
+const AWAY_AFTER_MS = 5 * 60_000
+
+/**
+ * Отсрочка оффлайна при потере фокуса окном, которое всё ещё видимо.
+ *
+ * Потеря фокуса — единственный признак того, что человек ушёл в другое
+ * ПРИЛОЖЕНИЕ (игра, второй монитор, другое окно браузера): вкладка при этом
+ * остаётся активной, visibilityState равен 'visible', и без учёта фокуса уход
+ * вообще ничем себя не выдаёт.
+ *
+ * Но тот же blur даёт клик в адресную строку, в devtools или в системное окно
+ * выбора файла — а это ещё не уход. Поэтому сразу гасим только до idle, а
+ * оффлайн объявляем, продержавшись без фокуса это окно (эскалацию делает уже
+ * существующий опрос IDLE_CHECK_MS).
+ */
+const BLUR_AWAY_MS = 15_000
 
 /** Как часто проверяем бездействие. Точность до 5 секунд здесь достаточна. */
 const IDLE_CHECK_MS = 5_000
@@ -80,14 +111,33 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
     if (!socket) return
 
     let lastActivityAt = Date.now()
+    // Есть ли у окна фокус. Держим в переменной, а не спрашиваем hasFocus()
+    // каждый раз: нужно ещё и ВРЕМЯ потери фокуса, чтобы отличить мгновенный
+    // клик в адресную строку от ухода в другое приложение.
+    let focused = document.hasFocus()
+    let focusLostAt = focused ? 0 : Date.now()
 
     const desiredStatus = (): TabStatus => {
       // Вкладка в фоне (переключились на другую, свернули окно) — hidden, и для
       // друзей это ровно оффлайн: точка гаснет, вместо неё «был(а) в сети только
       // что». Соединение при этом живёт, поэтому сообщения и звонки доходят.
       if (document.visibilityState === 'hidden') return 'hidden'
-      // Вкладка на экране, но человек молчит — «отошёл».
-      return Date.now() - lastActivityAt >= IDLE_AFTER_MS ? 'idle' : 'online'
+
+      // Вкладка активна и «видима», но фокус ушёл в другое приложение. Это
+      // главная дыра visibilityState: alt-tab в игру, второй монитор, другое
+      // окно браузера — вкладка при этом остаётся visible, и человек висел бы
+      // «в сети», сидя в игре. Считаем это уходом, но не мгновенно
+      // (см. BLUR_AWAY_MS).
+      if (!focused) {
+        return Date.now() - focusLostAt >= BLUR_AWAY_MS ? 'hidden' : 'idle'
+      }
+
+      // Вкладка на экране и в фокусе — смотрим только на активность человека.
+      const silentFor = Date.now() - lastActivityAt
+      // Ушёл из-за стола, оставив вкладку открытой: держать его жёлтым вечно
+      // нечестно, для друзей это оффлайн с растущим «был(а) N минут назад».
+      if (silentFor >= AWAY_AFTER_MS) return 'hidden'
+      return silentFor >= IDLE_AFTER_MS ? 'idle' : 'online'
     }
 
     const syncStatus = () => {
@@ -100,9 +150,30 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
 
     const onActivity = () => {
       lastActivityAt = Date.now()
+      // Действие в окне означает, что фокус вернулся: событие focus могло не
+      // прийти (например, окно активировали кликом по самой странице), и без
+      // этого человек остался бы «ушедшим», активно печатая.
+      if (!focused && document.hasFocus()) focused = true
       // Возврат к активности показываем сразу: собеседник должен видеть, что
       // человек вернулся, не дожидаясь следующей проверки.
       if (sentStatus.current !== 'online') syncStatus()
+    }
+
+    // Ушли в другое приложение или окно. Само по себе это ещё не оффлайн —
+    // порог BLUR_AWAY_MS отсеивает клик в адресную строку и devtools.
+    const onBlur = () => {
+      if (!focused) return
+      focused = false
+      focusLostAt = Date.now()
+      syncStatus()
+    }
+
+    // Вернулись в окно — это и есть присутствие, зачитываем как активность,
+    // иначе после пяти минут в игре человек вернулся бы сразу в idle.
+    const onFocus = () => {
+      focused = true
+      lastActivityAt = Date.now()
+      syncStatus()
     }
 
     const onVisibility = () => {
@@ -139,6 +210,10 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       document.addEventListener(event, onActivity, { passive: true })
     }
     document.addEventListener('visibilitychange', onVisibility)
+    // Фокус слушаем на window: у document эти события не всплывают так же
+    // предсказуемо во всех браузерах.
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
 
@@ -151,6 +226,8 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
         document.removeEventListener(event, onActivity)
       }
       document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
       sentStatus.current = null
