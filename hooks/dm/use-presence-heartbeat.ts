@@ -38,13 +38,22 @@ import { computeTabStatus, subscribeInCall, type TabStatus } from '@/lib/chat/ta
 /** Интервал heartbeat. С запасом меньше PING_TIMEOUT_MS на сервере (15 с). */
 const PING_INTERVAL_MS = 7_000
 
-/** Как часто проверяем бездействие. Точность до 5 секунд здесь достаточна. */
-const IDLE_CHECK_MS = 5_000
+/**
+ * Как часто перепроверяем статус вкладки.
+ *
+ * Опрос нужен ровно из-за одного перехода: потеря фокуса становится уходом не
+ * сразу, а продержавшись BLUR_AWAY_MS (см. lib/chat/tab-status), и наступает
+ * этот момент молча — браузер о нём никакого события не присылает. Бездействие
+ * же статус не меняет вовсе, поэтому больше опросу следить не за чем.
+ */
+const STATUS_POLL_MS = 5_000
 
 /**
- * События, считающиеся признаком жизни. Только passive-слушатели на document:
- * их частота высокая, а обработчик обязан быть дешёвым — он лишь пишет число в
- * ref, поэтому ререндера не вызывает.
+ * События, считающиеся признаком жизни. Нужны не для отсчёта бездействия (его
+ * больше нет), а для одного случая: окно активировали кликом по самой странице,
+ * а событие focus до нас не дошло — тогда человек остался бы «ушедшим», активно
+ * печатая. Только passive-слушатели на document: частота высокая, поэтому
+ * обработчик обязан быть дешёвым и ререндера не вызывает.
  */
 const ACTIVITY_EVENTS = [
   'pointerdown',
@@ -63,7 +72,6 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
   useEffect(() => {
     if (!socket) return
 
-    let lastActivityAt = Date.now()
     // Есть ли у окна фокус. Держим в переменной, а не спрашиваем hasFocus()
     // каждый раз: нужно ещё и ВРЕМЯ потери фокуса, чтобы отличить мгновенный
     // клик в адресную строку от ухода в другое приложение.
@@ -71,10 +79,9 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
     let focusLostAt = focused ? 0 : Date.now()
 
     // Само решение живёт в lib/chat/tab-status: тот же ответ нужен в handshake
-    // сокета, где этого хука ещё нет. Здесь остаётся только история — фокус и
-    // активность, которых у handshake быть не может.
-    const desiredStatus = (): TabStatus =>
-      computeTabStatus({ focused, focusLostAt, lastActivityAt })
+    // сокета, где этого хука ещё нет. Здесь остаётся только история фокуса,
+    // которой у handshake быть не может.
+    const desiredStatus = (): TabStatus => computeTabStatus({ focused, focusLostAt })
 
     const syncStatus = () => {
       if (!socket.connected) return
@@ -85,14 +92,15 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
     }
 
     const onActivity = () => {
-      lastActivityAt = Date.now()
-      // Действие в окне означает, что фокус вернулся: событие focus могло не
-      // прийти (например, окно активировали кликом по самой странице), и без
-      // этого человек остался бы «ушедшим», активно печатая.
-      if (!focused && document.hasFocus()) focused = true
-      // Возврат к активности показываем сразу: собеседник должен видеть, что
-      // человек вернулся, не дожидаясь следующей проверки.
-      if (sentStatus.current !== 'online') syncStatus()
+      // Единственная задача: действие в окне означает, что фокус вернулся, а
+      // событие focus могло не прийти (окно активировали кликом по самой
+      // странице). Без этого человек остался бы «ушедшим», активно печатая.
+      if (focused || !document.hasFocus()) return
+      focused = true
+      focusLostAt = 0
+      // Возврат показываем сразу, не дожидаясь следующего опроса: собеседник
+      // должен увидеть, что человек снова здесь.
+      syncStatus()
     }
 
     // Ушли в другое приложение или окно. Само по себе это ещё не оффлайн —
@@ -104,11 +112,11 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       syncStatus()
     }
 
-    // Вернулись в окно — это и есть присутствие, зачитываем как активность,
-    // иначе после пяти минут в игре человек вернулся бы сразу в idle.
+    // Вернулись в окно — это и есть присутствие: отсчёт BLUR_AWAY_MS обнуляем,
+    // иначе следующая потеря фокуса объявила бы уход мгновенно.
     const onFocus = () => {
       focused = true
-      lastActivityAt = Date.now()
+      focusLostAt = 0
       // Возврат отправляем ПРИНУДИТЕЛЬНО: пока нас не было, сервер мог сам
       // понизить статус (свипер видит, что пинги из фоновой вкладки идут реже —
       // браузер душит там таймеры). Наша память об отправленном статусе об этом
@@ -118,10 +126,12 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
     }
 
     const onVisibility = () => {
-      // Вернулись во вкладку — это тоже действие: без этого сразу после
-      // переключения статус остался бы idle до первого движения мыши.
+      // Вернулись во вкладку. Фокус на этот момент считаем своим: вкладку
+      // сделали активной, а событие focus порядок с visibilitychange не
+      // гарантирует — без этого статус остался бы «в фоне» до первого клика.
       if (document.visibilityState === 'visible') {
-        lastActivityAt = Date.now()
+        focused = true
+        focusLostAt = 0
         // Та же причина, что в onFocus: состояние на сервере могло разойтись с
         // нашим представлением о нём, пока вкладка была в фоне.
         sentStatus.current = null
@@ -161,9 +171,9 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       socket.emit('dm:ping', { status })
     }, PING_INTERVAL_MS)
 
-    // Уход в idle по бездействию наступает молча, без всякого события, поэтому
-    // его можно заметить только опросом.
-    const idleTimer = setInterval(syncStatus, IDLE_CHECK_MS)
+    // Порог BLUR_AWAY_MS истекает молча, без всякого события, поэтому заметить
+    // этот переход можно только опросом (см. STATUS_POLL_MS).
+    const pollTimer = setInterval(syncStatus, STATUS_POLL_MS)
 
     for (const event of ACTIVITY_EVENTS) {
       document.addEventListener(event, onActivity, { passive: true })
@@ -185,7 +195,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
 
     return () => {
       clearInterval(pingTimer)
-      clearInterval(idleTimer)
+      clearInterval(pollTimer)
       for (const event of ACTIVITY_EVENTS) {
         document.removeEventListener(event, onActivity)
       }

@@ -87,9 +87,11 @@ const fallback = {
   '/api/friends': {
     friends,
     presence: {
-      statuses: { u1: 'online', u3: 'online', u4: 'idle', u6: 'online' },
+      // Статус ровно один: онлайн — это ключ, оффлайн — его отсутствие.
+      statuses: { u1: 'online', u3: 'online', u6: 'online' },
       lastSeenAt: {
         u2: now - 4 * 60_000,
+        u4: now - 12 * 60_000,
         u5: now - 3 * 3600_000,
         u7: now - 50 * 3600_000,
       },

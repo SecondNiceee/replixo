@@ -49,7 +49,9 @@ export function useDmPresence(socket: Socket | null, selfId: string): void {
       // только известные статусы, иначе рендер получит строку, которой не знает.
       const safe: Record<string, LivePresenceStatus> = {}
       for (const [id, value] of Object.entries(statuses ?? {})) {
-        if (value === 'online' || value === 'idle') safe[id] = value
+        // 'idle' присылает ещё не перезапущенный сокет-сервер: этот статус
+        // означал присутствие, поэтому читаем его как 'online', а не отбрасываем.
+        if (value === 'online' || value === 'idle') safe[id] = 'online'
       }
       applyPresenceSnapshot(safe, lastSeenAt ?? {})
     }
@@ -61,7 +63,12 @@ export function useDmPresence(socket: Socket | null, selfId: string): void {
         lastSeenAt?: number
       }
       if (!userId) return
-      if (status !== 'online' && status !== 'idle' && status !== 'offline') return
+      // 'idle' — из старого сокет-сервера, см. onSnapshot: считаем присутствием.
+      if (status === 'idle') {
+        setPresence(userId, 'online', lastSeenAt)
+        return
+      }
+      if (status !== 'online' && status !== 'offline') return
       setPresence(userId, status, lastSeenAt)
     }
 

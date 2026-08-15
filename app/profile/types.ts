@@ -24,7 +24,12 @@ export interface Friend {
 export interface FriendsResponse {
   friends: Friend[]
   presence?: {
-    statuses?: Record<string, 'online' | 'idle'>
+    /**
+     * Только 'online': оффлайн передаётся отсутствием ключа, а промежуточных
+     * статусов у presence больше нет (см. stores/dm-store). Нормализацию делает
+     * lib/chat/presence, поэтому старое 'idle' сюда уже не доезжает.
+     */
+    statuses?: Record<string, 'online'>
     lastSeenAt?: Record<string, number>
   }
 }
