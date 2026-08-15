@@ -10,7 +10,8 @@ import { and, eq, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/lib/db'
 import { conversation, conversationMember, directMessage, user } from '@/lib/db/schema'
-import type { DmConversation } from '@/app/chat/types'
+import { isSelfConversationId, selfConversationId } from '@/lib/chat/conversation-id'
+import { FAVORITES_TITLE, type DmConversation } from '@/app/chat/types'
 
 /**
  * Диалоги пользователя, свежие сверху.
@@ -41,8 +42,10 @@ export async function listConversations(userId: string): Promise<DmConversation[
     })
     .from(conversationMember)
     .innerJoin(conversation, eq(conversation.id, conversationMember.conversationId))
-    .innerJoin(peer, and(eq(peer.conversationId, conversation.id), ne(peer.userId, userId)))
-    .innerJoin(user, eq(user.id, peer.userId))
+    // leftJoin, а не innerJoin: у чата «Избранное» участник ровно один, и на
+    // внутреннем соединении такой диалог не попал бы в список вообще.
+    .leftJoin(peer, and(eq(peer.conversationId, conversation.id), ne(peer.userId, userId)))
+    .leftJoin(user, eq(user.id, peer.userId))
     .leftJoin(directMessage, eq(directMessage.id, conversation.lastMessageId))
     .where(eq(conversationMember.userId, userId))
     // NULLS LAST обязателен: в Postgres DESC ставит NULL первыми, из-за чего
@@ -54,11 +57,62 @@ export async function listConversations(userId: string): Promise<DmConversation[
   // отдаёт Date. Иначе SSR-пропсы и ответ роута имели бы разную форму, и
   // new Date(peerLastReadAt) после первой ревалидации получил бы другой тип —
   // галочки прочтения дрогнули бы на глазах.
-  return rows.map((r) => ({
-    ...r,
-    lastMessageAt: toIso(r.lastMessageAt),
-    peerLastReadAt: toIso(r.peerLastReadAt),
-  }))
+  const conversations: DmConversation[] = []
+
+  for (const r of rows) {
+    const base = {
+      ...r,
+      lastMessageAt: toIso(r.lastMessageAt),
+      peerLastReadAt: toIso(r.peerLastReadAt),
+    }
+
+    if (isSelfConversationId(r.id)) {
+      // «Избранное»: собеседника нет, поэтому подставляем себя и обнуляем всё,
+      // что относится к другому человеку. unreadCount в БД и так всегда 0 —
+      // инкремент идёт строкам с userId <> senderId, а их здесь нет.
+      conversations.push({
+        ...base,
+        friendId: userId,
+        friendName: FAVORITES_TITLE,
+        friendUsername: null,
+        unreadCount: 0,
+        peerLastReadAt: null,
+        isSelf: true,
+      })
+      continue
+    }
+
+    // Страховка от leftJoin: у обычного direct-диалога собеседник обязан быть,
+    // и строка без профиля попала бы в UI пустым именем вместо ошибки.
+    if (r.friendId === null || r.friendName === null) continue
+
+    conversations.push({
+      ...base,
+      friendId: r.friendId,
+      friendName: r.friendName,
+    })
+  }
+
+  // Строку «Избранное» показываем всегда, даже если диалога в БД ещё нет: он
+  // создаётся при первом открытии, а не на пути чтения списка.
+  if (!conversations.some((c) => c.isSelf)) {
+    conversations.push({
+      id: selfConversationId(userId),
+      friendId: userId,
+      friendName: FAVORITES_TITLE,
+      friendUsername: null,
+      unreadCount: 0,
+      peerLastReadAt: null,
+      lastMessageAt: null,
+      lastMessageText: null,
+      lastMessageAttachment: null,
+      lastMessageSenderId: null,
+      isSelf: true,
+      pending: true,
+    })
+  }
+
+  return conversations
 }
 
 function toIso(value: Date | string | null): string | null {

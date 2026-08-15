@@ -19,7 +19,19 @@ export interface DmConversation {
   /** jsonb последнего сообщения — для превью «Файл: …» в списке диалогов. */
   lastMessageAttachment?: unknown
   lastMessageSenderId: string | null
+  /** Чат «Избранное» — заметки самому себе, виден только владельцу. */
+  isSelf?: boolean
+  /**
+   * Строка есть в списке, но диалога в БД пока нет: «Избранное» создаётся
+   * лениво, при первом открытии. См. ensureFavorites() в useConversations.
+   */
+  pending?: boolean
 }
+
+export const FAVORITES_TITLE = 'Избранное'
+export const FAVORITES_HINT = 'Заметки только для вас'
+export const FAVORITES_EMPTY_TEXT =
+  'Здесь пока пусто. Сохраняйте заметки, ссылки и файлы — их видите только вы.'
 
 export type DmMessageStatus = 'sending' | 'sent' | 'failed'
 
@@ -90,7 +102,12 @@ export const chatFetcher = (url: string) =>
     return r.json()
   })
 
-export function conversationTitle(c: Pick<DmConversation, 'friendName' | 'friendUsername'>): string {
+export function conversationTitle(
+  c: Pick<DmConversation, 'friendName' | 'friendUsername' | 'isSelf'>,
+): string {
+  // Отдельная ветка нужна и поиску по списку: он фильтрует по этому заголовку,
+  // поэтому «Избранное» находится набором названия, а не своего юзернейма.
+  if (c.isSelf) return FAVORITES_TITLE
   return c.friendUsername ?? c.friendName
 }
 
