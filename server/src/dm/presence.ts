@@ -105,6 +105,25 @@ const lastFlushAt = new Map<string, number>()
 const PING_TIMEOUT_MS = 15_000
 const SWEEP_INTERVAL_MS = 5_000
 
+/**
+ * После какой тишины СЧИТАЕМ ВКЛАДКУ ФОНОВОЙ, даже если она об этом не сообщила.
+ *
+ * Это независимая от клиентских событий страховка, и держится она на том, что
+ * браузеры душат таймеры в фоновых вкладках: активная вкладка присылает пинг
+ * каждые 7 секунд (PING_INTERVAL_MS), а свёрнутая или неактивная — не чаще
+ * раза в минуту. Значит сама РЕДКОСТЬ пингов уже доказывает, что человек не
+ * смотрит на страницу.
+ *
+ * Зачем, если есть dm:status: то событие — единственный источник правды о фоне,
+ * и стоит ему не дойти (потерялось на реконнекте, сервер ещё не знает о нём,
+ * старый бандл в кэше браузера), как человек навсегда остаётся «в сети» с живым
+ * сокетом. Тишина же не может «не дойти» — её видно всегда.
+ *
+ * 30 секунд — это четыре пропущенных пинга подряд: активная вкладка так
+ * замолчать не может даже на плохой сети, а фоновая переступает порог всегда.
+ */
+const PRESENCE_STALE_MS = 30_000
+
 /** Кэш списка друзей: адресатов presence спрашиваем часто, меняются они редко. */
 const FRIENDS_TTL_MS = 30_000
 const friendsCache = new Map<string, { ids: string[]; at: number }>()
@@ -382,15 +401,25 @@ function sweepStaleSockets(nsp: Namespace): void {
   for (const [userId, sockets] of connections) {
     let changed = false
     for (const [socketId, presence] of sockets) {
-      if (now - presence.lastPingAt <= PING_TIMEOUT_MS) continue
-      // Сокет мог просто не поддерживать наш heartbeat (старый клиент из
-      // закэшированного бандла): проверяем, что соединения действительно нет,
-      // прежде чем гасить точку.
+      const silentFor = now - presence.lastPingAt
+      if (silentFor <= PING_TIMEOUT_MS) continue
+
       const live = nsp.sockets.get(socketId)
       if (live?.connected) {
-        presence.lastPingAt = now
+        // Соединение живо, но вкладка замолчала. Раньше здесь просто
+        // переписывалось lastPingAt = now — и это была дыра: любая вкладка с
+        // живым сокетом бесконечно считалась активной, поэтому свёрнутый
+        // браузер оставался «в сети», пока не закроют окно.
+        //
+        // Теперь редкость пингов трактуется как фон (см. PRESENCE_STALE_MS).
+        // Сам сокет не трогаем: сообщения и звонки по нему должны доходить.
+        if (silentFor >= PRESENCE_STALE_MS && presence.status !== 'hidden') {
+          presence.status = 'hidden'
+          changed = true
+        }
         continue
       }
+
       sockets.delete(socketId)
       changed = true
     }

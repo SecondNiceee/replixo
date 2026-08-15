@@ -173,13 +173,23 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
     const onFocus = () => {
       focused = true
       lastActivityAt = Date.now()
+      // Возврат отправляем ПРИНУДИТЕЛЬНО: пока нас не было, сервер мог сам
+      // понизить статус (свипер видит, что пинги из фоновой вкладки идут реже —
+      // браузер душит там таймеры). Наша память об отправленном статусе об этом
+      // не знает, и без сброса «я снова здесь» не ушло бы вовсе.
+      sentStatus.current = null
       syncStatus()
     }
 
     const onVisibility = () => {
       // Вернулись во вкладку — это тоже действие: без этого сразу после
       // переключения статус остался бы idle до первого движения мыши.
-      if (document.visibilityState === 'visible') lastActivityAt = Date.now()
+      if (document.visibilityState === 'visible') {
+        lastActivityAt = Date.now()
+        // Та же причина, что в onFocus: состояние на сервере могло разойтись с
+        // нашим представлением о нём, пока вкладка была в фоне.
+        sentStatus.current = null
+      }
       syncStatus()
     }
 
@@ -198,8 +208,21 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       sentStatus.current = null
     }
 
+    // Heartbeat НЕСЁТ СТАТУС, а не только факт «я жив».
+    //
+    // Так presence перестаёт зависеть от того, дошло ли когда-то отдельное
+    // событие dm:status: каждый пинг — это полное состояние вкладки, поэтому
+    // любое расхождение между клиентом и сервером само лечится за один интервал
+    // (потерянное событие, реконнект, перезапуск сокет-сервера, эвристика
+    // свипера на той стороне). dm:status остаётся для МГНОВЕННОЙ реакции на
+    // переключение вкладки — ждать пинга там нельзя.
     const pingTimer = setInterval(() => {
-      if (socket.connected) socket.emit('dm:ping')
+      if (!socket.connected) return
+      const status = desiredStatus()
+      // Раз состояние уже ушло вместе с пингом, помечаем его отправленным —
+      // иначе следующий syncStatus продублировал бы то же самое через dm:status.
+      sentStatus.current = status
+      socket.emit('dm:ping', { status })
     }, PING_INTERVAL_MS)
 
     // Уход в idle по бездействию наступает молча, без всякого события, поэтому
