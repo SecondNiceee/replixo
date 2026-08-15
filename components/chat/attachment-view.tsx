@@ -16,10 +16,17 @@ export function AttachmentView({
   attachment,
   baseUrl,
   self,
+  captioned = false,
 }: {
   attachment: AttachmentLike
   baseUrl: string
   self: boolean
+  /**
+   * Под картинкой в этом же пузыре есть подпись. Тогда снизу картинку не
+   * скругляем: скругление там читалось бы как конец сообщения, а под ним ещё
+   * идёт текст — фон пузыря проглядывал бы полосками по нижним углам.
+   */
+  captioned?: boolean
 }) {
   const href = `${baseUrl}${attachment.url}`
 
@@ -30,7 +37,14 @@ export function AttachmentView({
   const downloadHref = `${href}${href.includes('?') ? '&' : '?'}name=${encodeURIComponent(attachment.name)}`
 
   if (isImageAttachment(attachment)) {
-    return <ImageAttachment src={href} downloadHref={downloadHref} name={attachment.name} />
+    return (
+      <ImageAttachment
+        src={href}
+        downloadHref={downloadHref}
+        name={attachment.name}
+        captioned={captioned}
+      />
+    )
   }
 
   return (
@@ -67,10 +81,12 @@ function ImageAttachment({
   src,
   downloadHref,
   name,
+  captioned = false,
 }: {
   src: string
   downloadHref: string
   name: string
+  captioned?: boolean
 }) {
   const [open, setOpen] = useState(false)
 
@@ -82,7 +98,12 @@ function ImageAttachment({
         // rounded-[inherit], а не своё значение: в ЛС пузырь отдан картинке
         // целиком (без padding), и собственный радиус меньше пузырёвого
         // оставлял бы по углам полоски его фона.
-        className="block cursor-zoom-in overflow-hidden rounded-[inherit] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className={cn(
+          'block cursor-zoom-in overflow-hidden rounded-[inherit] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+          // С подписью картинка — верхняя половина пузыря: скругление остаётся
+          // только сверху, снизу она стыкуется с текстом впритык.
+          captioned && 'rounded-b-none',
+        )}
         aria-label={`Открыть изображение ${name}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
