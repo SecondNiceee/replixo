@@ -625,13 +625,27 @@ export function useMediaControls({
       void (async () => {
         try {
           let remoteReports = 0
+          let reportsReceived = 0
+          let packetsLost = 0
           let packetsReceived = 0
+          // `packetsReceived` on remote-inbound-rtp is spec'd but NOT implemented
+          // by Chromium — it is simply absent there. Reading it as `|| 0` made a
+          // perfectly working microphone look like it delivered zero packets,
+          // which is why the "звук не уходит на сервер" notice appeared in calls
+          // everyone could hear. So track whether the field exists at all and
+          // only trust it when it does.
+          let hasPacketsReceivedField = false
           let packetsSent = 0
           const stats: RTCStatsReport = await producer.getStats()
           stats.forEach((report: Record<string, unknown>) => {
             if (report.type === "remote-inbound-rtp") {
               remoteReports += 1
-              packetsReceived += Number(report.packetsReceived) || 0
+              reportsReceived += Number(report.reportsReceived) || 0
+              packetsLost += Math.max(0, Number(report.packetsLost) || 0)
+              if (typeof report.packetsReceived === "number") {
+                hasPacketsReceivedField = true
+                packetsReceived += report.packetsReceived
+              }
             } else if (report.type === "outbound-rtp") {
               packetsSent += Number(report.packetsSent) || 0
             }
@@ -641,11 +655,22 @@ export function useMediaControls({
           if (audioProducerRef.current !== producer) return
           if (producer.paused || isMicMutedRef?.current) return
 
-          // Audio provably reached the SFU — latch and never probe again.
-          if (packetsReceived > 0) {
+          const prove = () => {
             probe.proven = true
             probe.strikes = 0
             rtpRecoveryAttemptsRef.current = 0
+          }
+
+          // Audio provably reached the SFU — latch and never probe again.
+          if (hasPacketsReceivedField && packetsReceived > 0) {
+            prove()
+            return
+          }
+          // Browsers without that field: an RTCP receiver report for our stream
+          // only exists because the SFU is actually receiving this RTP stream, so
+          // any report (or any packet the SFU did not report as lost) is proof.
+          if (remoteReports > 0 && (reportsReceived > 0 || packetsSent > packetsLost)) {
+            prove()
             return
           }
           // No receiver report yet but packets are leaving: unmeasured, not broken.
