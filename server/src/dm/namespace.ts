@@ -24,9 +24,17 @@ import type { SocketStatus } from './presence'
  * dm:status. Всё три источника недоверенные и приходят одинаковой формы, поэтому
  * разбор один. undefined означает «клиент статуса не сообщил» — так ведёт себя
  * старый бандл из кэша браузера, и для него presence должен работать как раньше.
+ *
+ * Список значений — граница доверия: неизвестное значение здесь становится
+ * undefined, то есть «статус не сообщён», а не ошибкой. Поэтому забыть добавить
+ * сюда новое значение опасно молча: 'call' раньше отбрасывался, и вкладка в
+ * звонке для сервера выглядела как вкладка, которая о себе вообще ничего не
+ * сказала.
  */
+const KNOWN_STATUSES: readonly SocketStatus[] = ['online', 'idle', 'hidden', 'call']
+
 function readStatus(value: unknown): SocketStatus | undefined {
-  return value === 'online' || value === 'idle' || value === 'hidden' ? value : undefined
+  return KNOWN_STATUSES.includes(value as SocketStatus) ? (value as SocketStatus) : undefined
 }
 
 // ---------------------------------------------------------------------------

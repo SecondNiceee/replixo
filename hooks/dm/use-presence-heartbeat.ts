@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { Socket } from 'socket.io-client'
-import { computeTabStatus, type TabStatus } from '@/lib/chat/tab-status'
+import { computeTabStatus, subscribeInCall, type TabStatus } from '@/lib/chat/tab-status'
 
 // ---------------------------------------------------------------------------
 // Своя половина presence на клиенте: heartbeat, статус «отошёл» и уход по
@@ -169,6 +169,11 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
       document.addEventListener(event, onActivity, { passive: true })
     }
     document.addEventListener('visibilitychange', onVisibility)
+    // Вход в звонок и выход из него не порождают ни одного браузерного события,
+    // поэтому единственный способ отреагировать мгновенно — подписка. Иначе
+    // «уже говорю» и «разговор закончился» доезжали бы только со следующим
+    // опросом, до пяти секунд показывая собеседнику неправду.
+    const unsubscribeCall = subscribeInCall(syncStatus)
     // Фокус слушаем на window: у document эти события не всплывают так же
     // предсказуемо во всех браузерах.
     window.addEventListener('blur', onBlur)
@@ -185,6 +190,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
         document.removeEventListener(event, onActivity)
       }
       document.removeEventListener('visibilitychange', onVisibility)
+      unsubscribeCall()
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('focus', onFocus)
       socket.off('connect', onConnect)

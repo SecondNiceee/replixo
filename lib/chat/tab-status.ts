@@ -82,12 +82,37 @@ export const BLUR_AWAY_MS = 15_000
 let inCall = false
 
 /**
+ * Кому сообщить, что участие в звонке изменилось.
+ *
+ * Нужно потому, что вход в звонок и выход из него — единственные переходы,
+ * которые не сопровождаются НИ ОДНИМ браузерным событием: ни visibilitychange,
+ * ни focus, ни движения мыши. Без подписки статус доезжал бы только со
+ * следующим опросом heartbeat, и собеседник до пяти секунд видел бы «был(а)
+ * только что» у человека, который уже в разговоре.
+ */
+const callListeners = new Set<() => void>()
+
+/**
+ * Подписаться на изменение участия в звонке. Возвращает отписку.
+ *
+ * Подписка, а не React-состояние, потому что флаг пишет страница комнаты, а
+ * читает heartbeat в DmNotifier: разные ветки дерева, общий родитель — только
+ * layout.
+ */
+export function subscribeInCall(listener: () => void): () => void {
+  callListeners.add(listener)
+  return () => callListeners.delete(listener)
+}
+
+/**
  * Отметить, что вкладка находится в активном звонке. Вызывается страницей
  * комнаты на входе и, ОБЯЗАТЕЛЬНО, с false на выходе: иначе человек остался бы
  * «в сети» до перезагрузки страницы.
  */
 export function setInCall(active: boolean): void {
+  if (inCall === active) return
   inCall = active
+  for (const listener of callListeners) listener()
 }
 
 export function isInCall(): boolean {
