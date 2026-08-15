@@ -237,7 +237,12 @@ export function DmComposer({
           size="icon"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || uploading}
-          className="size-10 shrink-0 rounded-full"
+          // Кружок виден всегда, а не только под курсором: у ghost-варианта фон
+          // появляется лишь на hover, и до наведения скрепка висела в пустоте
+          // рядом с явно очерченными полем и кнопкой отправки. Фон берём тот же,
+          // что у поля ввода, чтобы круг читался как часть строки, а не как
+          // вторая акцентная кнопка возле «Отправить».
+          className="size-10 shrink-0 rounded-full bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
           aria-label="Прикрепить файл"
         >
           <Paperclip className="size-4" />
@@ -257,7 +262,13 @@ export function DmComposer({
           maxLength={MAX_LENGTH}
           placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
           aria-label="Текст сообщения"
-          className="scroll-slim max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
+          // leading-5, а не leading-relaxed: строка в 20px вместе с py-2.5
+          // (10px сверху и снизу) даёт ровно 40px — высоту кнопок size-10. При
+          // 1.625 поле в одну строку было почти на 3px выше кнопок, и так как
+          // form выравнивает по нижнему краю, скрепка оказывалась выше центра
+          // строки. Теперь одна строка совпадает с кнопкой по высоте, а при
+          // росте поля кнопки остаются по центру последней строки.
+          className="scroll-slim max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
         />
         <Button
           type="submit"
