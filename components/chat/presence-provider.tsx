@@ -80,6 +80,10 @@ export function usePresenceStatus(userId: string | null | undefined): PresenceSt
     if (s.statuses[userId]) return 'online'
     // Живые данные есть, человека в них нет — значит он честно оффлайн.
     if (s.presenceLoaded) return 'offline'
+    // Живые данные были и пропали (обрыв соединения): снапшот страницы к этому
+    // моменту устарел, и повторять его значило бы держать зелёную точку на
+    // человеке, который ушёл ещё полчаса назад. Честнее «Подключение…».
+    if (s.presenceEverLoaded) return 'unknown'
     if (fallback.ok) return fallback.statuses[userId] ? 'online' : 'offline'
     return 'unknown'
   })

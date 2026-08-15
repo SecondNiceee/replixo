@@ -53,6 +53,15 @@ interface DmStore {
    * как «не знаем» (подпись «Подключение…»), а не как оффлайн.
    */
   presenceLoaded: boolean
+  /**
+   * Приходили ли достоверные статусы хоть раз за жизнь страницы. В отличие от
+   * presenceLoaded этот флаг НЕ сбрасывается при разрыве соединения, и нужен он
+   * ровно для одного: чтобы серверный снапшот, снятый при рендере страницы,
+   * перестал считаться знанием, как только его сменили живые данные. Иначе после
+   * обрыва websocket подписи откатывались бы к статусам часовой давности и
+   * уверенно показывали «в сети» человека, который давно ушёл.
+   */
+  presenceEverLoaded: boolean
   /** conversationId → userId → печатает ли. */
   typing: Record<string, Record<string, boolean>>
   /** conversationId → lastReadAt собеседника (мс), по нему рисуются галочки. */
@@ -103,6 +112,7 @@ export const useDmStore = create<DmStore>((set) => ({
   lastSeenAt: {},
   snapshotApplied: false,
   presenceLoaded: false,
+  presenceEverLoaded: false,
   typing: {},
   peerReadAt: {},
   activeConversationId: null,
@@ -118,6 +128,7 @@ export const useDmStore = create<DmStore>((set) => ({
       lastSeenAt: mergeLastSeen(state.lastSeenAt, lastSeenAt),
       snapshotApplied: true,
       presenceLoaded: true,
+      presenceEverLoaded: true,
     })),
 
   // Данные из HTTP-ответа (/api/friends) — только чтобы точки были на первом
@@ -131,12 +142,13 @@ export const useDmStore = create<DmStore>((set) => ({
       // Флаг поднимаем только по достоверному ответу: иначе пустой presence от
       // упавшего сокет-сервера означал бы «все оффлайн».
       presenceLoaded: state.presenceLoaded || ok,
+      presenceEverLoaded: state.presenceEverLoaded || ok,
     })),
 
   setPresence: (userId, status, lastSeenAt) =>
     set((state) => {
       const statuses = { ...state.statuses }
-      // Пишем только 'online': и оффлайн, и (теоретический) 'unknown' в сторе
+      // Пишем тол��ко 'online': и оффлайн, и (теоретический) 'unknown' в сторе
       // выражаются отсутствием ключа.
       if (status === 'online') statuses[userId] = status
       else delete statuses[userId]
@@ -144,6 +156,7 @@ export const useDmStore = create<DmStore>((set) => ({
         statuses,
         // Адресное событие — тоже доказательство связи с сокет-сервером.
         presenceLoaded: true,
+        presenceEverLoaded: true,
         lastSeenAt:
           lastSeenAt !== undefined
             ? mergeLastSeen(state.lastSeenAt, { [userId]: lastSeenAt })
@@ -174,6 +187,10 @@ export const useDmStore = create<DmStore>((set) => ({
   //
   // presenceLoaded тоже снимаем: без соединения мы про статусы не знаем ничего,
   // и «Подключение…» здесь честнее, чем утверждение об оффлайне.
+  //
+  // presenceEverLoaded, наоборот, не трогаем намеренно: он запрещает откатиться
+  // к серверному снапшоту страницы после обрыва — тот снят при загрузке и к
+  // этому моменту устарел ровно на всё время, что страница открыта.
   reset: () =>
     set((state) => ({
       statuses: {},

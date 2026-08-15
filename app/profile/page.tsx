@@ -33,7 +33,13 @@ export default async function ProfilePage() {
   // fetchPresence не бросает и ограничен таймаутом 500 мс: недоступный
   // сокет-сервер не задержит страницу и не сломает её — вернётся ok: false, и
   // подпись честно скажет «Подключение…».
-  const presence = await fetchPresence(friends.map((f) => f.friendId))
+  const snapshot = await fetchPresence(friends.map((f) => f.friendId))
+
+  // serverNow снимаем здесь, а не в браузере: относительные подписи («был(а)
+  // только что» / «был(а) 1 минуту назад») считаются от «сейчас», и часы
+  // сервера с часами клиента расходятся — посчитанные от разных времён строки
+  // отличались бы текстом, то есть ошибкой гидрации.
+  const presence = { ...snapshot, serverNow: Date.now() }
 
   return (
     // h-dvh + flex: переписка должна скроллиться внутри своей колонки, а не
@@ -44,7 +50,13 @@ export default async function ProfilePage() {
       {/* ProfileClient читает ?c= и ?u= через useSearchParams — на сервере это
           требует Suspense. */}
       <Suspense fallback={null}>
-        <ProfileClient user={session.user} />
+        {/* ProfileBoot кладёт серверные данные туда, откуда их читают хуки
+            внизу дерева: списки — в fallback SWR по ключам, presence — в
+            контекст. Без него всё, что снято выше, до компонентов не доезжает,
+            и первый кадр снова рисуется пустым. */}
+        <ProfileBoot friends={friends} conversations={conversations} presence={presence}>
+          <ProfileClient user={session.user} />
+        </ProfileBoot>
       </Suspense>
     </main>
   )
