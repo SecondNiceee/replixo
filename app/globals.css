@@ -383,6 +383,14 @@ html[data-overlay='1'] .desktop-titlebar {
     background: transparent;
   }
 
+  /* Chrome/Edge на Windows по умолчанию рисуют кнопки со стрелками на концах
+     полосы — в тонком скролле мессенджера это лишняя деталь, скрываем. */
+  .scroll-slim::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
   .scroll-slim::-webkit-scrollbar-thumb {
     /* background-clip: content-box + прозрачный border даёт визуальный отступ
        от края: без него полоса прилипает к рамке панели. */
