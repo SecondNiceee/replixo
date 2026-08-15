@@ -52,6 +52,7 @@ const socket_1 = require("./socket");
 const room_code_1 = require("./room-code");
 const room_registry_1 = require("./socket/room-registry");
 const uploads_1 = require("./uploads");
+const upload_filename_1 = require("./upload-filename");
 const db_1 = require("./dm/db");
 const internal_routes_1 = require("./dm/internal-routes");
 const uploads_2 = require("./dm/uploads");
@@ -82,8 +83,13 @@ async function main() {
             res.setHeader('Cache-Control', 'private, max-age=86400');
             const ext = path_1.default.extname(filePath).toLowerCase();
             const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'].includes(ext);
-            if (!isImage)
-                res.setHeader('Content-Disposition', 'attachment');
+            if (!isImage) {
+                // На диске файл называется UUID'ом, поэтому без явного имени браузер
+                // сохранил бы «a1b2….pdf». Клиент передаёт исходное имя в ?name=;
+                // отдаём его через RFC 5987 (filename*), чтобы кириллица дожила до
+                // диалога сохранения (атрибут download работает только same-origin).
+                res.setHeader('Content-Disposition', (0, upload_filename_1.contentDisposition)(res.req?.query?.name));
+            }
         },
     }));
     // Загрузка файла в папку конкретной комнаты. multer кладёт файл на диск с
@@ -105,7 +111,9 @@ async function main() {
             }
         },
         filename: (_req, file, cb) => {
-            const ext = path_1.default.extname(file.originalname).slice(0, 16);
+            // Имя от busboy приходит в latin1 — расширение берём из исправленного,
+            // иначе кириллица в нём («…копия.таблица») превратилась бы в мохибаку.
+            const ext = path_1.default.extname((0, upload_filename_1.decodeOriginalName)(file.originalname)).slice(0, 16);
             cb(null, `${(0, crypto_1.randomUUID)()}${ext}`);
         },
     });
@@ -137,7 +145,7 @@ async function main() {
             // не нужно: имя — это сгенерированный UUID + расширение.
             res.json({
                 url: `/uploads/${roomId}/${file.filename}`,
-                name: file.originalname.slice(0, 255),
+                name: (0, upload_filename_1.safeAttachmentName)(file.originalname),
                 size: file.size,
                 mime: file.mimetype || 'application/octet-stream',
             });
@@ -168,7 +176,7 @@ async function main() {
             }
         },
         filename: (_req, file, cb) => {
-            const ext = path_1.default.extname(file.originalname).slice(0, 16);
+            const ext = path_1.default.extname((0, upload_filename_1.decodeOriginalName)(file.originalname)).slice(0, 16);
             cb(null, `${(0, crypto_1.randomUUID)()}${ext}`);
         },
     });
@@ -226,7 +234,7 @@ async function main() {
                 // диалогу, так что подставить чужую не получится.
                 res.json({
                     url: `${(0, uploads_2.dmUrlPrefix)(conversationId)}${file.filename}`,
-                    name: file.originalname.slice(0, 255),
+                    name: (0, upload_filename_1.safeAttachmentName)(file.originalname),
                     size: file.size,
                     mime: file.mimetype || 'application/octet-stream',
                 });
