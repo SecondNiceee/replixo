@@ -36,9 +36,25 @@ import { userRoom } from './namespace-types'
 /** Что видит собеседник. 'offline' наружу отдаётся, но в памяти не хранится. */
 export type PresenceStatus = 'online' | 'idle' | 'offline'
 
+/**
+ * Состояние ОДНОЙ вкладки. Наружу не торчит: собеседнику уходит сводный
+ * PresenceStatus.
+ *
+ *   • online — вкладка видима, человек что-то делал недавно.
+ *   • idle   — вкладка видима, но человек молчит дольше минуты («отошёл»).
+ *   • hidden — вкладка ушла в фон (переключились на другую, свернули окно).
+ *              Соединение живо (звонки и сообщения доходят), но для друзей это
+ *              РАВНО оффлайну: человек Riplexo не смотрит, и правильный ответ на
+ *              вопрос «он на месте?» — «был в сети только что», а не зелёная
+ *              точка. Поэтому статус вкладки и наличие сокета здесь сознательно
+ *              разведены: sweeper/звонки смотрят на сокет (isOnline), UI — на
+ *              statusOf.
+ */
+export type SocketStatus = 'online' | 'idle' | 'hidden'
+
 interface SocketPresence {
-  /** Сам пользователь отметил вкладку активной или отошедшей. */
-  status: 'online' | 'idle'
+  /** Что сообщила о себе сама вкладка. */
+  status: SocketStatus
   /** Время последнего прикладного heartbeat — по нему свипер ловит мертвецов. */
   lastPingAt: number
 }
@@ -114,16 +130,22 @@ export function isOnline(userId: string): boolean {
 }
 
 /**
- * Сводный статус пользователя: online, если активна хотя бы одна вкладка;
- * idle, если соединения есть, но все отметились отошедшими.
+ * Сводный статус пользователя: online, если активна хотя бы одна вкладка; idle,
+ * если все видимые вкладки отметились отошедшими; offline, если все вкладки в
+ * фоне (или их нет вовсе).
+ *
+ * Вкладки в фоне не участвуют в подсчёте намеренно: иначе открытая в соседнем
+ * табе страница Riplexo держала бы зелёную точку неделями.
  */
 export function statusOf(userId: string): PresenceStatus {
   const sockets = connections.get(userId)
   if (!sockets || sockets.size === 0) return 'offline'
+  let idle = false
   for (const presence of sockets.values()) {
     if (presence.status === 'online') return 'online'
+    if (presence.status === 'idle') idle = true
   }
-  return 'idle'
+  return idle ? 'idle' : 'offline'
 }
 
 /** Статусы сразу для списка пользователей — для снапшота и /internal/presence. */
@@ -200,7 +222,9 @@ export async function trackConnect(
   }
 
   let sockets = connections.get(userId)
-  const wasOffline = !sockets || sockets.size === 0
+  // Именно сводный статус, а не «есть ли сокеты»: у пользователя могли остаться
+  // только свёрнутые вкладки, и для друзей он в этот момент оффлайн.
+  const statusBefore = statusOf(userId)
   if (!sockets) {
     sockets = new Map()
     connections.set(userId, sockets)
@@ -213,9 +237,10 @@ export async function trackConnect(
 
   const friends = await friendsOf(userId)
 
-  // Рассылаем только на переходе offline → online. Вторая вкладка того же
-  // пользователя ничего не меняет для его друзей.
-  if (wasOffline) {
+  // Рассылаем только когда сводный статус реально изменился. Вторая активная
+  // вкладка ничего не меняет для друзей, а вот новая вкладка при остальных
+  // свёрнутых (сводный статус был offline) — меняет.
+  if (statusBefore !== 'online') {
     for (const friendId of friends) {
       nsp.to(userRoom(friendId)).emit('dm:presence', { userId, status: 'online' })
     }
@@ -239,7 +264,7 @@ export async function trackConnect(
 export function trackPing(
   userId: string,
   socketId: string,
-  status?: 'online' | 'idle',
+  status?: SocketStatus,
 ): boolean {
   const sockets = connections.get(userId)
   const presence = sockets?.get(socketId)
@@ -248,20 +273,48 @@ export function trackPing(
   const before = statusOf(userId)
   presence.lastPingAt = Date.now()
   if (status) presence.status = status
-  // Пользователь активен — поддерживаем lastSeenAt свежим (throttle внутри).
-  flushLastSeen(userId, presence.lastPingAt)
-  return statusOf(userId) !== before
+  const after = statusOf(userId)
+  // lastSeenAt двигаем только пока человек действительно у экрана. Пинги от
+  // свёрнутых вкладок сюда тоже приходят (соединение живо), и если бы они
+  // обновляли время, у друзей навсегда осталось бы «был(а) только что» вместо
+  // растущего «N минут назад».
+  if (after !== 'offline') flushLastSeen(userId, presence.lastPingAt)
+  return after !== before
 }
 
-/** Сменить статус вкладки и разослать сводный статус, если он изменился. */
+/**
+ * Сменить статус вкладки и разослать сводный статус, если он изменился.
+ *
+ * Переход в оффлайн (все вкладки свернули) уходит вместе с lastSeenAt и
+ * принудительно фиксируется в БД: клиент по этому времени рисует «был(а) в сети
+ * только что», а перезагрузка страницы собеседника берёт то же значение из
+ * снапшота.
+ */
 export async function setSocketStatus(
   nsp: Namespace,
   socket: Socket,
   userId: string,
-  status: 'online' | 'idle',
+  status: SocketStatus,
 ): Promise<void> {
   if (!trackPing(userId, socket.id, status)) return
-  await broadcastStatus(nsp, userId, statusOf(userId))
+  await broadcastCurrentStatus(nsp, userId)
+}
+
+/**
+ * Разослать друзьям текущий сводный статус. Оффлайн (например, все вкладки
+ * ушли в фон при живых соединениях) всегда уходит вместе с lastSeenAt и
+ * принудительной записью в БД: по этому времени UI рисует «был(а) в сети только
+ * что», и то же значение потом приходит в снапшоте после перезагрузки.
+ */
+export async function broadcastCurrentStatus(nsp: Namespace, userId: string): Promise<void> {
+  const status = statusOf(userId)
+  if (status !== 'offline') {
+    await broadcastStatus(nsp, userId, status)
+    return
+  }
+  const at = Date.now()
+  flushLastSeen(userId, at, true)
+  await broadcastStatus(nsp, userId, 'offline', at)
 }
 
 /**
@@ -349,7 +402,9 @@ function sweepStaleSockets(nsp: Namespace): void {
       flushLastSeen(userId, at, true)
       void broadcastStatus(nsp, userId, 'offline', at)
     } else {
-      void broadcastStatus(nsp, userId, statusOf(userId))
+      // Остались соединения, но сводный статус мог стать любым, включая offline
+      // (все выжившие вкладки в фоне) — тогда helper приложит lastSeenAt.
+      void broadcastCurrentStatus(nsp, userId)
     }
   }
 }
