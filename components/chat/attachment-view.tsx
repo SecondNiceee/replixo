@@ -1,6 +1,10 @@
+'use client'
+
+import { useState } from 'react'
 import { FileText, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatFileSize, isImageAttachment, type AttachmentLike } from '@/lib/chat-format'
+import { ImageLightbox } from './image-lightbox'
 
 // ---------------------------------------------------------------------------
 // Вложение внутри пузыря сообщения: картинки — превью, всё остальное — карточка
@@ -19,30 +23,15 @@ export function AttachmentView({
 }) {
   const href = `${baseUrl}${attachment.url}`
 
-  if (isImageAttachment(attachment)) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block overflow-hidden rounded-xl border border-border/60"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={href || '/placeholder.svg'}
-          alt={attachment.name}
-          className="max-h-60 w-full max-w-[260px] object-cover"
-          loading="lazy"
-        />
-      </a>
-    )
-  }
-
   // На диске файл лежит под UUID'ом, поэтому без подсказки браузер сохранил бы
   // «a1b2c3.pdf». Атрибут download задаёт имя только для same-origin ссылок, а
   // сервер вложений может быть на другом домене — поэтому исходное имя ещё и
   // передаём в ?name=, откуда сервер собирает Content-Disposition (RFC 5987).
   const downloadHref = `${href}${href.includes('?') ? '&' : '?'}name=${encodeURIComponent(attachment.name)}`
+
+  if (isImageAttachment(attachment)) {
+    return <ImageAttachment src={href} downloadHref={downloadHref} name={attachment.name} />
+  }
 
   return (
     <a
@@ -64,5 +53,52 @@ export function AttachmentView({
       </span>
       <Download className="size-4 shrink-0 opacity-70" />
     </a>
+  )
+}
+
+/**
+ * Превью картинки, открывающее её в лайтбоксе поверх переписки.
+ *
+ * Именно кнопка, а не ссылка: раньше здесь была ссылка с target="_blank", и
+ * клик уводил на отдельную страницу с файлом. Скачать картинку по-прежнему
+ * можно — кнопка для этого есть в самом лайтбоксе.
+ */
+function ImageAttachment({
+  src,
+  downloadHref,
+  name,
+}: {
+  src: string
+  downloadHref: string
+  name: string
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block cursor-zoom-in overflow-hidden rounded-xl border border-border/60 transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        aria-label={`Открыть изображение ${name}`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src || '/placeholder.svg'}
+          alt={name}
+          className="max-h-60 w-full max-w-[260px] object-cover"
+          loading="lazy"
+        />
+      </button>
+
+      {open && (
+        <ImageLightbox
+          src={src}
+          alt={name}
+          downloadHref={downloadHref}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   )
 }

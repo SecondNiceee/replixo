@@ -138,6 +138,40 @@ export function DmComposer({
     [submit],
   )
 
+  // Ctrl+V картинкой из буфера — тот же путь, что и через скрепку.
+  //
+  // Скриншот в буфере приходит не в files, а элементом kind: 'file' в items,
+  // поэтому перебираем items и берём первый файловый. Файл из буфера почти
+  // всегда безымянный ("image.png" браузер подставляет не всегда), так что имя
+  // задаём сами — иначе на сервере вложение осталось бы без расширения.
+  //
+  // preventDefault только когда файл действительно нашёлся: при обычной вставке
+  // текста в items тоже лежит запись (kind: 'string'), и безусловный перехват
+  // сломал бы вставку текста.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled || uploading) return
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file') continue
+        const file = item.getAsFile()
+        if (!file) continue
+        e.preventDefault()
+        const named =
+          file.name && file.name !== 'image.png'
+            ? file
+            : new File([file], `pasted-${Date.now()}.${(file.type.split('/')[1] || 'png')}`, {
+                type: file.type,
+              })
+        void uploadFile(named)
+        return
+      }
+    },
+    [disabled, uploading, uploadFile],
+  )
+
   // Drag & drop файла на композер — тот же путь, что и через скрепку.
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -258,6 +292,7 @@ export function DmComposer({
             if (e.target.value.trim()) onTyping()
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           rows={1}
           maxLength={MAX_LENGTH}
           placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
