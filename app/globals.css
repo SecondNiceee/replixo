@@ -384,11 +384,24 @@ html[data-overlay='1'] .desktop-titlebar {
   }
 
   /* Chrome/Edge на Windows по умолчанию рисуют кнопки со стрелками на концах
-     полосы — в тонком скролле мессенджера это лишняя деталь, скрываем. */
-  .scroll-slim::-webkit-scrollbar-button {
-    display: none;
-    width: 0;
-    height: 0;
+     полосы — в тонком скролле мессенджера это лишняя деталь, скрываем.
+     Отдельные селекторы под :vertical/:horizontal и :increment/:decrement
+     нужны потому, что на части сборок Chromium общий ::-webkit-scrollbar-button
+     сам по себе кнопки не убирает — важен именно набор с этими псевдоклассами. */
+  .scroll-slim::-webkit-scrollbar-button,
+  .scroll-slim::-webkit-scrollbar-button:single-button,
+  .scroll-slim::-webkit-scrollbar-button:vertical:start,
+  .scroll-slim::-webkit-scrollbar-button:vertical:end,
+  .scroll-slim::-webkit-scrollbar-button:vertical:increment,
+  .scroll-slim::-webkit-scrollbar-button:vertical:decrement,
+  .scroll-slim::-webkit-scrollbar-button:horizontal:start,
+  .scroll-slim::-webkit-scrollbar-button:horizontal:end,
+  .scroll-slim::-webkit-scrollbar-button:horizontal:increment,
+  .scroll-slim::-webkit-scrollbar-button:horizontal:decrement {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    background: transparent !important;
   }
 
   .scroll-slim::-webkit-scrollbar-thumb {

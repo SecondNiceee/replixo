@@ -144,11 +144,22 @@ export function ConversationView({
   }, [firstMessageId])
 
   const handleSend = useCallback(
-    (text: string, attachment: DmAttachment | null) => {
+    (text: string, attachments: DmAttachment[]) => {
       // Сообщение ушло — индикатор набора у собеседника гасим сразу, не
       // дожидаясь таймаута молчания.
       stopTyping()
-      send(text, attachment)
+      if (attachments.length === 0) {
+        send(text, null)
+        return
+      }
+      // Несколько файлов — несколько отдельных сообщений, лента раскладывает
+      // их как обычную переписку. Текст из поля уходит только с последним:
+      // так подпись явно относится к конкретной фотографии, а не «висит»
+      // отдельно от всех вложений.
+      attachments.forEach((attachment, i) => {
+        const isLast = i === attachments.length - 1
+        send(isLast ? text : '', attachment)
+      })
     },
     [send, stopTyping],
   )
@@ -168,7 +179,7 @@ export function ConversationView({
           size="icon"
           onClick={onBack}
           className="size-8 md:hidden"
-          aria-label="Назад к списку диалогов"
+          aria-label="Назад к списк�� диалогов"
         >
           <ArrowLeft className="size-4" />
         </Button>
