@@ -11,6 +11,20 @@ export function directConversationId(a: string, b: string): string {
   return `direct:${min}:${max}`
 }
 
+// id чата «Избранное» — переписки пользователя с самим собой.
+//
+// Префикс намеренно другой (`self:`, а не `direct:`): по нему
+// otherUserIdFrom() возвращает null, и сокет-сервер не пытается проверить
+// дружбу пользователя с самим собой перед отправкой сообщения. Второе
+// следствие — участник у такого диалога ровно один.
+export function selfConversationId(userId: string): string {
+  return `self:${userId}`
+}
+
+export function isSelfConversationId(conversationId: string): boolean {
+  return conversationId.startsWith('self:')
+}
+
 /** Достаёт id второго участника из детерминированного id диалога. */
 export function otherUserIdFrom(conversationId: string, selfId: string): string | null {
   if (!conversationId.startsWith('direct:')) return null

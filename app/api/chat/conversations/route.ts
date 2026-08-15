@@ -4,7 +4,7 @@ import { and, eq, or } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { conversation, conversationMember, friendship } from '@/lib/db/schema'
-import { directConversationId } from '@/lib/chat/conversation-id'
+import { directConversationId, selfConversationId } from '@/lib/chat/conversation-id'
 import { listConversations } from '@/lib/chat/conversations'
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,26 @@ export async function POST(req: NextRequest) {
   const userId = session.user.id
 
   const body = await req.json().catch(() => null)
+
+  // Ветка «Избранного» — единственный способ создать диалог с самим собой, и
+  // она явная: обычный путь по friendId такое по-прежнему запрещает.
+  if (body?.self === true) {
+    const conversationId = selfConversationId(userId)
+
+    await db
+      .insert(conversation)
+      .values({ id: conversationId, type: 'self' })
+      .onConflictDoNothing()
+
+    // Участник ровно один — владелец.
+    await db
+      .insert(conversationMember)
+      .values({ conversationId, userId })
+      .onConflictDoNothing()
+
+    return NextResponse.json({ conversationId })
+  }
+
   const friendId = typeof body?.friendId === 'string' ? body.friendId.trim() : ''
   if (!friendId) {
     return NextResponse.json({ error: 'friendId обязателен' }, { status: 400 })

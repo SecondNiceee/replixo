@@ -34,6 +34,11 @@ export type UseConversationsResult = {
   refreshKeepingRead: (conversationId: string) => void
   /** Создать (или найти) диалог с другом, вернуть его id. */
   startWithFriend: (friendId: string) => Promise<string | null>
+  /**
+   * Завести в БД чат «Избранное» и вернуть его id. Идемпотентно, поэтому
+   * повторные вызовы безопасны.
+   */
+  ensureFavorites: () => Promise<string | null>
   /** Аварийная отметка прочтения по HTTP — только когда сокета нет. */
   markReadFallback: (conversationId: string) => Promise<void>
 }
@@ -118,6 +123,20 @@ export function useConversations(
     [mutate],
   )
 
+  const ensureFavorites = useCallback(async (): Promise<string | null> => {
+    const res = await fetch(CONVERSATIONS_KEY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ self: true }),
+    })
+    if (!res.ok) return null
+    const { conversationId } = (await res.json()) as { conversationId: string }
+    // Перечитываем список, чтобы синтетическая строка (pending) сменилась
+    // настоящей: до этого сокет не пустил бы в диалог отправку сообщения.
+    await mutate()
+    return conversationId
+  }, [mutate])
+
   // Этот роут не рассылает dm:read, поэтому вторые галочки у собеседника
   // появятся лишь после его перезагрузки. Основной путь — сокет (useDmRead).
   const markReadFallback = useCallback(
@@ -184,6 +203,7 @@ export function useConversations(
     zeroUnreadLocally,
     refreshKeepingRead,
     startWithFriend,
+    ensureFavorites,
     markReadFallback,
   }
 }

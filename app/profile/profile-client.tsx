@@ -7,6 +7,7 @@ import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useDmPresence } from '@/hooks/dm/use-dm-presence'
 import { useConversations } from '@/hooks/dm/use-conversations'
 import { useDmStore } from '@/stores/dm-store'
+import { isSelfConversationId } from '@/lib/chat/conversation-id'
 import { cn } from '@/lib/utils'
 import { ConversationList } from '@/app/chat/conversation-list'
 import { ConversationView } from '@/app/chat/conversation-view'
@@ -46,8 +47,14 @@ export function ProfileClient({ user }: { user: User }) {
   // Список диалогов, счётчики и все мутации живут в useConversations: тот же
   // SWR-ключ читают бейджи вне этой страницы, поэтому число непрочитанных
   // всегда совпадает.
-  const { conversations, isLoading, zeroUnreadLocally, startWithFriend, markReadFallback } =
-    useConversations(user.id, activeId)
+  const {
+    conversations,
+    isLoading,
+    zeroUnreadLocally,
+    startWithFriend,
+    ensureFavorites,
+    markReadFallback,
+  } = useConversations(user.id, activeId)
 
   const { data: friendsData, isLoading: friendsLoading } = useSWR<FriendsResponse>(
     '/api/friends',
@@ -95,12 +102,28 @@ export function ProfileClient({ user }: { user: User }) {
     return () => setActiveConversationId(null)
   }, [activeId, setActiveConversationId])
 
+  // «Избранное» создаётся лениво, поэтому до первого открытия оно живёт только
+  // строкой в списке. Пока записи в БД нет, GET /messages ответил бы 403 (нет
+  // членства), а сокет не принял бы отправку — значит, сначала создаём диалог и
+  // только потом открываем. Ref держит результат на всю сессию страницы, чтобы
+  // не отправлять идемпотентный POST на каждое открытие.
+  const favoritesReady = useRef(false)
+
   const openConversation = useCallback(
     (conversationId: string) => {
+      if (isSelfConversationId(conversationId) && !favoritesReady.current) {
+        void ensureFavorites().then((id) => {
+          if (!id) return
+          favoritesReady.current = true
+          setActiveId(id)
+          zeroUnreadLocally(id)
+        })
+        return
+      }
       setActiveId(conversationId)
       zeroUnreadLocally(conversationId)
     },
-    [zeroUnreadLocally],
+    [ensureFavorites, zeroUnreadLocally],
   )
 
   // Создать диалог и сразу открыть его. Обёртка над startWithFriend из хука:
@@ -122,8 +145,11 @@ export function ProfileClient({ user }: { user: User }) {
   const searchParams = useSearchParams()
   useEffect(() => {
     const fromUrl = searchParams.get('c')
-    if (fromUrl) setActiveId(fromUrl)
-  }, [searchParams])
+    // Через openConversation, а не setActiveId: ссылка может вести в ещё не
+    // созданное «Избранное». Чужой self-id при этом не утечёт — ensureFavorites
+    // всегда возвращает диалог текущего пользователя.
+    if (fromUrl) openConversation(fromUrl)
+  }, [searchParams, openConversation])
 
   // В отличие от ?c=, диалога в БД может ещё не быть, поэтому идём через
   // startWithFriend: он создаёт его при необходимости и только потом открывает.
