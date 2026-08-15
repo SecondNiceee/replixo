@@ -11,19 +11,29 @@ import { create } from 'zustand'
 // ---------------------------------------------------------------------------
 
 /**
- * Что видно про человека. Ровно два состояния:
+ * Что видно про человека:
  *   • online  — вкладка Riplexo открыта на экране либо идёт звонок;
- *   • offline — смотреть на Riplexo некому, показываем «был(а) N минут назад».
+ *   • offline — смотреть на Riplexo некому, показываем «был(а) N минут назад»;
+ *   • unknown — мы пока не знаем: ни снапшот сокета, ни HTTP-ответ ещё не
+ *     доехали (или сокет-сервер молчит).
  *
  * Промежуточного «отошёл» нет намеренно: открытая на экране вкладка — это
  * присутствие, и молчание в ней ничего не доказывает (читают длинное сообщение,
  * смотрят видео, думают над ответом). Подробно — в шапке
  * server/src/dm/presence.ts.
+ *
+ * 'unknown' — про НАШЕ незнание, а не про человека. Без него любое «ещё не
+ * знаю» выглядело как честный оффлайн, и на первом кадре /profile у всех
+ * мигало «не в сети».
  */
-export type PresenceStatus = 'online' | 'offline'
+export type PresenceStatus = 'online' | 'offline' | 'unknown'
 
-/** Статусы в сторе без 'offline': отсутствие ключа и есть оффлайн. */
-export type LivePresenceStatus = Exclude<PresenceStatus, 'offline'>
+/**
+ * Статусы в сторе: только 'online'. Оффлайн — отсутствие ключа, а 'unknown'
+ * сюда попасть не может: незнание описывается флагом presenceLoaded, а не
+ * записью про конкретного человека.
+ */
+export type LivePresenceStatus = 'online'
 
 interface DmStore {
   /** userId → статус. Оффлайн-друзей здесь нет: пустой ключ дешевле явного. */
@@ -36,6 +46,13 @@ interface DmStore {
    * авторитетнее, а HTTP-ответ мог быть собран на полсекунды раньше.
    */
   snapshotApplied: boolean
+  /**
+   * Известно ли про presence хоть что-нибудь. Отличается от snapshotApplied:
+   * тот про «сокет сказал своё слово», а этот — про любой достоверный источник,
+   * включая HTTP-ответ. Пока флаг снят, отсутствие человека в statuses читается
+   * как «не знаем» (подпись «Подключение…»), а не как оффлайн.
+   */
+  presenceLoaded: boolean
   /** conversationId → userId → печатает ли. */
   typing: Record<string, Record<string, boolean>>
   /** conversationId → lastReadAt собеседника (мс), по нему рисуются галочки. */
@@ -53,9 +70,15 @@ interface DmStore {
     statuses: Record<string, LivePresenceStatus>,
     lastSeenAt: Record<string, number>,
   ) => void
+  /**
+   * @param ok Ответил ли сокет-сервер. При false статусы игнорируются как
+   *   источник знания: пустой снапшот из-за недоступного сервера не должен
+   *   означать «все оффлайн» (см. PresenceSnapshot.ok в lib/chat/presence).
+   */
   mergePresence: (
     statuses: Record<string, LivePresenceStatus>,
     lastSeenAt: Record<string, number>,
+    ok: boolean,
   ) => void
   setPresence: (userId: string, status: PresenceStatus, lastSeenAt?: number) => void
   setTyping: (conversationId: string, userId: string, typing: boolean) => void
@@ -79,6 +102,7 @@ export const useDmStore = create<DmStore>((set) => ({
   statuses: {},
   lastSeenAt: {},
   snapshotApplied: false,
+  presenceLoaded: false,
   typing: {},
   peerReadAt: {},
   activeConversationId: null,
@@ -93,25 +117,33 @@ export const useDmStore = create<DmStore>((set) => ({
       statuses,
       lastSeenAt: mergeLastSeen(state.lastSeenAt, lastSeenAt),
       snapshotApplied: true,
+      presenceLoaded: true,
     })),
 
   // Данные из HTTP-ответа (/api/friends) — только чтобы точки были на первом
   // кадре, до подключения сокета. Как только снапшот пришёл, статусы оттуда
   // игнорируем: HTTP-ответ мог быть собран раньше и «оживил» бы ушедшего.
   // Времена берём всегда — они из Postgres и от сокета не зависят.
-  mergePresence: (statuses, lastSeenAt) =>
+  mergePresence: (statuses, lastSeenAt, ok) =>
     set((state) => ({
       statuses: state.snapshotApplied ? state.statuses : { ...statuses, ...state.statuses },
       lastSeenAt: mergeLastSeen(state.lastSeenAt, lastSeenAt),
+      // Флаг поднимаем только по достоверному ответу: иначе пустой presence от
+      // упавшего сокет-сервера означал бы «все оффлайн».
+      presenceLoaded: state.presenceLoaded || ok,
     })),
 
   setPresence: (userId, status, lastSeenAt) =>
     set((state) => {
       const statuses = { ...state.statuses }
-      if (status === 'offline') delete statuses[userId]
-      else statuses[userId] = status
+      // Пишем только 'online': и оффлайн, и (теоретический) 'unknown' в сторе
+      // выражаются отсутствием ключа.
+      if (status === 'online') statuses[userId] = status
+      else delete statuses[userId]
       return {
         statuses,
+        // Адресное событие — тоже доказательство связи с сокет-сервером.
+        presenceLoaded: true,
         lastSeenAt:
           lastSeenAt !== undefined
             ? mergeLastSeen(state.lastSeenAt, { [userId]: lastSeenAt })
@@ -139,25 +171,20 @@ export const useDmStore = create<DmStore>((set) => ({
   // сбрасываем. lastSeenAt, наоборот, оставляем: это история из Postgres, она
   // не портится от того, что websocket отвалился, и «был(а) 5 минут назад»
   // лучше пустого «не в сети».
+  //
+  // presenceLoaded тоже снимаем: без соединения мы про статусы не знаем ничего,
+  // и «Подключение…» здесь честнее, чем утверждение об оффлайне.
   reset: () =>
     set((state) => ({
       statuses: {},
       snapshotApplied: false,
+      presenceLoaded: false,
       typing: {},
       peerReadAt: {},
       lastSeenAt: state.lastSeenAt,
     })),
 }))
 
-/**
- * Статус одного человека одним значением. Отдельный хук, потому что подписка на
- * весь объект statuses перерисовывала бы компонент на любое чужое изменение.
- */
-export function usePresenceStatus(userId: string | null | undefined): PresenceStatus {
-  return useDmStore((s) => (userId ? (s.statuses[userId] ?? 'offline') : 'offline'))
-}
-
-/** Когда человека видели последний раз (мс), либо undefined. */
-export function usePresenceLastSeen(userId: string | null | undefined): number | undefined {
-  return useDmStore((s) => (userId ? s.lastSeenAt[userId] : undefined))
-}
+// Хуки чтения статуса (usePresenceStatus / usePresenceLastSeen) живут в
+// components/chat/presence-provider: кроме стора им нужен серверный снапшот,
+// приходящий контекстом, — иначе первый кадр не знал бы статусов вовсе.

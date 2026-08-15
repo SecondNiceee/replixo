@@ -146,6 +146,10 @@ export function presenceLabel(
   lastSeenAt: number | undefined,
   now?: number,
 ): string {
+  // 'unknown' — это про нас, а не про человека: статус ещё не доехал. Раньше
+  // такое состояние подписывалось «не в сети», и на первом кадре кабинета
+  // подпись мигала оффлайном у людей, которые в сети.
+  if (status === 'unknown') return 'Подключение…'
   if (status === 'online') return 'в сети'
   return formatLastSeen(lastSeenAt, now)
 }
