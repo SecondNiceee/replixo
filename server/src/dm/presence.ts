@@ -221,14 +221,22 @@ function flushLastSeen(userId: string, at: number, force = false): void {
 }
 
 /**
- * Регистрирует соединение. Если оно первое у пользователя — рассылает друзьям
- * статус. Затем отдаёт этому сокету снапшот: статусы его друзей и время
- * последнего присутствия остальных.
+ * Регистрирует соединение. Если сводный статус пользователя из-за этого
+ * изменился — рассылает его друзьям. Затем отдаёт этому сокету снапшот: статусы
+ * его друзей и время последнего присутствия остальных.
+ *
+ * `initialStatus` приезжает в handshake (см. use-dm-socket) и нужен для вкладок,
+ * которые открываются сразу в фоне: Ctrl+click, восстановление сессии браузера,
+ * реконнект свёрнутого окна. Раньше здесь безусловно ставился 'online', и такое
+ * подключение давало у друзей вспышку зелёной точки, которую следующее же
+ * dm:status сменяло на «был(а) только что». Значение по умолчанию оставлено
+ * ради старого бандла из кэша браузера, который статус не присылает.
  */
 export async function trackConnect(
   nsp: Namespace,
   socket: Socket,
   userId: string,
+  initialStatus: SocketStatus = 'online',
 ): Promise<void> {
   const now = Date.now()
 
@@ -248,25 +256,29 @@ export async function trackConnect(
     sockets = new Map()
     connections.set(userId, sockets)
   }
-  sockets.set(socket.id, { status: 'online', lastPingAt: now })
+  sockets.set(socket.id, { status: initialStatus, lastPingAt: now })
 
   // Пользователь здесь и сейчас — фиксируем сразу, не дожидаясь первого
   // периодического сброса: короткая сессия иначе не оставила бы времени.
+  // Открытая в фоне вкладка тоже считается: страницу всё-таки загрузили, и
+  // «был(а) только что» — правильный ответ, даже если точка не зажглась.
   flushLastSeen(userId, now, true)
 
   const friends = await friendsOf(userId)
 
   // Рассылаем только когда сводный статус реально изменился. Вторая активная
   // вкладка ничего не меняет для друзей, а вот новая вкладка при остальных
-  // свёрнутых (сводный статус был offline) — меняет.
-  if (statusBefore !== 'online') {
+  // свёрнутых (сводный статус был offline) — меняет. И наоборот: фоновая вкладка
+  // при отсутствии других статус не меняет вовсе, поэтому и события нет.
+  const statusAfter = statusOf(userId)
+  if (statusAfter !== statusBefore) {
     for (const friendId of friends) {
-      nsp.to(userRoom(friendId)).emit('dm:presence', { userId, status: 'online' })
+      nsp.to(userRoom(friendId)).emit('dm:presence', { userId, status: statusAfter })
     }
   }
 
   // lastSeenAt читаем из БД: в памяти его больше нет, и именно поэтому снапшот
-  // теперь остаётся содержательным после рестарта сервера.
+  // тепер�� остаётся содержательным после рестарта сервера.
   const [statuses, lastSeenAt] = await Promise.all([
     Promise.resolve(statusesFor(friends)),
     getLastSeenBulk(friends),

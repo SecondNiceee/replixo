@@ -17,6 +17,17 @@ import {
   trackPing,
 } from './presence'
 import { userRoom, type DmSocketData } from './namespace-types'
+import type { SocketStatus } from './presence'
+
+/**
+ * Достать статус вкладки из чего угодно, что прислал клиент: handshake, dm:ping,
+ * dm:status. Всё три источника недоверенные и приходят одинаковой формы, поэтому
+ * разбор один. undefined означает «клиент статуса не сообщил» — так ведёт себя
+ * старый бандл из кэша браузера, и для него presence должен работать как раньше.
+ */
+function readStatus(value: unknown): SocketStatus | undefined {
+  return value === 'online' || value === 'idle' || value === 'hidden' ? value : undefined
+}
 
 // ---------------------------------------------------------------------------
 // Namespace /dm — личные сообщения между друзьями.
@@ -75,7 +86,15 @@ export function setupDmNamespace(io: Server): void {
     cancelCallCleanup(userId)
 
     // join уже выполнен, поэтому снапшот presence гарантированно дойдёт.
-    void trackConnect(nsp, socket, userId)
+    //
+    // Статус вкладки берём из handshake: вкладка могла открыться сразу в фоне
+    // (Ctrl+click, восстановление сессии браузера) или это реконнект свёрнутого
+    // окна. Без него presence обязан был предполагать 'online', и у друзей
+    // мигала зелёная точка, тут же сменяясь на «был(а) только что».
+    const initialStatus = readStatus(
+      (socket.handshake.auth as Record<string, unknown> | undefined)?.status,
+    )
+    void trackConnect(nsp, socket, userId, initialStatus)
 
     // Досылаем этому устройству звонки, которые уже идут: `call:incoming`
     // рассылался один раз, и подключившийся посреди звонка о нём бы не узнал.
@@ -96,11 +115,7 @@ export function setupDmNamespace(io: Server): void {
       //
       // Статуса может и не быть (старый бандл из кэша браузера) — тогда пинг
       // работает как раньше, просто продлевая жизнь соединения.
-      const raw = (payload ?? {}) as { status?: unknown }
-      const status =
-        raw.status === 'online' || raw.status === 'idle' || raw.status === 'hidden'
-          ? raw.status
-          : undefined
+      const status = readStatus((payload as { status?: unknown } | undefined)?.status)
 
       if (trackPing(userId, socket.id, status)) {
         void broadcastCurrentStatus(nsp, userId)
@@ -111,9 +126,9 @@ export function setupDmNamespace(io: Server): void {
     // Статус хранится на каждый сокет: сводный считается по всем устройствам,
     // поэтому свёрнутая вкладка на ноутбуке не гасит активность на телефоне.
     socket.on('dm:status', (payload: unknown) => {
-      const raw = (payload ?? {}) as { status?: unknown }
-      if (raw.status !== 'online' && raw.status !== 'idle' && raw.status !== 'hidden') return
-      void setSocketStatus(nsp, socket, userId, raw.status)
+      const status = readStatus((payload as { status?: unknown } | undefined)?.status)
+      if (!status) return
+      void setSocketStatus(nsp, socket, userId, status)
     })
 
     socket.on('disconnect', () => {
