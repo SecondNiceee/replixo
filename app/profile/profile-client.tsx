@@ -71,7 +71,10 @@ export function ProfileClient({ user }: { user: User }) {
   const presence = friendsData?.presence
   useEffect(() => {
     if (!presence) return
-    mergePresence(presence.statuses ?? {}, presence.lastSeenAt ?? {})
+    // Третий аргумент — «ответил ли сокет-сервер». Без него пустой presence от
+    // упавшего сервера поднял бы presenceLoaded и все друзья мгновенно стали бы
+    // «не в сети»; при ok: false подпись честно остаётся «Подключение…».
+    mergePresence(presence.statuses ?? {}, presence.lastSeenAt ?? {}, presence.ok === true)
   }, [presence, mergePresence])
 
   const friends = friendsData?.friends ?? []
@@ -187,7 +190,7 @@ export function ProfileClient({ user }: { user: User }) {
                     aria-controls={`pane-panel-${id}`}
                     onClick={() => setPane(id)}
                     className={cn(
-                      // Начертание одно на оба состояния: сменой на semibold
+                      // Начертание одно на оба состояния: с��еной на semibold
                       // активный таб менял бы ширину и сдвигал соседний.
                       'border-b-2 pb-2.5 pt-2 text-[13px] font-medium tracking-tight transition-colors',
                       selected

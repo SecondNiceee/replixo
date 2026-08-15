@@ -9,7 +9,12 @@ import { useCallStore } from '@/stores/call-store'
 import { useConversationMessages } from '@/hooks/dm/use-conversation-messages'
 import { useDmRead } from '@/hooks/dm/use-dm-read'
 import { useTyping } from '@/hooks/dm/use-typing'
-import { useDmStore, usePresenceLastSeen, usePresenceStatus } from '@/stores/dm-store'
+import { useDmStore } from '@/stores/dm-store'
+import {
+  usePresenceLastSeen,
+  usePresenceServerNow,
+  usePresenceStatus,
+} from '@/components/chat/presence-provider'
 import { useNow } from '@/hooks/use-now'
 import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { PresenceDot } from '@/components/chat/presence-dot'
@@ -83,7 +88,11 @@ export function ConversationView({
   // «был(а) N минут назад» должно стареть само: события об оффлайне больше не
   // будет, и без тика шапка часами показывала бы «только что». Пока собеседник
   // на связи, подписка не нужна — подпись там постоянная.
-  const now = useNow(peerStatus === 'offline')
+  // Серверное «сейчас» для первого кадра — по той же причине, что и в списке
+  // друзей: шапка открытого по ссылке диалога рендерится на сервере, и подпись,
+  // посчитанная от часов клиента, разошлась бы с HTML.
+  const serverNow = usePresenceServerNow()
+  const now = useNow(peerStatus === 'offline', serverNow)
   const peerLabel = presenceLabel(peerStatus, peerLastSeen, now)
 
   // Отметка прочитанного: только когда вкладка видима и лента внизу.

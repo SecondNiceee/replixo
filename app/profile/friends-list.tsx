@@ -2,7 +2,11 @@
 
 import { useState } from 'react'
 import { UserMinus, Loader2 } from 'lucide-react'
-import { usePresenceLastSeen, usePresenceStatus } from '@/stores/dm-store'
+import {
+  usePresenceLastSeen,
+  usePresenceServerNow,
+  usePresenceStatus,
+} from '@/components/chat/presence-provider'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useNow } from '@/hooks/use-now'
 import { ListSearch } from '@/components/chat/list-search'
@@ -136,7 +140,12 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
   const lastSeenAt = usePresenceLastSeen(friend.friendId)
   // Тикающее «сейчас» нужно только оффлайн-строкам: у остальных подпись
   // постоянная («в сети»), и обновлять её незачем.
-  const now = useNow(status === 'offline')
+  //
+  // Первый кадр считаем от серверного времени: строка «был(а) N минут назад»
+  // рисуется уже в HTML, и посчитай её клиент по своим часам — текст разошёлся
+  // бы с серверным, то есть дал бы ошибку гидрации.
+  const serverNow = usePresenceServerNow()
+  const now = useNow(status === 'offline', serverNow)
   const label = presenceLabel(status, lastSeenAt, now)
 
   return (
