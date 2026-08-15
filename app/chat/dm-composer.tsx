@@ -11,7 +11,8 @@ import { normalizeAttachment, type DmAttachment } from './types'
 interface DmComposerProps {
   /** Нужен для загрузки: файл кладётся в папку конкретного диалога. */
   conversationId: string
-  onSend: (text: string, attachment: DmAttachment | null) => void
+  /** Каждое вложение уходит отдельным сообщением; текст — только к последнему. */
+  onSend: (text: string, attachments: DmAttachment[]) => void
   /** Вызывается при наборе текста; троттлинг событий — внутри useTyping. */
   onTyping: () => void
   disabled: boolean
@@ -20,6 +21,8 @@ interface DmComposerProps {
 const MAX_LENGTH = 4000
 /** Предел роста поля ввода: дальше появляется собственный скролл. */
 const MAX_HEIGHT = 140
+/** Больше — неудобно листать превью и незачем: это личный чат, не файлообменник. */
+const MAX_ATTACHMENTS = 10
 
 export function DmComposer({
   conversationId,
@@ -28,9 +31,11 @@ export function DmComposer({
   disabled,
 }: DmComposerProps) {
   const [text, setText] = useState('')
-  // Загруженное вложение, ожидающее отправки со следующим сообщением. Файл уже
-  // лежит на сервере: так отправка мгновенна, а ошибка загрузки видна заранее.
-  const [pending, setPending] = useState<DmAttachment | null>(null)
+  // Загруженные вложения, ожидающие отправки. Каждое уходит своим сообщением
+  // (см. ConversationView.handleSend), а текст из поля — только к последнему.
+  // Файлы уже лежат на сервере: так отправка мгновенна, а ошибка загрузки
+  // видна заранее.
+  const [pendingList, setPendingList] = useState<DmAttachment[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -64,7 +69,7 @@ export function DmComposer({
   // привязана к conversationId, в другом диалоге сервер её отвергнет.
   useEffect(() => {
     setText('')
-    setPending(null)
+    setPendingList([])
     setUploadError(null)
   }, [conversationId])
 
@@ -76,55 +81,90 @@ export function DmComposer({
     resize()
   }, [text, resize])
 
-  const uploadFile = useCallback(
-    async (file: File) => {
-      setUploading(true)
-      setUploadError(null)
-      try {
-        const body = new FormData()
-        body.append('file', file)
-        const res = await fetch(
-          `/api/chat/upload?conversationId=${encodeURIComponent(conversationId)}`,
-          { method: 'POST', body },
-        )
-        const payload = (await res.json().catch(() => null)) as
-          | (Record<string, unknown> & { error?: string })
-          | null
-        if (!res.ok) {
-          throw new Error(payload?.error ?? 'Не удалось загрузить файл')
-        }
-        const attachment = normalizeAttachment(payload)
-        if (!attachment) throw new Error('Сервер вернул некорректный файл')
-        setPending(attachment)
-      } catch (e) {
-        setUploadError((e as Error).message)
-      } finally {
-        setUploading(false)
+  // Грузим по одному файлу за раз (не параллельно): так порядок вложений в
+  // pendingList совпадает с порядком выбора, а прогресс легко показать одним
+  // общим индикатором вместо счётчика по каждому файлу.
+  const uploadOne = useCallback(
+    async (file: File): Promise<void> => {
+      const body = new FormData()
+      body.append('file', file)
+      const res = await fetch(
+        `/api/chat/upload?conversationId=${encodeURIComponent(conversationId)}`,
+        { method: 'POST', body },
+      )
+      const payload = (await res.json().catch(() => null)) as
+        | (Record<string, unknown> & { error?: string })
+        | null
+      if (!res.ok) {
+        throw new Error(payload?.error ?? `Не удалось загрузить файл «${file.name}»`)
       }
+      const attachment = normalizeAttachment(payload)
+      if (!attachment) throw new Error('Сервер вернул некорректный файл')
+      setPendingList((prev) => [...prev, attachment])
     },
     [conversationId],
   )
 
+  const uploadFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return
+      setUploading(true)
+      let lastError: string | null = null
+      for (const file of files) {
+        try {
+          await uploadOne(file)
+        } catch (e) {
+          lastError = (e as Error).message
+        }
+      }
+      setUploading(false)
+      if (lastError) setUploadError(lastError)
+    },
+    [uploadOne],
+  )
+
+  // Общая точка входа для скрепки, вставки и drag&drop: обрезает список до
+  // свободных мест в pendingList и предупреждает, если файлов прислали больше,
+  // чем помещается.
+  const addFiles = useCallback(
+    (files: File[]) => {
+      if (disabled || !files.length) return
+      const room = MAX_ATTACHMENTS - pendingList.length
+      if (room <= 0) {
+        setUploadError(`Можно прикрепить не более ${MAX_ATTACHMENTS} файлов за раз`)
+        return
+      }
+      const toUpload = files.slice(0, room)
+      setUploadError(files.length > toUpload.length ? `Можно прикрепить не более ${MAX_ATTACHMENTS} файлов за раз` : null)
+      void uploadFiles(toUpload)
+    },
+    [disabled, pendingList.length, uploadFiles],
+  )
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      // Сброс значения, чтобы выбор того же файла снова вызвал change.
+      const files = Array.from(e.target.files ?? [])
+      // Сброс значения, чтобы выбор тех же файлов снова вызвал change.
       e.target.value = ''
-      if (file) void uploadFile(file)
+      addFiles(files)
     },
-    [uploadFile],
+    [addFiles],
   )
+
+  const removePending = useCallback((url: string) => {
+    setPendingList((prev) => prev.filter((a) => a.url !== url))
+  }, [])
 
   const submit = useCallback(() => {
     const trimmed = text.trim()
     // Пустое сообщение с вложением — допустимо, без вложения — нет.
-    if (disabled || uploading || (!trimmed && !pending)) return
-    onSend(trimmed, pending)
+    if (disabled || uploading || (!trimmed && pendingList.length === 0)) return
+    onSend(trimmed, pendingList)
     setText('')
-    setPending(null)
+    setPendingList([])
     // Высоту после отправки сбрасывать здесь не нужно: её вернёт эффект по
     // изменению text — на момент этого вызова в DOM ещё старое значение.
-  }, [text, pending, disabled, uploading, onSend])
+  }, [text, pendingList, disabled, uploading, onSend])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -138,52 +178,58 @@ export function DmComposer({
     [submit],
   )
 
-  // Ctrl+V картинкой из буфера — тот же путь, что и через скрепку.
+  // Ctrl+V картинками из буфера — тот же путь, что и через скрепку.
   //
-  // Скриншот в буфере приходит не в files, а элементом kind: 'file' в items,
-  // поэтому перебираем items и берём первый файловый. Файл из буфера почти
-  // всегда безымянный ("image.png" браузер подставляет не всегда), так что имя
-  // задаём сами — иначе на сервере вложение осталось бы без расширения.
+  // Скриншот в буфере приходит не в files, а элементами kind: 'file' в items,
+  // поэтому перебираем все items и берём каждый файловый — так можно вставить
+  // сразу несколько скопированных изображений. Файл из буфера почти всегда
+  // безымянный ("image.png" браузер подставляет не всегда), так что имя задаём
+  // сами, добавляя индекс — иначе несколько вставленных подряд картинок
+  // получили бы одинаковое имя.
   //
   // preventDefault только когда файл действительно нашёлся: при обычной вставке
   // текста в items тоже лежит запись (kind: 'string'), и безусловный перехват
   // сломал бы вставку текста.
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (disabled || uploading) return
+      if (disabled) return
       const items = e.clipboardData?.items
       if (!items) return
 
+      const files: File[] = []
       for (const item of Array.from(items)) {
         if (item.kind !== 'file') continue
         const file = item.getAsFile()
-        if (!file) continue
-        e.preventDefault()
-        const named =
-          file.name && file.name !== 'image.png'
-            ? file
-            : new File([file], `pasted-${Date.now()}.${(file.type.split('/')[1] || 'png')}`, {
-                type: file.type,
-              })
-        void uploadFile(named)
-        return
+        if (file) files.push(file)
       }
+      if (!files.length) return
+      e.preventDefault()
+      const named = files.map((file, i) =>
+        file.name && file.name !== 'image.png'
+          ? file
+          : new File(
+              [file],
+              `pasted-${Date.now()}-${i}.${file.type.split('/')[1] || 'png'}`,
+              { type: file.type },
+            ),
+      )
+      addFiles(named)
     },
-    [disabled, uploading, uploadFile],
+    [disabled, addFiles],
   )
 
-  // Drag & drop файла на композер — тот же путь, что и через скрепку.
+  // Drag & drop файлов на композер — тот же путь, что и через скрепку, но
+  // сразу для всех перетащенных файлов (до MAX_ATTACHMENTS).
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
-      if (disabled || uploading) return
-      const file = e.dataTransfer.files?.[0]
-      if (file) void uploadFile(file)
+      if (disabled) return
+      addFiles(Array.from(e.dataTransfer.files ?? []))
     },
-    [disabled, uploading, uploadFile],
+    [disabled, addFiles],
   )
 
-  const canSend = (text.trim().length > 0 || !!pending) && !uploading && !disabled
+  const canSend = (text.trim().length > 0 || pendingList.length > 0) && !uploading && !disabled
 
   return (
     <div
@@ -191,13 +237,13 @@ export function DmComposer({
       onDragOver={(e) => e.preventDefault()}
       className="shrink-0 border-t border-border/60 bg-card/70"
     >
-      {/* Статус загрузки / готовое вложение */}
-      {(pending || uploading || uploadError) && (
-        <div className="px-3 pt-3">
+      {/* Статус загрузки / готовые вложения */}
+      {(pendingList.length > 0 || uploading || uploadError) && (
+        <div className="flex flex-col gap-2 px-3 pt-3">
           {uploading && (
             <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Загрузка файла…
+              Загрузка файлов…
             </div>
           )}
 
@@ -215,36 +261,46 @@ export function DmComposer({
             </div>
           )}
 
-          {pending && !uploading && (
-            <div className="flex items-center gap-3 rounded-lg bg-muted px-3 py-2">
-              {isImageAttachment(pending) ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={`${SERVER_URL}${pending.url}` || '/placeholder.svg'}
-                  alt={pending.name}
-                  className="size-10 shrink-0 rounded-md object-cover"
-                />
-              ) : (
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
-                  <FileText className="size-4" />
-                </span>
-              )}
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium text-foreground">
-                  {pending.name}
-                </span>
-                <span className="text-[11px] text-muted-foreground">
-                  {formatFileSize(pending.size)}
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setPending(null)}
-                className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground"
-                aria-label="Убрать вложение"
-              >
-                <X className="size-4" />
-              </button>
+          {/* Каждое вложение уйдёт отдельным сообщением — превью показываем в
+              ряд, а не карточкой на всю ширину, чтобы сразу было видно
+              будущее число сообщений. */}
+          {pendingList.length > 0 && (
+            <div className="scroll-slim flex gap-2 overflow-x-auto pb-1">
+              {pendingList.map((att) => (
+                <div
+                  key={att.url}
+                  className="relative flex shrink-0 items-center gap-2 rounded-lg bg-muted px-2.5 py-2 pr-7"
+                >
+                  {isImageAttachment(att) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`${SERVER_URL}${att.url}` || '/placeholder.svg'}
+                      alt={att.name}
+                      className="size-9 shrink-0 rounded-md object-cover"
+                    />
+                  ) : (
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+                      <FileText className="size-4" />
+                    </span>
+                  )}
+                  <span className="flex min-w-0 max-w-28 flex-col">
+                    <span className="truncate text-xs font-medium text-foreground">
+                      {att.name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatFileSize(att.size)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removePending(att.url)}
+                    className="absolute right-1 top-1 shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                    aria-label={`Убрать файл ${att.name}`}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -260,6 +316,7 @@ export function DmComposer({
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           onChange={handleFileChange}
           className="hidden"
           aria-hidden="true"
@@ -270,7 +327,7 @@ export function DmComposer({
           variant="ghost"
           size="icon"
           onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || uploading}
+          disabled={disabled || uploading || pendingList.length >= MAX_ATTACHMENTS}
           // Кружок виден всегда, а не только под курсором: у ghost-варианта фон
           // появляется лишь на hover, и до наведения скрепка висела в пустоте
           // рядом с явно очерченными полем и кнопкой отправки. Фон берём тот же,

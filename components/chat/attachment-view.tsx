@@ -79,7 +79,7 @@ function ImageAttachment({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="block cursor-zoom-in overflow-hidden rounded-xl border border-border/60 transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="block cursor-zoom-in overflow-hidden rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         aria-label={`Открыть изображение ${name}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
