@@ -364,14 +364,26 @@ html[data-overlay='1'] .desktop-titlebar {
      бы на каждый скролл. Прозрачный thumb места не занимает визуально, но
      гуттер уже учтён в раскладке.
      --------------------------------------------------------------------------- */
-  .scroll-slim {
-    /* Firefox: своих псевдоэлементов нет, только эти два свойства. */
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
+  /* Стандартные scrollbar-width / scrollbar-color отдаём ТОЛЬКО браузерам без
+     ::-webkit-scrollbar (то есть Firefox). Причина: с Chrome 121 стандартные
+     свойства имеют приоритет и полностью отключают легаси-псевдоэлементы — а
+     нативная «thin» полоса Chromium рисуется вместе с кнопками-стрелками на
+     концах, убрать которые можно только через ::-webkit-scrollbar-button.
+     Раньше эти свойства стояли безусловно, поэтому все правила ниже в Chrome
+     игнорировались и стрелки оставались на месте. */
+  @supports not selector(::-webkit-scrollbar) {
+    .scroll-slim {
+      scrollbar-width: thin;
+      scrollbar-color: transparent transparent;
+    }
 
-  .scroll-slim[data-scrolling] {
-    scrollbar-color: oklch(1 0 0 / 24%) transparent;
+    .scroll-slim[data-scrolling] {
+      scrollbar-color: oklch(1 0 0 / 24%) transparent;
+    }
+
+    .scroll-slim-invert[data-scrolling] {
+      scrollbar-color: oklch(0 0 0 / 30%) transparent;
+    }
   }
 
   .scroll-slim::-webkit-scrollbar {
@@ -430,11 +442,7 @@ html[data-overlay='1'] .desktop-titlebar {
   }
 
   /* Внутри синего баббла своих сообщений белый thumb сливается с фоном —
-     там он тёмный. */
-  .scroll-slim-invert[data-scrolling] {
-    scrollbar-color: oklch(0 0 0 / 30%) transparent;
-  }
-
+     там он тёмный. Вариант для Firefox — в блоке @supports выше. */
   .scroll-slim-invert[data-scrolling]::-webkit-scrollbar-thumb {
     background-color: oklch(0 0 0 / 30%);
   }

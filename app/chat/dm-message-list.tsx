@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { AttachmentView } from '@/components/chat/attachment-view'
 import { MessageText } from '@/components/chat/message-text'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
-import { formatTime } from '@/lib/chat-format'
+import { formatTime, isImageAttachment } from '@/lib/chat-format'
 import type { DmMessage } from './types'
 
 interface DmMessageListProps {
@@ -47,6 +47,8 @@ export function DmMessageList({
     <ul className="flex flex-col gap-3">
       {messages.map((m, i) => {
         const self = m.senderId === selfId
+        // Картинка рисуется без рамки пузыря, карточка файла — с отступами.
+        const photo = !!m.attachment && isImageAttachment(m.attachment)
         const prev = i > 0 ? messages[i - 1] : null
         const showDay =
           !prev ||
@@ -67,9 +69,14 @@ export function DmMessageList({
             <div className={cn('flex flex-col gap-0.5', self ? 'items-end' : 'items-start')}>
               <div
                 className={cn(
-                  'flex max-w-[85%] flex-col gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed',
+                  'flex max-w-[85%] flex-col overflow-hidden rounded-2xl text-sm leading-relaxed',
                   self ? 'rounded-br-md bubble-self' : 'rounded-bl-md bubble-peer',
-                  m.status === 'failed' && 'ring-1 ring-destructive',
+                  // Фотография занимает пузырь целиком: без отступов и зазора
+                  // цветная рамка баббла вокруг неё не проглядывает, а
+                  // overflow-hidden выше скругляет саму картинку по его форме.
+                  // Остальным сообщениям отступы нужны — текст и карточку файла
+                  // нельзя прижимать к краю.
+                  photo ? 'gap-0' : 'gap-2 px-3 py-2',
                 )}
               >
                 {m.attachment && (
@@ -82,7 +89,13 @@ export function DmMessageList({
                   />
                 )}
                 {/* Вложение без подписи — обычный случай, пустой абзац не рисуем. */}
-                {m.text && <MessageText text={m.text} />}
+                {m.text &&
+                  (photo ? (
+                    // Пузырь отступов лишён — возвращаем их подписи под фото.
+                    <MessageText text={m.text} className="block px-3 pb-2 pt-1.5" />
+                  ) : (
+                    <MessageText text={m.text} />
+                  ))}
               </div>
 
               <div className="flex items-center gap-1.5 px-1">

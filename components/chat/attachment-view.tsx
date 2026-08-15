@@ -79,7 +79,10 @@ function ImageAttachment({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="block cursor-zoom-in overflow-hidden rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        // rounded-[inherit], а не своё значение: в ЛС пузырь отдан картинке
+        // целиком (без padding), и собственный радиус меньше пузырёвого
+        // оставлял бы по углам полоски его фона.
+        className="block cursor-zoom-in overflow-hidden rounded-[inherit] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         aria-label={`Открыть изображение ${name}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
