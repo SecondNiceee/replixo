@@ -19,6 +19,9 @@ interface ElectronAPI {
   onPresentationSourceChanged: (
     callback: (info: PresentationSourceChange) => void,
   ) => () => void
+  // Геометрия демонстрируемого источника (см. electron/capture-region.js)
+  getCaptureRegion: () => Promise<CaptureRegion | null>
+  onCaptureRegionChanged: (callback: (region: CaptureRegion) => void) => () => void
   // Overlay-режим (демонстрация экрана)
   enterOverlayMode: () => void
   exitOverlayMode: () => void
@@ -58,6 +61,19 @@ interface PresentationSourceChange {
   // slideshow — открылось окно показа слайдов; origin — показ закрыт, возврат
   // к окну, выбранному пользователем в пикере.
   kind: "slideshow" | "origin"
+}
+
+interface CaptureRegion {
+  sourceId: string | null
+  kind: "window" | "screen"
+  /** DIP-координаты области на рабочем столе. */
+  screenRect: { x: number; y: number; width: number; height: number }
+  /** Та же область относительно содержимого overlay-окна = CSS-пиксели. */
+  rect: { left: number; top: number; width: number; height: number }
+  /** Окно живо и не свёрнуто (иначе рисовать по нему бессмысленно). */
+  visible: boolean
+  /** Геометрию получить не удалось — регион равен всему дисплею. */
+  degraded: boolean
 }
 
 interface AudioCaptureSupport {

@@ -9,6 +9,12 @@ const {
   setupDiagnosticsIpc,
   log,
 } = require("./diagnostics")
+const {
+  startCaptureRegionTracking,
+  stopCaptureRegionTracking,
+  getCaptureRegion,
+  resolveCaptureDisplay,
+} = require("./capture-region")
 
 // Имя приложения задаём ДО initDiagnostics(): app.getPath("userData") строится
 // из app.getName(), а тот берётся из package.json ("productName" || "name").
@@ -208,11 +214,14 @@ function createWindow() {
     if (details.isMainFrame && !details.isSameDocument) {
       stopAudioCapture()
       stopGlobalMouseHook()
+      stopCaptureRegionTracking()
     }
   })
 
   mainWindow.on("closed", () => {
     clearTimeout(forceShowTimer)
+    // PowerShell-воркер держит ссылку на окно — без остановки он пережил бы его.
+    stopCaptureRegionTracking()
     mainWindow = null
   })
 }
@@ -250,6 +259,11 @@ function setupMediaPermissions() {
 // setDisplayMediaRequestHandler должен вернуть Chromium при следующем вызове
 // navigator.mediaDevices.getDisplayMedia().
 let pendingDisplaySourceId = null
+// Последний источник, реально ушедший в демонстрацию. Отличается от pending тем,
+// что не сбрасывается после выдачи потока: overlay-режиму нужно знать, ГДЕ этот
+// источник находится на экране, всё время показа. Сюда попадает и выбор в
+// пикере, и молчаливое переключение на окно показа слайдов PowerPoint.
+let lastDisplaySourceId = null
 
 function setupDesktopCapturer() {
   ipcMain.handle("get-desktop-sources", async () => {
@@ -272,6 +286,12 @@ function setupDesktopCapturer() {
   // ПЕРЕД тем как вызвать штатный getDisplayMedia().
   ipcMain.handle("set-display-source", (_e, sourceId) => {
     pendingDisplaySourceId = sourceId
+    if (typeof sourceId === "string" && sourceId) {
+      lastDisplaySourceId = sourceId
+      // Демонстрация могла переключиться на другое окно уже в overlay-режиме
+      // (показ слайдов) — тогда трекинг геометрии надо перенаправить.
+      if (overlayRestoreState) startCaptureRegionForOverlay()
+    }
     return true
   })
 
@@ -289,7 +309,7 @@ function setupDesktopCapturer() {
   // Здесь мы используем штатный путь: renderer вызывает настоящий
   // navigator.mediaDevices.getDisplayMedia(constraints), Chromium (в Electron 42
   // это Chromium 148, где restrictOwnAudio уже поддержан) применяет
-  // restrictOwnAudio к аудиодорожке, а мы лишь подставляем выбранный источник и
+  // restrictOwnAudio к аудиодорожке, а мы лишь п��дставляем выбранный источник и
   // включаем системный loopback только если звук действительно запрошен.
   // ---------------------------------------------------------------------------
   session.defaultSession.setDisplayMediaRequestHandler(
@@ -579,6 +599,33 @@ function startGlobalMouseHook() {
 // ---------------------------------------------------------------------------
 let overlayRestoreState = null
 
+/**
+ * Старт (или перезапуск) слежения за геометрией демонстрируемого источника.
+ * Renderer получает регион и ограничивает им канвас рисования, поэтому
+ * нормализованные координаты штрихов совпадают с картинкой у зрителей.
+ */
+function startCaptureRegionForOverlay() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  startCaptureRegionTracking({
+    sourceId: lastDisplaySourceId,
+    win: mainWindow,
+    send: (channel, payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(channel, payload)
+      }
+    },
+    // Демонстрируемое окно перетащили на другой монитор — overlay едет за ним,
+    // иначе рисовать по нему просто негде.
+    onDisplayChange: (display) => {
+      if (!mainWindow || mainWindow.isDestroyed() || !overlayRestoreState) return
+      const current = mainWindow.getBounds()
+      const { x, y, width, height } = display.bounds
+      if (current.x === x && current.y === y && current.width === width && current.height === height) return
+      mainWindow.setBounds({ x, y, width, height })
+    },
+  })
+}
+
 function setupOverlayMode() {
   ipcMain.on("enter-overlay-mode", () => {
     if (!mainWindow) return
@@ -590,8 +637,9 @@ function setupOverlayMode() {
       alwaysOnTop: mainWindow.isAlwaysOnTop(),
     }
 
-    const { screen } = require("electron")
-    const display = screen.getDisplayMatching(mainWindow.getBounds())
+    // Целевой монитор считаем от ИСТОЧНИКА, а не от окна приложения: при
+    // демонстрации второго монитора overlay должен накрыть именно его.
+    const display = resolveCaptureDisplay(lastDisplaySourceId, mainWindow)
     const { x, y, width, height } = display.bounds
 
     // Снимаем maximize, иначе setBounds может игнорироваться
@@ -605,10 +653,16 @@ function setupOverlayMode() {
     // сработал hover на контролах и мы временно вернули перехват.
     mainWindow.setIgnoreMouseEvents(true, { forward: true })
     startGlobalMouseHook()
+    startCaptureRegionForOverlay()
   })
+
+  // Текущий регион нужен renderer'у сразу при монтировании overlay-слоя, чтобы
+  // канвас не мигнул на весь экран до первого тика опроса.
+  ipcMain.handle("get-capture-region", () => getCaptureRegion())
 
   ipcMain.on("exit-overlay-mode", () => {
     stopGlobalMouseHook()
+    stopCaptureRegionTracking()
     if (!mainWindow || !overlayRestoreState) return
 
     mainWindow.setIgnoreMouseEvents(false)
@@ -1001,12 +1055,14 @@ app.on("before-quit", () => {
   stopGlobalMouseHook()
   stopAudioCapture()
   stopPresentationWatch()
+  stopCaptureRegionTracking()
 })
 
 app.on("window-all-closed", () => {
   stopGlobalMouseHook()
   stopAudioCapture()
   stopPresentationWatch()
+  stopCaptureRegionTracking()
   if (process.platform !== "darwin") {
     app.quit()
   }

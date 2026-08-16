@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("presentation-source-changed", handler)
   },
 
+  // Прямоугольник демонстрируемого источника в координатах содержимого overlay-окна.
+  // Нужен, чтобы канвас рисования совпадал с картинкой у зрителей, когда
+  // демонстрируется окно, занимающее лишь часть экрана.
+  getCaptureRegion: () => ipcRenderer.invoke("get-capture-region"),
+  onCaptureRegionChanged: (callback) => {
+    const handler = (_e, region) => callback(region)
+    ipcRenderer.on("capture-region-changed", handler)
+    return () => ipcRenderer.removeListener("capture-region-changed", handler)
+  },
+
   // Переход в прозрачный overlay-режим (демонстрация экрана)
   enterOverlayMode: () => ipcRenderer.send("enter-overlay-mode"),
   // Выход из overlay-режима (восстановление нормального окна)

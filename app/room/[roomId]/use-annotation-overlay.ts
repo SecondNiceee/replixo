@@ -6,6 +6,7 @@ import { DEFAULT_PEN_WIDTH, type AnnotationTool } from "@/components/stream-anno
 import type { RemotePeer } from "@/hooks/use-mediasoup"
 import { useAnnotationSettingsStore } from "@/stores/annotation-settings-store"
 import { useAnnotationSettingsSync } from "@/hooks/use-annotation-settings-sync"
+import { useCaptureRegion } from "@/hooks/use-capture-region"
 
 interface UseAnnotationOverlayArgs {
   isScreenSharing: boolean
@@ -27,6 +28,8 @@ interface UseAnnotationOverlayResult {
   triggerAnnotationClear: () => void
   isElectron: boolean
   overlayMode: boolean
+  /** Область демонстрируемого источника на экране (только в overlay-режиме). */
+  captureRegion: CaptureRegion | null
 }
 
 /**
