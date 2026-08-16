@@ -81,20 +81,9 @@ export function usePresenceStatus(userId: string | null | undefined): PresenceSt
     if (s.statuses[userId]) return 'online'
     // Живые данные есть, человека в них нет — значит он честно оффлайн.
     if (s.presenceLoaded) return 'offline'
-    // Живые данные были и пропали (обрыв соединения): снапшот страницы к этому
-    // моменту устарел, и повторять его значило бы держать зелёную точку на
-    // человеке, который ушёл ещё полчаса назад. Честнее «Подключение…».
-    if (s.presenceEverLoaded) return 'unknown'
-    if (fallback.ok) return fallback.statuses[userId] ? 'online' : 'offline'
-
-    // Статусов нет (сокет-сервер не ответил либо websocket ещё поднимается), но
-    // время последнего присутствия у нас есть даже в этом случае: его Next читает
-    // прямо из Postgres. Достаточно давнее время само доказывает оффлайн — пока
-    // человек у экрана, сокет-сервер обновляет его не реже раза в минуту.
-    //
-    // Именно это и убирает «Подключение…» со всего списка: раньше без статусов
-    // каждая строка секунду висела в неизвестности, хотя про большинство друзей
-    // ответ был известен сразу.
+    // Давнее lastSeenAt само по себе доказывает оффлайн даже после разрыва
+    // websocket. Проверяем его ДО presenceEverLoaded: иначе reset скрывал уже
+    // известное «был(а) час назад» за «Подключение…» до нового снапшота.
     const lastSeenAt = s.lastSeenAt[userId] ?? fallback.lastSeenAt[userId]
     if (lastSeenAt !== undefined) {
       // Отсчёт от серверного «сейчас», как и подписи: часы клиента могут
@@ -103,6 +92,12 @@ export function usePresenceStatus(userId: string | null | undefined): PresenceSt
       const now = fallback.serverNow || Date.now()
       if (now - lastSeenAt > LAST_SEEN_PROVES_OFFLINE_MS) return 'offline'
     }
+
+    // Живые данные были и пропали (обрыв соединения): не используем серверный
+    // online-снапшот повторно — он уже устарел. Для свежего lastSeenAt статус
+    // остаётся неизвестным, пока websocket не подключится снова.
+    if (s.presenceEverLoaded) return 'unknown'
+    if (fallback.ok) return fallback.statuses[userId] ? 'online' : 'offline'
 
     return 'unknown'
   })

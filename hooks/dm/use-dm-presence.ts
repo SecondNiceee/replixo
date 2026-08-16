@@ -108,21 +108,26 @@ export function useDmPresence(socket: Socket | null, selfId: string): void {
       setPeerReadAt(conversationId, ts)
     }
 
+    // Сбрасываем live-статусы именно при реальном разрыве соединения. Раньше
+    // reset вызывался в cleanup эффекта, а React запускает cleanup ещё и при
+    // проверочном remount в StrictMode. Из-за этого уже полученный HTTP/sокетный
+    // статус на секунды снова превращался в «Подключение…» до нового снапшота.
+    const onDisconnect = () => reset()
+
     socket.on('dm:presence:snapshot', onSnapshot)
     socket.on('dm:presence', onPresence)
     socket.on('dm:typing', onTyping)
     socket.on('dm:read', onRead)
+    socket.on('disconnect', onDisconnect)
 
     return () => {
       socket.off('dm:presence:snapshot', onSnapshot)
       socket.off('dm:presence', onPresence)
       socket.off('dm:typing', onTyping)
       socket.off('dm:read', onRead)
+      socket.off('disconnect', onDisconnect)
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
-      // Состояние presence достоверно только при живом соединении: после
-      // разрыва «онлайн»-точки надо погасить, а не показывать устаревшие.
-      reset()
     }
   }, [socket, selfId, applyPresenceSnapshot, setPresence, setTyping, setPeerReadAt, reset])
 }
