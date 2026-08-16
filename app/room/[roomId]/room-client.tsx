@@ -211,6 +211,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     triggerAnnotationClear,
     isElectron,
     overlayMode,
+    captureRegion,
   } = useAnnotationOverlay({ isScreenSharing, peers })
 
   // Chat panel state: open/close, unread counter, read receipts, chime, hotkey.
@@ -544,6 +545,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           onToggleMic={toggleMic}
           onToggleCam={handleToggleCam}
           onStopScreenShare={stopScreenShare}
+          captureRegion={captureRegion}
         />
       )}
     </div>

@@ -30,6 +30,11 @@ interface RoomOverlayLayerProps {
   onToggleMic: () => void
   onToggleCam: () => void
   onStopScreenShare: () => void
+  /**
+   * Прямоугольник демонстрируемого источника в CSS-пикселях содержимого
+   * overlay-окна. null (браузер / регион ещё не известен) — канвас на весь экран.
+   */
+  captureRegion?: CaptureRegion | null
 }
 
 /**
@@ -66,12 +71,33 @@ export function RoomOverlayLayer({
   onToggleMic,
   onToggleCam,
   onStopScreenShare,
+  captureRegion = null,
 }: RoomOverlayLayerProps) {
+  // Демонстрируется окно, занимающее часть экрана → канвас должен накрывать
+  // ровно его, иначе нормализованные (0..1) координаты штрихов у зрителей
+  // указывают в другое место. `degraded` = геометрию получить не удалось,
+  // работаем как раньше (весь дисплей).
+  const regionRect = captureRegion && !captureRegion.degraded ? captureRegion.rect : null
+  // Свёрнутое/закрытое окно рисовать незачем: зрители всё равно видят стоп-кадр
+  // или ничего, а штрихи ушли бы в координаты, которых на экране нет.
+  const canvasHidden = Boolean(captureRegion && !captureRegion.visible)
+
   return (
     <>
       <div
         {...{ [OVERLAY_INTERACTIVE_ATTR]: "true" }}
-        className="pointer-events-none fixed inset-0 z-[9990]"
+        className="pointer-events-none fixed z-[9990]"
+        style={
+          regionRect
+            ? {
+                left: regionRect.left,
+                top: regionRect.top,
+                width: regionRect.width,
+                height: regionRect.height,
+                display: canvasHidden ? "none" : undefined,
+              }
+            : { inset: 0, display: canvasHidden ? "none" : undefined }
+        }
       >
         <StreamAnnotationCanvas
           active={annotationActive}

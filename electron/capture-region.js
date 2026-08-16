@@ -170,7 +170,7 @@ function handleWorkerLine(line) {
   state.degraded = false
 
   if (!data.ok) {
-    // Окно закрылось или свернулось: регион остаётся прежним, но канвас скрыт.
+    // Окно закрылось или свернулось: регион о��таётся прежним, но канвас скрыт.
     setRegion(state, state.screenRect, false, false)
     return
   }
@@ -274,9 +274,29 @@ function pollWindowRegion() {
 // -------------------------------------------------------------------------
 // Публикация региона в renderer.
 // -------------------------------------------------------------------------
+/**
+ * Пересечение региона с content-областью overlay-окна. Окно демонстрации может
+ * частично выходить за край монитора (или на соседний) — рисовать вне overlay
+ * физически нельзя, поэтому обрезаем, иначе часть канваса ушла бы за пределы
+ * окна и штрихи в этой зоне не рисовались бы вообще.
+ */
+function clipToWindow(rect, bounds) {
+  const left = Math.max(rect.x, bounds.x)
+  const top = Math.max(rect.y, bounds.y)
+  const right = Math.min(rect.x + rect.width, bounds.x + bounds.width)
+  const bottom = Math.min(rect.y + rect.height, bounds.y + bounds.height)
+  if (right <= left || bottom <= top) return null
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
 function toRendererPayload(state) {
   const bounds = state.win.getContentBounds()
-  const screenRect = state.screenRect || bounds
+  const rawRect = state.screenRect || bounds
+  // Для окна регион может частично лежать за пределами overlay — обрезаем.
+  // Полностью ушедшее за край окно = рисовать негде (visible: false ниже).
+  const clipped = state.kind === "window" ? clipToWindow(rawRect, bounds) : rawRect
+  const screenRect = clipped || rawRect
+  const offscreen = state.kind === "window" && !clipped
   return {
     sourceId: state.sourceId,
     kind: state.kind,
@@ -288,7 +308,7 @@ function toRendererPayload(state) {
       width: screenRect.width,
       height: screenRect.height,
     },
-    visible: state.visible,
+    visible: state.visible && !offscreen,
     degraded: state.degraded,
   }
 }

@@ -140,6 +140,11 @@ export function useAnnotationOverlay({
   // рабочий стол, кроме интерактивных областей (контролы, сайдбар участников).
   useOverlayMouseManager(overlayMode)
 
+  // Геометрия демонстрируемого источника: overlay-окно накрывает весь дисплей,
+  // а зрители видят только захваченное окно. Ограничив канвас этим регионом,
+  // приводим нормализованные координаты штрихов к системе координат зрителя.
+  const captureRegion = useCaptureRegion(overlayMode)
+
   return {
     canAnnotate,
     annotationActive,
@@ -155,5 +160,6 @@ export function useAnnotationOverlay({
     triggerAnnotationClear,
     isElectron,
     overlayMode,
+    captureRegion,
   }
 }
