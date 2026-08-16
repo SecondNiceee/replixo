@@ -20,6 +20,13 @@ interface DmComposerProps {
 const MAX_LENGTH = 4000
 /** Предел роста поля ввода: дальше появляется собственный скролл. */
 const MAX_HEIGHT = 140
+/**
+ * Высота строки поля ввода в px — та же, что задаёт leading-5 в классах ниже.
+ * Нужна как допуск «пользователь у нижнего края»: точное равенство scrollTop и
+ * максимума не годится, дробные значения при зуме и на HiDPI не сходятся до
+ * пикселя.
+ */
+const LINE_HEIGHT = 20
 /** Больше — неудобно листать превью и незачем: это личный чат, не файлообменник. */
 const MAX_ATTACHMENTS = 10
 
@@ -50,12 +57,48 @@ export function DmComposer({
   const resize = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
+    // Позиция скролла до замеров. Сброс высоты в 'auto' ниже разворачивает поле
+    // на весь контент, браузер на этот миг видит нулевое переполнение и зажимает
+    // scrollTop в 0. Само значение при этом теряется безвозвратно, поэтому
+    // запоминаем его здесь и возвращаем после того, как высота снова задана.
+    const prevScrollTop = el.scrollTop
     // Сначала снимаем прошлую высоту: scrollHeight у зафиксированного по высоте
     // элемента не умеет уменьшаться, и поле не сжималось бы при удалении строк.
     el.style.height = 'auto'
     const full = el.scrollHeight
     el.style.height = `${Math.min(full, MAX_HEIGHT)}px`
-    el.style.overflowY = full > MAX_HEIGHT ? 'auto' : 'hidden'
+    const overflows = full > MAX_HEIGHT
+    el.style.overflowY = overflows ? 'auto' : 'hidden'
+    if (!overflows) return
+
+    // Дальше — доросшее до предела поле. Пока пользователь печатает, каретка
+    // всегда должна быть видна, но простое восстановление prevScrollTop этого не
+    // даёт: на переносе строки контент стал выше, а скролл остался прежним — и
+    // новая строка оказывалась под нижним краем, из-за чего приходилось
+    // подкручивать колесом за собой.
+    //
+    // Ставим scrollTop так, чтобы низ содержимого совпал с низом поля: каретка
+    // при наборе стоит в последней строке, значит именно её и нужно показать.
+    // Проверка «был ли пользователь у самого низа» (в пределах строки) оставляет
+    // возможность спокойно перечитать начало длинного черновика — если он
+    // отлистал выше, позицию не трогаем.
+    const maxScrollTop = el.scrollHeight - el.clientHeight
+    const wasNearBottom = prevScrollTop >= maxScrollTop - LINE_HEIGHT
+    el.scrollTop = wasNearBottom ? maxScrollTop : prevScrollTop
+  }, [])
+
+  // Каретку двигают не только новые символы: клик мышью, стрелки, Home/End и
+  // выделение прокручивают поле сами, а эффект по text на это не реагирует. Без
+  // синхронизации переход стрелкой вверх за пределы видимой части оставлял бы
+  // каретку за краем.
+  const keepCaretVisible = useCallback(() => {
+    const el = textareaRef.current
+    if (!el || el.scrollHeight <= el.clientHeight) return
+    // Курсор в конце текста — единственный случай, который можно вычислить без
+    // измерения позиции каретки: показываем низ содержимого.
+    if (el.selectionStart === el.value.length && el.selectionStart === el.selectionEnd) {
+      el.scrollTop = el.scrollHeight - el.clientHeight
+    }
   }, [])
 
   // При переключении диалога черновик и вложение сбрасываем: ссылка вложения
@@ -342,6 +385,10 @@ export function DmComposer({
             if (e.target.value.trim()) onTyping()
           }}
           onKeyDown={handleKeyDown}
+          // keepCaretVisible — на keyUp, а не keyDown: на момент keyDown каретка
+          // ещё не переехала, и стрелка вниз в последней строке доводила бы
+          // скролл на строку раньше, чем нужно.
+          onKeyUp={keepCaretVisible}
           onPaste={handlePaste}
           rows={1}
           maxLength={MAX_LENGTH}

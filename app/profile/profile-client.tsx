@@ -8,6 +8,10 @@ import { useDmPresence } from '@/hooks/dm/use-dm-presence'
 import { useConversations } from '@/hooks/dm/use-conversations'
 import { useDmStore } from '@/stores/dm-store'
 import { isSelfConversationId, selfConversationId } from '@/lib/chat/conversation-id'
+import {
+  readLastConversationId,
+  writeLastConversationId,
+} from '@/lib/chat/last-conversation'
 import { cn } from '@/lib/utils'
 import { ConversationList } from '@/app/chat/conversation-list'
 import { ConversationView } from '@/app/chat/conversation-view'
@@ -167,6 +171,45 @@ export function ProfileClient({ user }: { user: User }) {
     handledFriendParam.current = friendId
     void openWithFriend(friendId)
   }, [searchParams, openWithFriend])
+
+  // Восстановление последнего открытого диалога после перезагрузки.
+  //
+  // Ждём загрузки списка: пока conversations пуст, нельзя отличить «диалог ещё не
+  // пришёл» от «диалога больше нет» (человека удалили из друзей, переписку
+  // стёрли), и во втором случае открылась бы переписка-призрак, для которой
+  // сервер вернёт 403. Поэтому id из localStorage сверяем с реальным списком.
+  //
+  // Ref-флаг — чтобы это сработало один раз за жизнь страницы: без него
+  // «Назад» сбрасывал бы activeId, эффект видел бы null и тут же открывал
+  // диалог заново.
+  const restored = useRef(false)
+  useEffect(() => {
+    if (restored.current || isLoading) return
+    restored.current = true
+
+    // Глубокая ссылка важнее памяти: если человек пришёл по ?c= или ?u=, он
+    // просил конкретный диалог, а не тот, что был открыт в прошлый раз.
+    if (searchParams.get('c') || searchParams.get('u')) return
+
+    const savedId = readLastConversationId(user.id)
+    if (!savedId) return
+
+    // Собственное «Избранное» в списке есть всегда (строкой, даже до создания в
+    // БД), но идти к нему нужно через openConversation — он дождётся
+    // ensureFavorites, иначе GET сообщений ответит 403.
+    if (isSelfConversationId(savedId)) {
+      openConversation(savedId)
+      return
+    }
+    if (conversations.some((c) => c.id === savedId)) openConversation(savedId)
+  }, [isLoading, conversations, searchParams, openConversation, user.id])
+
+  // Сохраняем выбор. Пишем и null (кнопка «Назад») — это осознанный выход из
+  // переписки, и возвращать в неё после F5 было бы навязчиво.
+  useEffect(() => {
+    if (!restored.current) return
+    writeLastConversationId(user.id, activeId)
+  }, [activeId, user.id])
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0)
 
