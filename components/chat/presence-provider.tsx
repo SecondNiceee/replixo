@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { useDmStore, type PresenceStatus } from '@/stores/dm-store'
+import { LAST_SEEN_PROVES_OFFLINE_MS } from '@/app/chat/types'
 
 // ---------------------------------------------------------------------------
 // Серверный снапшот presence + единственная точка чтения статуса.
@@ -85,6 +86,24 @@ export function usePresenceStatus(userId: string | null | undefined): PresenceSt
     // человеке, который ушёл ещё полчаса назад. Честнее «Подключение…».
     if (s.presenceEverLoaded) return 'unknown'
     if (fallback.ok) return fallback.statuses[userId] ? 'online' : 'offline'
+
+    // Статусов нет (сокет-сервер не ответил либо websocket ещё поднимается), но
+    // время последнего присутствия у нас есть даже в этом случае: его Next читает
+    // прямо из Postgres. Достаточно давнее время само доказывает оффлайн — пока
+    // человек у экрана, сокет-сервер обновляет его не реже раза в минуту.
+    //
+    // Именно это и убирает «Подключение…» со всего списка: раньше без статусов
+    // каждая строка секунду висела в неизвестности, хотя про большинство друзей
+    // ответ был известен сразу.
+    const lastSeenAt = s.lastSeenAt[userId] ?? fallback.lastSeenAt[userId]
+    if (lastSeenAt !== undefined) {
+      // Отсчёт от серверного «сейчас», как и подписи: часы клиента могут
+      // расходиться, а решение должно совпасть с тем, что отрисовано в HTML,
+      // иначе первый кадр после гидрации сменит текст — то самое мигание.
+      const now = fallback.serverNow || Date.now()
+      if (now - lastSeenAt > LAST_SEEN_PROVES_OFFLINE_MS) return 'offline'
+    }
+
     return 'unknown'
   })
 }
