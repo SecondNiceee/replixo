@@ -289,7 +289,7 @@ function setupDesktopCapturer() {
   // Здесь мы используем штатный путь: renderer вызывает настоящий
   // navigator.mediaDevices.getDisplayMedia(constraints), Chromium (в Electron 42
   // это Chromium 148, где restrictOwnAudio уже поддержан) применяет
-  // restrictOwnAudio к аудиодорожке, а мы лишь подставляем выбранный источник и
+  // restrictOwnAudio к аудиодорожке, а мы лишь п��дставляем выбранный источник и
   // включаем системный loopback только если звук действительно запрошен.
   // ---------------------------------------------------------------------------
   session.defaultSession.setDisplayMediaRequestHandler(
@@ -303,6 +303,7 @@ function setupDesktopCapturer() {
         const chosen = requestedId ? sources.find((s) => s.id === requestedId) : sources[0]
         pendingDisplaySourceId = null
         if (!chosen) {
+          console.log("[v0] display-media source not found: %s", requestedId)
           callback({})
           return
         }
@@ -376,6 +377,39 @@ function stopPresentationWatch() {
   return true
 }
 
+// Ищем окно показа слайдов среди всех окон.
+//
+// На заголовок «Показ слайдов PowerPoint» полагаться нельзя: в разных версиях и
+// локализациях Microsoft 365 окно показа называется просто именем документа
+// («Презентация1»), поэтому одного регэкспа недостаточно. Главный признак —
+// окно ПОЯВИЛОСЬ после старта демонстрации и относится к тому же документу.
+function findSlideshowWindow(windows, watch) {
+  const candidates = windows.filter((w) => w.id !== watch.originId)
+
+  // 1. Явный заголовок показа слайдов — самый надёжный признак.
+  const byTitle = candidates.filter((w) => isSlideshowWindow(w.name))
+  const sameDocByTitle = byTitle.find((w) => presentationDocumentKey(w.name) === watch.documentKey)
+  if (sameDocByTitle) return sameDocByTitle
+  if (byTitle.length === 1) return byTitle[0]
+
+  // 2. Новое окно того же документа: так выглядит показ слайдов, когда в
+  // заголовке нет слов «показ слайдов» — только имя презентации.
+  const appeared = candidates.filter((w) => !watch.knownIds.has(w.id))
+  const sameDoc = appeared.find((w) => {
+    if (PRESENTER_VIEW_WINDOW_RE.test(w.name)) return false
+    return presentationDocumentKey(w.name) === watch.documentKey
+  })
+  if (sameDoc) return sameDoc
+
+  // 3. Новое окно того же приложения-презентации (документ переименовали при
+  // показе, либо заголовок не содержит имени файла).
+  return (
+    appeared.find(
+      (w) => !PRESENTER_VIEW_WINDOW_RE.test(w.name) && PRESENTATION_APP_WINDOW_RE.test(w.name),
+    ) || null
+  )
+}
+
 async function pollPresentationWindows() {
   const watch = presentationWatch
   if (!watch || watch.busy) return
@@ -389,13 +423,20 @@ async function pollPresentationWindows() {
     })
     if (presentationWatch !== watch) return
 
-    const slideshowWindows = windows.filter((w) => isSlideshowWindow(w.name))
-    // Сначала показ ИМЕННО той презентации, которую демонстрируют. Если совпадения
-    // по документу нет (заголовок показа может не содержать имени файла — например
-    // «Показ слайдов PowerPoint»), берём единственный найденный показ.
-    const slideshow =
-      slideshowWindows.find((w) => presentationDocumentKey(w.name) === watch.documentKey)
-      || (slideshowWindows.length === 1 ? slideshowWindows[0] : null)
+    const slideshow = findSlideshowWindow(windows, watch)
+
+    // Диагностика: без неё непонятно, что именно видит main — окна показа нет
+    // или его заголовок не распознан.
+    if (!watch.logged || slideshow?.id !== watch.loggedSlideshowId) {
+      watch.logged = true
+      watch.loggedSlideshowId = slideshow?.id ?? null
+      console.log(
+        "[v0] presentation-watch doc=%s slideshow=%s windows=%j",
+        watch.documentKey,
+        slideshow ? `${slideshow.name} (${slideshow.id})` : "none",
+        windows.map((w) => w.name),
+      )
+    }
 
     if (slideshow && slideshow.id !== watch.activeId) {
       watch.activeId = slideshow.id
@@ -427,7 +468,7 @@ async function pollPresentationWindows() {
 }
 
 function setupPresentationWatch() {
-  ipcMain.handle("start-presentation-watch", (_e, payload) => {
+  ipcMain.handle("start-presentation-watch", async (_e, payload) => {
     const sourceId = payload?.sourceId
     const sourceName = String(payload?.sourceName ?? "")
     stopPresentationWatch()
@@ -435,15 +476,35 @@ function setupPresentationWatch() {
     // Следим только за захватом ОКНА приложения-презентации. Для захвата всего
     // экрана переключаться не нужно: показ слайдов и так попадёт в кадр.
     if (typeof sourceId !== "string" || !sourceId.startsWith("window:")) return false
-    if (!PRESENTATION_APP_WINDOW_RE.test(sourceName) && !SLIDESHOW_WINDOW_RE.test(sourceName)) return false
+    if (!PRESENTATION_APP_WINDOW_RE.test(sourceName) && !SLIDESHOW_WINDOW_RE.test(sourceName)) {
+      console.log("[v0] presentation-watch skipped, not a presentation window: %s", sourceName)
+      return false
+    }
+
+    // Снимок уже открытых окон: окно показа слайдов — это то, которое появится
+    // ПОСЛЕ старта. Без снапшота пришлось бы угадывать по заголовку.
+    let knownIds = new Set()
+    try {
+      const windows = await desktopCapturer.getSources({
+        types: ["window"],
+        thumbnailSize: { width: 0, height: 0 },
+      })
+      knownIds = new Set(windows.map((w) => w.id))
+    } catch {
+      /* без снапшота останется детект по заголовку */
+    }
 
     presentationWatch = {
       originId: sourceId,
       activeId: sourceId,
       documentKey: presentationDocumentKey(sourceName),
+      knownIds,
       busy: false,
+      logged: false,
+      loggedSlideshowId: null,
       timer: setInterval(pollPresentationWindows, PRESENTATION_POLL_MS),
     }
+    console.log("[v0] presentation-watch started doc=%s src=%s", presentationWatch.documentKey, sourceName)
     return true
   })
 

@@ -298,7 +298,7 @@ export function useMediaControls({
           selectedMicIdRef.current = undefined
           setMicNotice("Микрофон не найден. Подключите устройство и нажмите кнопку микрофона снова.")
         } else {
-          setMicNotice("Не удалось включить микрофон. Нажмите кнопку микрофона, чтобы попробовать снова.")
+          setMicNotice("Не удалось включить микрофон. Нажмите кноп��у микрофона, чтобы попробовать снова.")
         }
       } finally {
         audioPublishLockRef.current = false
@@ -994,7 +994,10 @@ export function useMediaControls({
     const stream = screenStreamRef.current
     const producer = screenVideoProducerRef.current
     const oldTrack = stream?.getVideoTracks()[0]
-    if (!stream || !producer || producer.closed || !oldTrack) return false
+    if (!stream || !producer || producer.closed || !oldTrack) {
+      console.log("[v0] switch skipped: no active screen producer/track")
+      return false
+    }
 
     screenSourceSwitchInFlightRef.current = true
     let nextStream: MediaStream | null = null
@@ -1026,6 +1029,7 @@ export function useMediaControls({
       stream.removeTrack(oldTrack)
       oldTrack.stop()
       activeScreenSourceRef.current = info.sourceId
+      console.log("[v0] screen source switched to:", info.name, info.kind)
 
       nextTrack.onended = () => {
         if (screenStreamRef.current !== stream) return
@@ -1181,8 +1185,10 @@ export function useMediaControls({
       const picked = isElectronRuntime() && videoTrack ? getLastDisplaySource() : null
       presentationOriginRef.current = picked
       activeScreenSourceRef.current = picked?.id ?? null
+      console.log("[v0] screen-share started, electron:", isElectronRuntime(), "picked:", picked)
       if (picked) {
         const stopFollow = followPresentationWindow(picked, (info) => {
+          console.log("[v0] presentation source changed:", info)
           void switchScreenCaptureSourceRef.current(info)
         })
         // Не перезаписываем уже собранную очистку (слушатели аудио) — дополняем.
