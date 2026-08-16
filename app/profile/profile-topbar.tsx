@@ -237,6 +237,13 @@ export function ProfileTopbar({
           onStart={(roomCode) => {
             window.location.href = `/room/${roomCode}?create=true`
           }}
+          // В кабинете кнопка «Начать звонок» одна, поэтому вход по коду живёт
+          // внутри её диалога (на лендинге для этого есть отдельная кнопка
+          // рядом). Без ?create=true: комната уже создана организатором, и флаг
+          // здесь означал бы попытку создать её заново.
+          onJoin={(roomCode) => {
+            window.location.href = `/room/${roomCode}`
+          }}
         />
       )}
     </header>
