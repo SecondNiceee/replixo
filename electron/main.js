@@ -116,7 +116,7 @@ function loadAppUrl() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.loadURL(APP_URL).catch((error) => {
     // loadURL реджектится тем же кодом, что придёт в did-fail-load, поэтому
-    // саму повторную попытку планирует обработчик события — здесь только лог.
+    // саму повторную попытку планирует обработчик события — зде��ь только лог.
     log.warn("load", "loadURL rejected", error?.message || error)
   })
 }
@@ -296,7 +296,11 @@ function setupDesktopCapturer() {
     async (request, callback) => {
       try {
         const sources = await desktopCapturer.getSources({ types: ["screen", "window"] })
-        const chosen = sources.find((s) => s.id === pendingDisplaySourceId) || sources[0]
+        const requestedId = pendingDisplaySourceId
+        // Если источник запрошен явно, но исчез (окно успело закрыться) — отказ.
+        // Молчаливый fallback на sources[0] означал бы, что вместо окна показа
+        // слайдов в трансляцию внезапно уходит весь рабочий стол.
+        const chosen = requestedId ? sources.find((s) => s.id === requestedId) : sources[0]
         pendingDisplaySourceId = null
         if (!chosen) {
           callback({})
@@ -328,9 +332,16 @@ function setupDesktopCapturer() {
 // Окно «Режим докладчика» (Presenter View) исключаем: показ слайдов для
 // зрителей — это другое окно, и переключаться надо именно на него.
 // ---------------------------------------------------------------------------
-const POWERPOINT_WINDOW_RE = /powerpoint|\.pptx?(\s|$|\])/i
-const SLIDESHOW_WINDOW_RE = /powerpoint\s+slide\s+show|показ\s+слайдов|слайд-шоу/i
-const PRESENTER_VIEW_WINDOW_RE = /presenter\s+view|режим\s+докладчика/i
+// Приложение-презентация в заголовке выбранного окна. Кроме PowerPoint сюда
+// попадают Impress и Keynote — у них показ слайдов тоже отдельное окно.
+const PRESENTATION_APP_WINDOW_RE = /powerpoint|impress|keynote|\.pptx?(\s|$|\])|\.odp(\s|$|\])|\.key(\s|$|\])/i
+// Заголовок окна показа слайдов. У PowerPoint он локализованный
+// («Показ слайдов PowerPoint — [Презентация1]» / «PowerPoint Slide Show»),
+// у Impress — «Презентация» / «Presentation».
+const SLIDESHOW_WINDOW_RE = /powerpoint\s+slide\s+show|показ\s+слайдов|слайд-шоу|slide\s*show|impress\s+presentation/i
+// Окно «Режим докладчика» (Presenter View) исключаем: зрителям надо отдавать
+// именно окно показа, а не заметки докладчика.
+const PRESENTER_VIEW_WINDOW_RE = /presenter\s+view|presenter\s+console|режим\s+докладчика|консоль\s+докладчика/i
 
 // Опрашиваем список окон: событий «появилось окно другого приложения» в
 // Electron нет, а WGC-захват стартует только по идентификатору окна.
@@ -340,6 +351,22 @@ let presentationWatch = null
 
 function isSlideshowWindow(name) {
   return SLIDESHOW_WINDOW_RE.test(name) && !PRESENTER_VIEW_WINDOW_RE.test(name)
+}
+
+// Имя документа из заголовка окна: «Отчёт.pptx - PowerPoint» → «отчёт»,
+// «Показ слайдов PowerPoint - [Отчёт]» → «отчёт». Нужно, чтобы не переключиться
+// на показ ДРУГОЙ презентации, открытой в том же PowerPoint параллельно.
+function presentationDocumentKey(name) {
+  const bracketed = name.match(/\[([^\]]+)\]/)
+  const raw = bracketed
+    ? bracketed[1]
+    : name.split(/\s+[-–—]\s+/).find((part) => !/^\s*(powerpoint|impress|keynote)\s*$/i.test(part)) || name
+  return raw
+    .replace(/\.(pptx?|odp|key)\s*$/i, "")
+    .replace(/\s*[-–—]\s*(powerpoint|impress|keynote).*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
 }
 
 function stopPresentationWatch() {
@@ -362,7 +389,13 @@ async function pollPresentationWindows() {
     })
     if (presentationWatch !== watch) return
 
-    const slideshow = windows.find((w) => isSlideshowWindow(w.name))
+    const slideshowWindows = windows.filter((w) => isSlideshowWindow(w.name))
+    // Сначала показ ИМЕННО той презентации, которую демонстрируют. Если совпадения
+    // по документу нет (заголовок показа может не содержать имени файла — например
+    // «Показ слайдов PowerPoint»), берём единственный найденный показ.
+    const slideshow =
+      slideshowWindows.find((w) => presentationDocumentKey(w.name) === watch.documentKey)
+      || (slideshowWindows.length === 1 ? slideshowWindows[0] : null)
 
     if (slideshow && slideshow.id !== watch.activeId) {
       watch.activeId = slideshow.id
@@ -402,11 +435,12 @@ function setupPresentationWatch() {
     // Следим только за захватом ОКНА приложения-презентации. Для захвата всего
     // экрана переключаться не нужно: показ слайдов и так попадёт в кадр.
     if (typeof sourceId !== "string" || !sourceId.startsWith("window:")) return false
-    if (!POWERPOINT_WINDOW_RE.test(sourceName) && !SLIDESHOW_WINDOW_RE.test(sourceName)) return false
+    if (!PRESENTATION_APP_WINDOW_RE.test(sourceName) && !SLIDESHOW_WINDOW_RE.test(sourceName)) return false
 
     presentationWatch = {
       originId: sourceId,
       activeId: sourceId,
+      documentKey: presentationDocumentKey(sourceName),
       busy: false,
       timer: setInterval(pollPresentationWindows, PRESENTATION_POLL_MS),
     }
