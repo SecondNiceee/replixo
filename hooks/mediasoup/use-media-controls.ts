@@ -14,6 +14,13 @@ import {
   getRawMicTrack,
   type MicCapture,
 } from "@/lib/mic-gate"
+import {
+  adoptNativeScreenAudio,
+  captureElectronSource,
+  followPresentationWindow,
+  getLastDisplaySource,
+  isElectronRuntime,
+} from "@/lib/electron-screen-capture"
 import { rememberProducerTransport, isProducerOnStaleTransport } from "./producer-transport"
 import { SCREEN_QUALITY_PRESETS } from "./types"
 import type { Transport, Producer, ScreenQuality } from "./types"
@@ -170,6 +177,17 @@ export function useMediaControls({
   // though recoverCamera is declared further down.
   const recoverCameraRef = useRef<() => Promise<boolean>>(async () => false)
   const screenCaptureCleanupRef = useRef<(() => void) | null>(null)
+  // Окно, выбранное пользователем в пикере: к нему возвращаемся, когда показ
+  // слайдов PowerPoint закрывают, чтобы не прерывать демонстрацию.
+  const presentationOriginRef = useRef<{ id: string; name: string } | null>(null)
+  // Источник, который прямо сейчас в кадре (окно редактора или окно показа).
+  const activeScreenSourceRef = useRef<string | null>(null)
+  const screenSourceSwitchInFlightRef = useRef(false)
+  // Indirection: переключение источника ссылается на само себя (возврат к окну
+  // редактора, когда дорожка показа слайдов закончилась).
+  const switchScreenCaptureSourceRef = useRef<(info: PresentationSourceChange) => Promise<boolean>>(
+    async () => false,
+  )
 
   // Mirror of watchCameraTrack for audio: react the instant the OS/browser kills
   // the microphone (device unplugged, driver reset, exclusive-mode grab) instead
@@ -935,6 +953,9 @@ export function useMediaControls({
 
     screenCaptureCleanupRef.current?.()
     screenCaptureCleanupRef.current = null
+    // Слежение за окном показа слайдов живёт ровно столько, сколько сессия.
+    presentationOriginRef.current = null
+    activeScreenSourceRef.current = null
 
     for (const producer of [screenVideoProducerRef.current, screenAudioProducerRef.current]) {
       if (!producer) continue
@@ -955,8 +976,91 @@ export function useMediaControls({
   }, [roomId, peerIdRef, socketRef, screenVideoProducerRef, screenAudioProducerRef,
       screenStreamRef, dispatch])
 
+  // ---------------------------------------------------------------------------
+  // PowerPoint: показ слайдов — ОТДЕЛЬНОЕ окно.
+  //
+  // Мы захватываем конкретное окно, поэтому зритель продолжал видеть редактор
+  // после нажатия «Показ слайдов». main-процесс следит за окнами PowerPoint
+  // (см. setupPresentationWatch в electron/main.js) и присылает сюда новый
+  // источник. Здесь мы молча подменяем видеодорожку через replaceTrack: producer
+  // и transport остаются те же, поэтому у зрителей нет разрыва потока и
+  // переподписки — только смена картинки, как в Zoom.
+  // ---------------------------------------------------------------------------
+  const switchScreenCaptureSource = useCallback(async (info: PresentationSourceChange): Promise<boolean> => {
+    // Уже смотрим на это окно (main присылает событие и после возврата дорожки).
+    if (activeScreenSourceRef.current === info.sourceId) return true
+    if (screenSourceSwitchInFlightRef.current) return false
+
+    const stream = screenStreamRef.current
+    const producer = screenVideoProducerRef.current
+    const oldTrack = stream?.getVideoTracks()[0]
+    if (!stream || !producer || producer.closed || !oldTrack) return false
+
+    screenSourceSwitchInFlightRef.current = true
+    let nextStream: MediaStream | null = null
+    let handedOver = false
+    try {
+      const preset = SCREEN_QUALITY_PRESETS[screenQualityRef.current]
+      nextStream = await captureElectronSource(info.sourceId, preset.video)
+      const nextTrack = nextStream.getVideoTracks()[0]
+      if (!nextTrack) return false
+
+      // Демонстрацию могли остановить, пока открывался захват нового окна.
+      if (screenStreamRef.current !== stream || screenVideoProducerRef.current !== producer || producer.closed) {
+        return false
+      }
+
+      if ("contentHint" in nextTrack) nextTrack.contentHint = "detail"
+      await producer.replaceTrack({ track: nextTrack })
+
+      // Нативный WASAPI-звук экрана привязан к прежней видеодорожке: без
+      // передачи владения stop() ниже оборвал бы звук посреди показа.
+      adoptNativeScreenAudio(oldTrack, nextTrack)
+      handedOver = true
+
+      // Новую дорожку добавляем ДО удаления старой: если звука в захвате нет,
+      // поток на миг остался бы без дорожек и Chromium прислал бы "inactive",
+      // то есть демонстрация остановилась бы сама.
+      stream.addTrack(nextTrack)
+      oldTrack.onended = null
+      stream.removeTrack(oldTrack)
+      oldTrack.stop()
+      activeScreenSourceRef.current = info.sourceId
+
+      nextTrack.onended = () => {
+        if (screenStreamRef.current !== stream) return
+        const origin = presentationOriginRef.current
+        // Окно показа слайдов закрылось — возвращаемся к окну редактора, не
+        // прерывая демонстрацию. Если и его больше нет, показ действительно
+        // закончился.
+        if (info.kind === "slideshow" && origin && origin.id !== info.sourceId) {
+          activeScreenSourceRef.current = null
+          void switchScreenCaptureSourceRef.current({
+            sourceId: origin.id, name: origin.name, kind: "origin",
+          }).then((restored) => { if (!restored) stopScreenShare() })
+          return
+        }
+        stopScreenShare()
+      }
+      return true
+    } catch (error) {
+      console.error("[media] Presentation window switch failed", error)
+      return false
+    } finally {
+      // Дорожки неудавшегося захвата не должны держать окно открытым.
+      if (!handedOver) nextStream?.getTracks().forEach((track) => track.stop())
+      screenSourceSwitchInFlightRef.current = false
+    }
+  }, [screenStreamRef, screenVideoProducerRef, screenQualityRef, stopScreenShare])
+
+  switchScreenCaptureSourceRef.current = switchScreenCaptureSource
+
   const recoverScreenShare = useCallback(async () => {
     if (screenRecoveryInFlightRef.current) return false
+    // Смена окна на показ слайдов на миг оставляет дорожку "ended": без этого
+    // recovery принял бы её за прекращённый захват и снёс демонстрацию ровно в
+    // момент запуска презентации.
+    if (screenSourceSwitchInFlightRef.current) return true
     const stream = screenStreamRef.current
     const videoTrack = stream?.getVideoTracks()[0]
     if (!stream || !videoTrack || videoTrack.readyState !== "live") {
@@ -1070,6 +1174,24 @@ export function useMediaControls({
       }
       displayStream.addEventListener("inactive", handleCaptureEnded)
       if (videoTrack) videoTrack.onended = handleCaptureEnded
+
+      // Electron: начинаем следить за окнами PowerPoint. Патч getDisplayMedia
+      // запомнил выбор пользователя в пикере — только по заголовку окна main
+      // понимает, что захвачена презентация.
+      const picked = isElectronRuntime() && videoTrack ? getLastDisplaySource() : null
+      presentationOriginRef.current = picked
+      activeScreenSourceRef.current = picked?.id ?? null
+      if (picked) {
+        const stopFollow = followPresentationWindow(picked, (info) => {
+          void switchScreenCaptureSourceRef.current(info)
+        })
+        // Не перезаписываем уже собранную очистку (слушатели аудио) — дополняем.
+        const previousCleanup = screenCaptureCleanupRef.current
+        screenCaptureCleanupRef.current = () => {
+          previousCleanup?.()
+          stopFollow()
+        }
+      }
 
       dispatch({ type: "SET_SCREEN_SHARING", isSharing: true })
       if (!options?.silent) playScreenShareSound()
