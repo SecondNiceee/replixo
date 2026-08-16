@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Loader2, Paperclip, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatFileSize, isImageAttachment } from '@/lib/chat-format'
 import { normalizeAttachment, type DmAttachment } from './types'
@@ -40,12 +39,6 @@ export function DmComposer({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Поле ввода — такой же скроллируемый контейнер, как лента и список диалогов,
-  // поэтому и полоса у него та же: тонкая, проявляющаяся на время скролла
-  // (.scroll-slim + этот хук). Без хука класс сам по себе бесполезен — он рисует
-  // thumb прозрачным, а показать его может только атрибут data-scrolling.
-  useScrollbarAutohide(textareaRef)
 
   // Подгонка высоты под содержимое.
   //
@@ -360,11 +353,10 @@ export function DmComposer({
           // form выравнивает по нижнему краю, скрепка оказывалась выше центра
           // строки. Теперь одна строка совпадает с кнопкой по высоте, а при
           // росте поля кнопки остаются по центру последней строки.
-          // scroll-slim-inset: в скруглённом поле полоса прокрутки прижималась
-          // к самому изгибу правого края и торчала за рамкой — класс сдвигает
-          // thumb внутрь. pr-3 (вместо px-4) отдаёт эти 8px под гуттер полосы,
-          // чтобы текст длинной строки под ней не проезжал.
-          className="scroll-slim scroll-slim-inset max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-2xl border border-transparent bg-foreground/5 py-2.5 pl-4 pr-3 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
+          // scroll-none: длинное сообщение по-прежнему листается, но полосы у
+          // строки ввода нет совсем — в поле высотой в пару строк она только
+          // шумит. Раз гуттер не нужен, отступы снова симметричные (px-4).
+          className="scroll-none max-h-[140px] min-h-10 flex-1 resize-none select-text rounded-md border border-transparent bg-foreground/5 px-4 py-2.5 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-card"
         />
         <Button
           type="submit"
