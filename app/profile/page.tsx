@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
 import { listFriends } from '@/lib/chat/friends'
 import { listConversations } from '@/lib/chat/conversations'
-import { fetchPresence } from '@/lib/chat/presence'
+import { completePresence, fetchPresence } from '@/lib/chat/presence'
 import { ProfileClient } from './profile-client'
 import { ProfileBoot } from './profile-boot'
 
@@ -24,16 +24,27 @@ export default async function ProfilePage() {
   // Списки и статусы снимаем здесь, а не в браузере: пока запросы летели с
   // клиента, первый кадр рисовался без статусов вовсе, и у людей в сети на
   // долю секунды мигало «не в сети».
-  const [friends, conversations] = await Promise.all([
+  //
+  // Все три запроса идут ОДНОВРЕМЕННО. Раньше presence ждал список друзей, чтобы
+  // передать их id, и задержки складывались; теперь список резолвит сам
+  // сокет-сервер по одному userId (см. fetchPresence), и последовательной
+  // цепочки здесь больше нет.
+  //
+  // fetchPresence не бросает и ограничен таймаутом 500 мс: недоступный
+  // сокет-сервер не задержит страницу и не сломает её.
+  const [friends, conversations, rawPresence] = await Promise.all([
     listFriends(session.user.id),
     listConversations(session.user.id),
+    fetchPresence(session.user.id),
   ])
 
   // Собеседники диалогов — это друзья, поэтому один список id покрывает и чаты.
-  // fetchPresence не бросает и ограничен таймаутом 500 мс: недоступный
-  // сокет-сервер не задержит страницу и не сломает её — вернётся ok: false, и
-  // подпись честно скажет «Подключение…».
-  const snapshot = await fetchPresence(friends.map((f) => f.friendId))
+  //
+  // completePresence дочитывает lastSeenAt из Postgres для тех, о ком сокет-сервер
+  // не рассказал. Без этого шага незаданный INTERNAL_HOOK_SECRET (состояние по
+  // умолчанию) означал пустой снапшот, и «Подключение…» висело на каждой строке
+  // до подключения websocket — то самое мигание на секунду.
+  const snapshot = await completePresence(rawPresence, friends.map((f) => f.friendId))
 
   // serverNow снимаем здесь, а не в браузере: относительные подписи («был(а)
   // только что» / «был(а) 1 минуту назад») считаются от «сейчас», и часы

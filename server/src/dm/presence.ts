@@ -165,6 +165,16 @@ const CALL_STALE_MS = 180_000
 const FRIENDS_TTL_MS = 30_000
 const friendsCache = new Map<string, { ids: string[]; at: number }>()
 
+/**
+ * Друзья пользователя, через кэш. Экспортируется ради /internal/presence: Next
+ * спрашивает «кто из друзей этого человека в сети», не перечисляя их сам, —
+ * иначе его запрос к сокет-серверу пришлось бы выстраивать в цепочку за своим
+ * же SELECT'ом списка друзей. Здесь тот же список чаще всего уже в кэше.
+ */
+export async function friendIdsOf(userId: string): Promise<string[]> {
+  return friendsOf(userId)
+}
+
 async function friendsOf(userId: string): Promise<string[]> {
   const cached = friendsCache.get(userId)
   const now = Date.now()
@@ -214,7 +224,7 @@ export function statusOf(userId: string): PresenceStatus {
   return 'offline'
 }
 
-/** Статусы сразу для списка пользователей — для снапшота и /internal/presence. */
+/** Статусы сразу для списка пользователей �� для снапшота и /internal/presence. */
 export function statusesFor(userIds: string[]): Record<string, PresenceStatus> {
   const result: Record<string, PresenceStatus> = {}
   for (const id of userIds) {
@@ -515,7 +525,7 @@ function sweepStaleSockets(nsp: Namespace): void {
       flushLastSeen(userId, at, true)
       void broadcastStatus(nsp, userId, 'offline', at)
     } else {
-      // Остались соединения, но сводный статус мог стать любым, включая offline
+      // Остались соединения, но св��дный статус мог стать любым, включая offline
       // (все выжившие вкладки в фоне) — тогда helper приложит lastSeenAt.
       void broadcastCurrentStatus(nsp, userId)
     }

@@ -12,8 +12,22 @@
 // Источник истины у двух половин ответа разный (см. server/src/dm/presence.ts):
 // статус online живёт в памяти сокет-сервера, lastSeenAt — в Postgres.
 // Спросить их одним запросом можно только у сокет-сервера, поэтому ходим туда.
+//
+// Две вещи, из-за которых этот путь раньше стоил секунду на каждое открытие
+// кабинета:
+//
+//   • Запрос ЖДАЛ список друзей, чтобы передать их id. Два обращения к одной и
+//     той же БД выстраивались в цепочку, хотя сокет-сервер и сам знает, кто с
+//     кем дружит (и держит этот список в кэше). Теперь спрашиваем «статусы
+//     друзей вот этого пользователя», и запрос уходит одновременно со списком.
+//
+//   • Без INTERNAL_HOOK_SECRET он не уходил вовсе и возвращал пустоту, а пустой
+//     снапшот — это «не знаем», то есть «Подключение…» на КАЖДОЙ строке.
+//     Незаданный секрет — состояние по умолчанию, поэтому теперь есть фолбэк:
+//     lastSeenAt Next читает из Postgres сам (см. completePresence).
 // ---------------------------------------------------------------------------
 
+import { fetchLastSeen } from './last-seen'
 import { serverBaseUrl } from './internal-url'
 
 /** Статусов два: см. PresenceStatus в server/src/dm/presence.ts. */
@@ -25,6 +39,9 @@ export interface PresenceSnapshot {
    * сети» или «спросить не удалось», и различать их обязательно: в первом случае
    * про человека честно известно, что он оффлайн, во втором про него не известно
    * ничего, и рисовать «не в сети» нельзя (см. presenceLabel: 'unknown').
+   *
+   * Относится ТОЛЬКО к statuses. lastSeenAt может быть заполнен и при ok: false —
+   * его Next читает из БД без всякого сокет-сервера.
    */
   ok: boolean
   /** userId → статус. Оффлайн не передаётся: это состояние по умолчанию. */
@@ -49,8 +66,9 @@ function warnMissingSecretOnce(): void {
   if (missingSecretWarned) return
   missingSecretWarned = true
   console.warn(
-    '[presence] INTERNAL_HOOK_SECRET не задан — статусы в HTTP-ответах отключены. ' +
-      'Точки «в сети» появятся только после подключения websocket.',
+    '[presence] INTERNAL_HOOK_SECRET не задан — статусы «в сети» в HTTP-ответах ' +
+      'отключены (зелёные точки появятся только после подключения websocket). ' +
+      'Время последнего присутствия читается из БД и работает без него.',
   )
 }
 
@@ -79,17 +97,18 @@ function parseSnapshot(raw: unknown): PresenceSnapshot {
 }
 
 /**
- * Статусы и время последнего присутствия для списка пользователей.
+ * Статусы и время последнего присутствия ДРУЗЕЙ указанного пользователя.
+ *
+ * Список друзей сюда не передаётся намеренно: его резолвит сокет-сервер, у
+ * которого он уже лежит в кэше (friendIdsOf). Благодаря этому запрос можно
+ * запустить одновременно с listFriends, а не после него — раньше два обращения к
+ * одной БД шли цепочкой и складывали задержки.
  *
  * Никогда не бросает: presence — украшение поверх основных данных, и упавший
  * сокет-сервер не должен превращать список друзей в 500. В худшем случае
- * возвращается пустой снапшот, а клиент дождётся статусов по websocket.
+ * возвращается ok: false — тогда статусы дополнит completePresence и websocket.
  */
-export async function fetchPresence(userIds: string[]): Promise<PresenceSnapshot> {
-  // Спрашивать не о ком — а значит и «не удалось спросить» тут не про что:
-  // отдаём ok, иначе пустой список друзей навсегда остался бы в «Подключение…».
-  if (userIds.length === 0) return { ok: true, statuses: {}, lastSeenAt: {} }
-
+export async function fetchPresence(userId: string): Promise<PresenceSnapshot> {
   const secret = process.env.INTERNAL_HOOK_SECRET
   if (!secret) {
     warnMissingSecretOnce()
@@ -100,7 +119,7 @@ export async function fetchPresence(userIds: string[]): Promise<PresenceSnapshot
     const res = await fetch(`${serverBaseUrl()}/internal/presence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
-      body: JSON.stringify({ userIds }),
+      body: JSON.stringify({ ownerId: userId }),
       cache: 'no-store',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
@@ -113,6 +132,33 @@ export async function fetchPresence(userIds: string[]): Promise<PresenceSnapshot
     console.error('[presence] сокет-сервер недоступен:', (e as Error).message)
     return EMPTY_PRESENCE
   }
+}
+
+/**
+ * Дополнить снапшот тем, что Next может узнать сам.
+ *
+ * Вызывается всегда, а не только при ok: false, и причина не в перестраховке.
+ * Сокет-сервер отдаёт lastSeenAt для СВОЕГО представления о списке друзей, а
+ * страница рисует своё — они разъезжаются на время кэша (FRIENDS_TTL_MS, 30 с),
+ * и только что принятый друг оказался бы в списке без времени. Запрос по id из
+ * страницы закрывает эту дыру и стоит один индексный SELECT.
+ *
+ * Значения сокет-сервера имеют приоритет: у него в памяти есть время, которое в
+ * БД ещё не сброшено (запись троттлится, см. LAST_SEEN_FLUSH_MS).
+ */
+export async function completePresence(
+  snapshot: PresenceSnapshot,
+  friendIds: string[],
+): Promise<PresenceSnapshot> {
+  // Спрашивать не о ком — а значит и «не удалось спросить» тут не про что:
+  // отдаём ok, иначе пустой список друзей навсегда остался бы в «Подключение…».
+  if (friendIds.length === 0) return { ok: true, statuses: {}, lastSeenAt: {} }
+
+  const missing = friendIds.filter((id) => snapshot.lastSeenAt[id] === undefined)
+  if (missing.length === 0) return snapshot
+
+  const fromDb = await fetchLastSeen(missing)
+  return { ...snapshot, lastSeenAt: { ...fromDb, ...snapshot.lastSeenAt } }
 }
 
 /**
