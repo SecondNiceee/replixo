@@ -484,6 +484,65 @@ html[data-overlay='1'] .desktop-titlebar {
     height: 0;
     display: none;
   }
+
+  /* ---------------------------------------------------------------------------
+     Волосяной скролл (.scroll-hairline)
+     ---------------------------------------------------------------------------
+     Для строки ввода сообщения. Полоса в 8px (.scroll-slim) в поле высотой в
+     пару строк выглядит непропорционально широкой, а полное её отсутствие
+     (.scroll-none) лишает подсказки, что текст уехал за верхний край. Здесь
+     середина: 4px, вдвое уже обычной.
+
+     Thumb виден всегда, без data-scrolling: автоскрытие в .scroll-slim ставит
+     JS-хук на прокручиваемом контейнере, а у поля ввода прокрутка своя,
+     внутренняя, и такого хука на нём нет — с автоскрытием полоса не появлялась
+     бы вообще никогда.
+     --------------------------------------------------------------------------- */
+  @supports not selector(::-webkit-scrollbar) {
+    .scroll-hairline {
+      /* Firefox не умеет произвольную ширину — thin здесь его минимум. */
+      scrollbar-width: thin;
+      scrollbar-color: oklch(1 0 0 / 22%) transparent;
+    }
+  }
+
+  .scroll-hairline::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scroll-hairline::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Кнопки-стрелки на концах — по той же причине, что и в .scroll-slim:
+     Chrome/Edge на Windows рисуют их по умолчанию, и в полосе такой ширины они
+     превращаются в две неопрятные засечки. */
+  .scroll-hairline::-webkit-scrollbar-button,
+  .scroll-hairline::-webkit-scrollbar-button:single-button,
+  .scroll-hairline::-webkit-scrollbar-button:vertical:start,
+  .scroll-hairline::-webkit-scrollbar-button:vertical:end,
+  .scroll-hairline::-webkit-scrollbar-button:vertical:increment,
+  .scroll-hairline::-webkit-scrollbar-button:vertical:decrement {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    background: transparent !important;
+  }
+
+  .scroll-hairline::-webkit-scrollbar-thumb {
+    background-color: oklch(1 0 0 / 22%);
+    border-radius: 999px;
+    transition: background-color 200ms ease;
+  }
+
+  .scroll-hairline::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(1 0 0 / 36%);
+  }
+
+  .scroll-hairline::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @layer base {
