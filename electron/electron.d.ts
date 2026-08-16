@@ -13,6 +13,12 @@ interface ElectronAPI {
   getDesktopSources: () => Promise<DesktopSource[]>
   // Передаёт выбранный источник в main для setDisplayMediaRequestHandler
   setDisplaySource: (sourceId: string) => Promise<boolean>
+  // Слежение за окном показа слайдов PowerPoint (см. electron/main.js)
+  startPresentationWatch: (payload: { sourceId: string; sourceName: string }) => Promise<boolean>
+  stopPresentationWatch: () => Promise<boolean>
+  onPresentationSourceChanged: (
+    callback: (info: PresentationSourceChange) => void,
+  ) => () => void
   // Overlay-режим (демонстрация экрана)
   enterOverlayMode: () => void
   exitOverlayMode: () => void
@@ -44,6 +50,14 @@ interface ElectronAPI {
   // Диагностика крашей: путь к main.log и открытие папки логов.
   getLogPath: () => Promise<string | null>
   openLogsFolder: () => Promise<boolean>
+}
+
+interface PresentationSourceChange {
+  sourceId: string
+  name: string
+  // slideshow — открылось окно показа слайдов; origin — показ закрыт, возврат
+  // к окну, выбранному пользователем в пикере.
+  kind: "slideshow" | "origin"
 }
 
 interface AudioCaptureSupport {

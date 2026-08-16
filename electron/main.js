@@ -315,6 +315,108 @@ function setupDesktopCapturer() {
 }
 
 // ---------------------------------------------------------------------------
+// Слежение за окном слайд-шоу PowerPoint.
+//
+// Мы захватываем КОНКРЕТНОЕ окно (HWND), а PowerPoint открывает показ слайдов
+// в ОТДЕЛЬНОМ полноэкранном окне. Поэтому зритель продолжал видеть окно
+// редактора, хотя докладчик уже запустил показ. Zoom решает это тем же
+// способом: следит за окнами приложения-источника и молча переключает захват
+// на окно показа, а после выхода из показа возвращается к редактору.
+//
+// Определяем окно по заголовку: у показа слайдов он локализованный
+// («Показ слайдов PowerPoint — [Презентация1]» / «PowerPoint Slide Show»).
+// Окно «Режим докладчика» (Presenter View) исключаем: показ слайдов для
+// зрителей — это другое окно, и переключаться надо именно на него.
+// ---------------------------------------------------------------------------
+const POWERPOINT_WINDOW_RE = /powerpoint|\.pptx?(\s|$|\])/i
+const SLIDESHOW_WINDOW_RE = /powerpoint\s+slide\s+show|показ\s+слайдов|слайд-шоу/i
+const PRESENTER_VIEW_WINDOW_RE = /presenter\s+view|режим\s+докладчика/i
+
+// Опрашиваем список окон: событий «появилось окно другого приложения» в
+// Electron нет, а WGC-захват стартует только по идентификатору окна.
+const PRESENTATION_POLL_MS = 900
+
+let presentationWatch = null
+
+function isSlideshowWindow(name) {
+  return SLIDESHOW_WINDOW_RE.test(name) && !PRESENTER_VIEW_WINDOW_RE.test(name)
+}
+
+function stopPresentationWatch() {
+  if (!presentationWatch) return false
+  clearInterval(presentationWatch.timer)
+  presentationWatch = null
+  return true
+}
+
+async function pollPresentationWindows() {
+  const watch = presentationWatch
+  if (!watch || watch.busy) return
+  watch.busy = true
+  try {
+    // thumbnailSize 0x0 — список окон нужен только ради заголовков, кадры не
+    // рендерим, иначе опрос раз в секунду сам бы жёг CPU во время показа.
+    const windows = await desktopCapturer.getSources({
+      types: ["window"],
+      thumbnailSize: { width: 0, height: 0 },
+    })
+    if (presentationWatch !== watch) return
+
+    const slideshow = windows.find((w) => isSlideshowWindow(w.name))
+
+    if (slideshow && slideshow.id !== watch.activeId) {
+      watch.activeId = slideshow.id
+      mainWindow?.webContents.send("presentation-source-changed", {
+        sourceId: slideshow.id,
+        name: slideshow.name,
+        kind: "slideshow",
+      })
+      return
+    }
+
+    // Показ закрыли (вышли из режима демонстрации) — возвращаемся к окну,
+    // которое пользователь выбрал изначально, не прерывая демонстрацию.
+    if (!slideshow && watch.activeId !== watch.originId) {
+      const origin = windows.find((w) => w.id === watch.originId)
+      if (!origin) return
+      watch.activeId = watch.originId
+      mainWindow?.webContents.send("presentation-source-changed", {
+        sourceId: origin.id,
+        name: origin.name,
+        kind: "origin",
+      })
+    }
+  } catch {
+    /* окно могло закрыться между опросами — следующий тик разберётся */
+  } finally {
+    watch.busy = false
+  }
+}
+
+function setupPresentationWatch() {
+  ipcMain.handle("start-presentation-watch", (_e, payload) => {
+    const sourceId = payload?.sourceId
+    const sourceName = String(payload?.sourceName ?? "")
+    stopPresentationWatch()
+
+    // Следим только за захватом ОКНА приложения-презентации. Для захвата всего
+    // экрана переключаться не нужно: показ слайдов и так попадёт в кадр.
+    if (typeof sourceId !== "string" || !sourceId.startsWith("window:")) return false
+    if (!POWERPOINT_WINDOW_RE.test(sourceName) && !SLIDESHOW_WINDOW_RE.test(sourceName)) return false
+
+    presentationWatch = {
+      originId: sourceId,
+      activeId: sourceId,
+      busy: false,
+      timer: setInterval(pollPresentationWindows, PRESENTATION_POLL_MS),
+    }
+    return true
+  })
+
+  ipcMain.handle("stop-presentation-watch", () => stopPresentationWatch())
+}
+
+// ---------------------------------------------------------------------------
 // Управление безрамочным окном из renderer (кастомный титлбар).
 // Так как frame: false убирает нативные кнопки, их заменяет DesktopTitlebar,
 // который шлёт эти IPC-команды.
@@ -846,6 +948,7 @@ function setupAudioCapture() {
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
+  setupPresentationWatch()
   setupWindowControls()
   setupOverlayMode()
   setupClipboard()
@@ -863,11 +966,13 @@ app.whenReady().then(() => {
 app.on("before-quit", () => {
   stopGlobalMouseHook()
   stopAudioCapture()
+  stopPresentationWatch()
 })
 
 app.on("window-all-closed", () => {
   stopGlobalMouseHook()
   stopAudioCapture()
+  stopPresentationWatch()
   if (process.platform !== "darwin") {
     app.quit()
   }

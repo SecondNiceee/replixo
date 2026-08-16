@@ -2,6 +2,11 @@
 
 import { useEffect } from "react"
 import { startNativeScreenAudio } from "@/lib/native-screen-audio"
+import {
+  attachNativeScreenAudioLifecycle,
+  rememberDisplaySource,
+  type ElectronDisplayMediaOptions,
+} from "@/lib/electron-screen-capture"
 
 // Глобальные типы Electron-моста объявлены в electron/electron.d.ts
 // (interface ElectronAPI / DesktopSource / MediaDevices.__electronPatched).
@@ -127,7 +132,16 @@ function patchElectronDisplayMedia() {
   // Fallback (старый Windows / нет helper'а / любая ошибка): показываем пикер и
   // вызываем НАСТОЯЩИЙ getDisplayMedia(constraints) c restrictOwnAudio, как
   // раньше — без регрессии.
-  navigator.mediaDevices.getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
+  navigator.mediaDevices.getDisplayMedia = async (constraints?: ElectronDisplayMediaOptions) => {
+    // Переключение захвата на окно показа слайдов PowerPoint: источник уже
+    // известен, пикер показывать нельзя — демонстрация идёт прямо сейчас.
+    const preselectedSourceId = constraints?.__electronSourceId
+    if (preselectedSourceId) {
+      const { __electronSourceId: _ignored, ...rest } = constraints
+      await window.electronAPI!.setDisplaySource(preselectedSourceId)
+      return _original(rest)
+    }
+
     if (displayMediaRequestInFlight) {
       throw new DOMException("A screen share request is already in progress", "InvalidStateError")
     }
@@ -160,6 +174,10 @@ function patchElectronDisplayMedia() {
       if (!sourceId) {
         throw new DOMException("Screen share cancelled", "AbortError")
       }
+      // Заголовок окна нужен хуку демонстрации, чтобы понять, что захвачено
+      // окно PowerPoint, и начать следить за окном показа слайдов.
+      const chosen = sources.find((s) => s.id === sourceId)
+      rememberDisplaySource(chosen ? { id: chosen.id, name: chosen.name } : null)
     }
 
     // Каждый вызов настоящего getDisplayMedia потребляет pendingDisplaySourceId
@@ -182,19 +200,10 @@ function patchElectronDisplayMedia() {
       if (native) {
         stream.addTrack(native.track)
         // Останавливаем нативный захват, когда останавливают видеодорожку.
+        // Владение переносится на новую дорожку при смене окна (показ слайдов),
+        // см. adoptNativeScreenAudio.
         const videoTrack = stream.getVideoTracks()[0]
-        if (videoTrack) {
-          videoTrack.addEventListener("ended", () => native.stop())
-          // Событие "ended" приходит только когда захват прекращает сама ОС
-          // (кнопка "Stop sharing" в Chromium). Когда демонстрацию останавливает
-          // наш UI через videoTrack.stop(), события нет — поэтому оборачиваем stop()
-          // вручную, иначе хелпер и IPC-слушатель переживают сессию и утекают.
-          const videoStop = videoTrack.stop.bind(videoTrack)
-          videoTrack.stop = () => {
-            videoStop()
-            native.stop()
-          }
-        }
+        if (videoTrack) attachNativeScreenAudioLifecycle(videoTrack, native)
         return stream
       }
 
