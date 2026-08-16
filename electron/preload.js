@@ -16,6 +16,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Передаёт выбранный в кастомном пикере источник в main до вызова
   // штатного navigator.mediaDevices.getDisplayMedia().
   setDisplaySource: (sourceId) => ipcRenderer.invoke("set-display-source", sourceId),
+  // Слежение за окном показа слайдов PowerPoint: показ открывается отдельным
+  // окном, поэтому захват окна редактора надо молча переключать на него.
+  startPresentationWatch: (payload) => ipcRenderer.invoke("start-presentation-watch", payload),
+  stopPresentationWatch: () => ipcRenderer.invoke("stop-presentation-watch"),
+  onPresentationSourceChanged: (callback) => {
+    const handler = (_e, info) => callback(info)
+    ipcRenderer.on("presentation-source-changed", handler)
+    return () => ipcRenderer.removeListener("presentation-source-changed", handler)
+  },
+
   // Переход в прозрачный overlay-режим (демонстрация экрана)
   enterOverlayMode: () => ipcRenderer.send("enter-overlay-mode"),
   // Выход из overlay-режима (восстановление нормального окна)
