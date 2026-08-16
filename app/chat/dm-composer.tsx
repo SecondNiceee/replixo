@@ -20,15 +20,55 @@ interface DmComposerProps {
 const MAX_LENGTH = 4000
 /** Предел роста поля ввода: дальше появляется собственный скролл. */
 const MAX_HEIGHT = 140
-/**
- * Высота строки поля ввода в px — та же, что задаёт leading-5 в классах ниже.
- * Нужна как допуск «пользователь у нижнего края»: точное равенство scrollTop и
- * максимума не годится, дробные значения при зуме и на HiDPI не сходятся до
- * пикселя.
- */
-const LINE_HEIGHT = 20
 /** Больше — неудобно листать превью и незачем: это личный чат, не файлообменник. */
 const MAX_ATTACHMENTS = 10
+
+/**
+ * Невидимый двойник поля ввода — им замеряется высота текста, чтобы не трогать
+ * настоящее поле (подробнее в resize). Держим вне потока документа и без
+ * прокрутки: нужен только его scrollHeight.
+ */
+function createRuler(): HTMLTextAreaElement {
+  const ruler = document.createElement('textarea')
+  ruler.setAttribute('aria-hidden', 'true')
+  ruler.tabIndex = -1
+  ruler.readOnly = true
+  Object.assign(ruler.style, {
+    position: 'absolute',
+    top: '0',
+    left: '0',
+    // Не display:none и не visibility:hidden: у скрытого элемента нет раскладки,
+    // а значит и scrollHeight равен нулю. Убираем его за пределы экрана.
+    transform: 'translateX(-200vw)',
+    height: '0',
+    overflow: 'hidden',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    // Перенос строк должен совпадать с настоящим полем, иначе замер разойдётся.
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    resize: 'none',
+    border: '0',
+  })
+  document.body.appendChild(ruler)
+  return ruler
+}
+
+/**
+ * Переносит на линейку всё, что влияет на перенос строк и высоту. Ширину и
+ * типографику копируем из живого поля, а не задаём константами: они приходят из
+ * Tailwind-классов и меняются вместе с размером окна.
+ */
+function syncRulerStyle(ruler: HTMLTextAreaElement, el: HTMLTextAreaElement) {
+  const cs = getComputedStyle(el)
+  ruler.style.width = `${el.clientWidth}px`
+  ruler.style.font = cs.font
+  ruler.style.letterSpacing = cs.letterSpacing
+  ruler.style.lineHeight = cs.lineHeight
+  ruler.style.padding = cs.padding
+  // box-sizing влияет на то, входят ли отступы в заданную ширину.
+  ruler.style.boxSizing = cs.boxSizing
+}
 
 export function DmComposer({
   conversationId,
@@ -57,48 +97,36 @@ export function DmComposer({
   const resize = useCallback(() => {
     const el = textareaRef.current
     if (!el) return
-    // Позиция скролла до замеров. Сброс высоты в 'auto' ниже разворачивает поле
-    // на весь контент, браузер на этот миг видит нулевое переполнение и зажимает
-    // scrollTop в 0. Само значение при этом теряется безвозвратно, поэтому
-    // запоминаем его здесь и возвращаем после того, как высота снова задана.
-    const prevScrollTop = el.scrollTop
-    // Сначала снимаем прошлую высоту: scrollHeight у зафиксированного по высоте
-    // элемента не умеет уменьшаться, и поле не сжималось бы при удалении строк.
-    el.style.height = 'auto'
-    const full = el.scrollHeight
-    el.style.height = `${Math.min(full, MAX_HEIGHT)}px`
-    const overflows = full > MAX_HEIGHT
-    el.style.overflowY = overflows ? 'auto' : 'hidden'
-    if (!overflows) return
-
-    // Дальше — доросшее до предела поле. Пока пользователь печатает, каретка
-    // всегда должна быть видна, но простое восстановление prevScrollTop этого не
-    // даёт: на переносе строки контент стал выше, а скролл остался прежним — и
-    // новая строка оказывалась под нижним краем, из-за чего приходилось
-    // подкручивать колесом за собой.
+    // Замеряем контент на клоне-«линейке», а не на самом поле.
     //
-    // Ставим scrollTop так, чтобы низ содержимого совпал с низом поля: каретка
-    // при наборе стоит в последней строке, значит именно её и нужно показать.
-    // Проверка «был ли пользователь у самого низа» (в пределах строки) оставляет
-    // возможность спокойно перечитать начало длинного черновика — если он
-    // отлистал выше, позицию не трогаем.
-    const maxScrollTop = el.scrollHeight - el.clientHeight
-    const wasNearBottom = prevScrollTop >= maxScrollTop - LINE_HEIGHT
-    el.scrollTop = wasNearBottom ? maxScrollTop : prevScrollTop
-  }, [])
+    // Обычный приём — сбросить height в 'auto', прочитать scrollHeight и вернуть
+    // высоту — на живом поле даёт двойной side effect: на этот кадр поле
+    // разворачивается на весь текст, браузер видит нулевое переполнение и
+    // обнуляет scrollTop. Отсюда и «танцы»: значение приходилось восстанавливать
+    // вручную, а любая ручная правка scrollTop спорит с собственным доводом
+    // каретки, который браузер делает сразу после ввода. Визуально это и есть
+    // «уехало вниз, через миг вернулось».
+    //
+    // Клон измеряется в том же кадре, но он вне потока и невидим, так что ни
+    // высота, ни scrollTop настоящего поля при замере не трогаются вообще.
+    // Дальше остаётся только задать height — прокруткой целиком распоряжается
+    // браузер, который каретку из вида не теряет.
+    const ruler = (rulerRef.current ??= createRuler())
+    syncRulerStyle(ruler, el)
+    // Замыкающий перенос строки браузер в scrollHeight не считает: без якоря
+    // поле на пустой новой строке не подрастало, а прыгало на строку позже.
+    ruler.value = `${el.value}\u200b`
+    const full = ruler.scrollHeight
 
-  // Каретку двигают не только новые символы: клик мышью, стрелки, Home/End и
-  // выделение прокручивают поле сами, а эффект по text на это не реагирует. Без
-  // синхронизации переход стрелкой вверх за пределы видимой части оставлял бы
-  // каретку за краем.
-  const keepCaretVisible = useCallback(() => {
-    const el = textareaRef.current
-    if (!el || el.scrollHeight <= el.clientHeight) return
-    // Курсор в конце текста — единственный случай, который можно вычислить без
-    // измерения позиции каретки: показываем низ содержимого.
-    if (el.selectionStart === el.value.length && el.selectionStart === el.selectionEnd) {
-      el.scrollTop = el.scrollHeight - el.clientHeight
-    }
+    const next = Math.min(full, MAX_HEIGHT)
+    // Пишем, только если высота реально изменилась: лишняя запись в style
+    // заставляет браузер пересчитать раскладку на каждый символ.
+    if (el.style.height !== `${next}px`) el.style.height = `${next}px`
+    // Скролл включаем вручную и только при реальном переполнении: у поля своя
+    // высота в одну строку, и по отступам с line-height содержимое одной строки
+    // её чуть перерастает — по CSS браузер рисовал бы полосу в пустом поле.
+    const overflow = full > MAX_HEIGHT ? 'auto' : 'hidden'
+    if (el.style.overflowY !== overflow) el.style.overflowY = overflow
   }, [])
 
   // При переключении диалога черновик и вложение сбрасываем: ссылка вложения
@@ -118,7 +146,7 @@ export function DmComposer({
   }, [text, resize])
 
   // Грузим по одному файлу за раз (не параллельно): так порядок вложений в
-  // pendingList совпадает с порядком выбора, а прогресс легко показать одним
+  // pendingList совпадает с порядком выбора, а прогресс легко показа��ь одним
   // общим индикатором вместо счётчика по каждому файлу.
   const uploadOne = useCallback(
     async (file: File): Promise<void> => {
