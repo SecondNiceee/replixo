@@ -48,6 +48,7 @@ export interface ProducePayload {
 export interface ConsumePayload {
   roomId: string
   peerId: string
+  transportId: string
   producerId: string
   rtpCapabilities: object
 }

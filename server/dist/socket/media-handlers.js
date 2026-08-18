@@ -194,7 +194,9 @@ function registerMediaHandlers(ctx, worker) {
             const room = room_registry_1.rooms.get(roomId);
             if (!room)
                 return (0, helpers_1.err)(callback, `Room ${roomId} not found`);
-            const transportData = await room.createWebRtcTransport(peerId, direction ?? 'send');
+            const resolvedDirection = direction ?? 'send';
+            const transportData = await room.createWebRtcTransport(peerId, resolvedDirection);
+            console.log(`[media] Transport created room=${roomId} peer=${peerId} transport=${transportData.transportId} direction=${resolvedDirection} socket=${socket.id}`);
             (0, helpers_1.ack)(callback, transportData);
         }
         catch (e) {
@@ -248,6 +250,7 @@ function registerMediaHandlers(ctx, worker) {
             if (!peer)
                 return (0, helpers_1.err)(callback, `Peer ${peerId} not found`);
             const result = await room.produce(peerId, transportId, kind, rtpParameters, appData);
+            console.log(`[media] Produced room=${roomId} peer=${peerId} producer=${result.producerId} kind=${kind} transport=${transportId} socket=${socket.id}`);
             // Notify all other peers in the room about the new producer
             socket.to(roomId).emit('newProducer', {
                 peerId,
@@ -266,12 +269,13 @@ function registerMediaHandlers(ctx, worker) {
     // consume
     // -----------------------------------------------------------------------
     socket.on('consume', async (payload, callback) => {
-        const { roomId, peerId, producerId, rtpCapabilities } = payload;
+        const { roomId, peerId, transportId, producerId, rtpCapabilities } = payload;
         try {
             const room = room_registry_1.rooms.get(roomId);
             if (!room)
                 return (0, helpers_1.err)(callback, `Room ${roomId} not found`);
-            const consumerData = await room.consume(peerId, producerId, rtpCapabilities);
+            const consumerData = await room.consume(peerId, transportId, producerId, rtpCapabilities);
+            console.log(`[media] Consumed room=${roomId} peer=${peerId} consumer=${consumerData.consumerId} producer=${producerId} kind=${consumerData.kind} transport=${transportId} socket=${socket.id}`);
             (0, helpers_1.ack)(callback, consumerData);
         }
         catch (e) {

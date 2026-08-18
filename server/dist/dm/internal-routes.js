@@ -205,14 +205,30 @@ function registerInternalRoutes(app, io) {
                 res.status(503).json({ error: 'dm_disabled' });
                 return;
             }
-            const { userIds } = (req.body ?? {});
-            if (!Array.isArray(userIds) || userIds.length > MAX_PRESENCE_IDS) {
+            const { userIds, ownerId } = (req.body ?? {});
+            // Две формы запроса, и предпочтительная — ownerId.
+            //
+            // При ней Next не перечисляет друзей сам, а спрашивает «статусы друзей
+            // вот этого пользователя». Разница не в удобстве, а в задержке: список
+            // друзей Next читает из той же БД, и передача id означала, что запрос
+            // сюда ЖДАЛ этот SELECT — две задержки складывались на каждом открытии
+            // кабинета. Здесь тот же список почти всегда уже лежит в кэше presence.
+            //
+            // Форма с userIds оставлена для вызовов, где список нужен произвольный,
+            // и для старого бандла Next, который ещё не знает про ownerId.
+            let ids;
+            if (isId(ownerId)) {
+                ids = await (0, presence_1.friendIdsOf)(ownerId);
+            }
+            else if (Array.isArray(userIds) && userIds.length <= MAX_PRESENCE_IDS) {
+                // Кривые элементы отбрасываем, а не роняем весь запрос: presence —
+                // улучшение поверх списка, и один битый id не повод остаться без точек.
+                ids = [...new Set(userIds.filter(isId))];
+            }
+            else {
                 res.status(400).json({ error: 'bad_payload' });
                 return;
             }
-            // Кривые элементы отбрасываем, а не роняем весь запрос: presence —
-            // улучшение поверх списка, и один битый id не повод остаться без точек.
-            const ids = [...new Set(userIds.filter(isId))];
             if (ids.length === 0) {
                 res.json({ statuses: {}, lastSeenAt: {} });
                 return;
@@ -240,7 +256,7 @@ function registerInternalRoutes(app, io) {
     // Поэтому beacon летит в Next (POST /api/chat/presence/leave), тот достаёт
     // личность из сессии и дёргает уже этот маршрут. Два следствия:
     //   • userId приходит от доверенной стороны, а не из браузера — иначе одним
-    //     POST'ом можно было бы «выключить» любого пользователя;
+    //     POST'ом можно ��ыло бы «выключить» любого пользователя;
     //   • путь идёт через тот же origin, что и приложение, а его nginx проксирует
     //     всегда (location /). Прямой POST на порт 3001 в проде не проходит:
     //     под /dm/ у nginx location'а нет, и запрос ушёл бы в Next и получил 404.

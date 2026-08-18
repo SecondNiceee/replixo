@@ -476,6 +476,7 @@ export function useTransports({
         {
           roomId,
           peerId: peerIdRef.current,
+          transportId: recvTransport.id,
           producerId,
           rtpCapabilities: device.rtpCapabilities,
         },

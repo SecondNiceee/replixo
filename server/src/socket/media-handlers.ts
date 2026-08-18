@@ -238,7 +238,9 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
 
-        const transportData = await room.createWebRtcTransport(peerId, direction ?? 'send')
+        const resolvedDirection = direction ?? 'send'
+        const transportData = await room.createWebRtcTransport(peerId, resolvedDirection)
+        console.log(`[media] Transport created room=${roomId} peer=${peerId} transport=${transportData.transportId} direction=${resolvedDirection} socket=${socket.id}`)
         ack(callback, transportData)
       } catch (e) {
         err(callback as Callback<never>, (e as Error).message)
@@ -306,6 +308,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         if (!peer) return err(callback as Callback<never>, `Peer ${peerId} not found`)
 
         const result = await room.produce(peerId, transportId, kind, rtpParameters, appData)
+        console.log(`[media] Produced room=${roomId} peer=${peerId} producer=${result.producerId} kind=${kind} transport=${transportId} socket=${socket.id}`)
 
         // Notify all other peers in the room about the new producer
         socket.to(roomId).emit('newProducer', {
@@ -329,13 +332,14 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'consume',
     async (payload: ConsumePayload, callback: Callback<object>) => {
-      const { roomId, peerId, producerId, rtpCapabilities } = payload
+      const { roomId, peerId, transportId, producerId, rtpCapabilities } = payload
 
       try {
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
 
-        const consumerData = await room.consume(peerId, producerId, rtpCapabilities)
+        const consumerData = await room.consume(peerId, transportId, producerId, rtpCapabilities)
+        console.log(`[media] Consumed room=${roomId} peer=${peerId} consumer=${(consumerData as { consumerId: string }).consumerId} producer=${producerId} kind=${(consumerData as { kind: string }).kind} transport=${transportId} socket=${socket.id}`)
         ack(callback, consumerData)
       } catch (e) {
         err(callback as Callback<never>, (e as Error).message)

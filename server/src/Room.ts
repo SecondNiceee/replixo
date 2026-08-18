@@ -3,7 +3,6 @@ import type {
   Worker,
   DtlsParameters,
   DtlsState,
-  WebRtcTransport,
 } from 'mediasoup/types'
 import * as mediasoup from 'mediasoup'
 import { mediaCodecs, webRtcTransportOptions, MAX_PEERS_PER_ROOM, iceServers } from './config'
@@ -114,6 +113,15 @@ export class Room {
   async createWebRtcTransport(peerId: string, direction: 'send' | 'recv'): Promise<TransportCreatedPayload> {
     const peer = this.peers.get(peerId)
     if (!peer) throw new Error(`Peer ${peerId} not found in room ${this.id}`)
+
+    // A media rebuild can happen while the peer remains in the room. Keep one
+    // transport per direction so consumers can never attach to a stale recv
+    // path left behind by a previous client transport.
+    for (const existingTransport of [...peer.transports.values()]) {
+      if ((existingTransport.appData as Record<string, unknown>).direction !== direction) continue
+      peer.transports.delete(existingTransport.id)
+      existingTransport.close()
+    }
 
     const transport = await this.router.createWebRtcTransport({
       ...webRtcTransportOptions,
@@ -246,21 +254,20 @@ export class Room {
 
   async consume(
     consumerPeerId: string,
+    transportId: string,
     producerId: string,
     rtpCapabilities: object,
   ): Promise<ConsumedPayload> {
     const consumerPeer = this.peers.get(consumerPeerId)
     if (!consumerPeer) throw new Error(`Consumer peer ${consumerPeerId} not found`)
 
-    // Find recv transport for this peer (marked by appData.direction)
-    let recvTransport: WebRtcTransport | null = null
-    for (const transport of consumerPeer.transports.values()) {
-      if ((transport.appData as Record<string, unknown>).direction === 'recv') {
-        recvTransport = transport
-        break
-      }
+    const recvTransport = consumerPeer.getTransport(transportId)
+    if (!recvTransport || recvTransport.closed) {
+      throw new Error(`Recv transport ${transportId} not found for peer ${consumerPeerId}`)
     }
-    if (!recvTransport) throw new Error(`No recv transport found for peer ${consumerPeerId}`)
+    if ((recvTransport.appData as Record<string, unknown>).direction !== 'recv') {
+      throw new Error(`Transport ${transportId} is not a recv transport`)
+    }
 
     if (!this.router.canConsume({ producerId, rtpCapabilities } as Parameters<typeof this.router.canConsume>[0])) {
       throw new Error(`Router cannot consume producer ${producerId} with given rtpCapabilities`)

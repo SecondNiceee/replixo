@@ -6,6 +6,31 @@ const handlers_1 = require("./handlers");
 const call_handlers_1 = require("./call-handlers");
 const presence_1 = require("./presence");
 const namespace_types_1 = require("./namespace-types");
+/**
+ * Достать статус вкладки из чего угодно, что прислал клиент: handshake, dm:ping,
+ * dm:status. Всё три источника недоверенные и приходят одинаковой формы, поэтому
+ * разбор один. undefined означает «клиент статуса не сообщил» — так ведёт себя
+ * старый бандл из кэша браузера, и для него presence должен работать как раньше.
+ *
+ * Список значений — граница доверия: неизвестное значение здесь становится
+ * undefined, то есть «статус не сообщён», а не ошибкой. Поэтому забыть добавить
+ * сюда новое значение опасно молча: 'call' раньше отбрасывался, и вкладка в
+ * звонке для сервера выглядела как вкладка, которая о себе вообще ничего не
+ * сказала.
+ */
+const KNOWN_STATUSES = ['online', 'hidden', 'call'];
+function readStatus(value) {
+    if (KNOWN_STATUSES.includes(value))
+        return value;
+    // 'idle' присылают бандлы, закэшированные до отказа от статуса «отошёл».
+    // Такая вкладка открыта на экране и сообщает о себе честно — она лишь называет
+    // бездействие отдельным словом, которого у нас больше нет. Трактуем как
+    // присутствие: иначе у пользователя со старой вкладкой точка гасла бы через
+    // минуту тишины и не зажигалась до перезагрузки страницы.
+    if (value === 'idle')
+        return 'online';
+    return undefined;
+}
 // ---------------------------------------------------------------------------
 // Namespace /dm — личные сообщения между друзьями.
 //
@@ -53,7 +78,13 @@ function setupDmNamespace(io) {
         // отменяем отложенную уборку, иначе она погасила бы живой звонок.
         (0, call_handlers_1.cancelCallCleanup)(userId);
         // join уже выполнен, поэтому снапшот presence гарантированно дойдёт.
-        void (0, presence_1.trackConnect)(nsp, socket, userId);
+        //
+        // Статус вкладки берём из handshake: вкладка могла открыться сразу в фоне
+        // (Ctrl+click, восстановление сессии браузера) или это реконнект свёрнутого
+        // окна. Без него presence обязан был предполагать 'online', и у друзей
+        // мигала зелёная точка, тут же сменяясь на «был(а) только что».
+        const initialStatus = readStatus(socket.handshake.auth?.status);
+        void (0, presence_1.trackConnect)(nsp, socket, userId, initialStatus);
         // Досылаем этому устройству звонки, которые уже идут: `call:incoming`
         // рассылался один раз, и подключившийся посреди звонка о нём бы не узнал.
         (0, call_handlers_1.syncCallsForSocket)(socket, userId);
@@ -62,23 +93,29 @@ function setupDmNamespace(io) {
         // 30 секунд, и понижать его нельзя: на нём держится устойчивость звонков к
         // мигнувшей сети. Presence же должен реагировать за секунды, поэтому у него
         // отдельный, более чуткий таймер (см. PING_TIMEOUT_MS в presence.ts).
-        socket.on('dm:ping', () => {
-            // Изменение сводного статуса возможно и здесь: пинг оживляет соединение,
-            // которое свипер мог считать замолчавшим.
-            // Статус вкладки при этом НЕ переписываем: свёрнутая вкладка тоже шлёт
-            // пинги (соединение живо), и «online» здесь вернул бы ей зелёную точку.
-            if ((0, presence_1.trackPing)(userId, socket.id)) {
+        socket.on('dm:ping', (payload) => {
+            // Пинг НЕСЁТ СОСТОЯНИЕ ВКЛАДКИ, а не только факт «я жив».
+            //
+            // Благодаря этому presence самовосстанавливается: каждый heartbeat — это
+            // полная правда о вкладке, поэтому потерянное dm:status, реконнект или
+            // понижение статуса свипером исправляются сами на следующем пинге. Без
+            // этого расхождение могло держаться до перезагрузки страницы.
+            //
+            // Статуса может и не быть (старый бандл из кэша браузера) — тогда пинг
+            // работает как раньше, просто продлевая жизнь соединения.
+            const status = readStatus(payload?.status);
+            if ((0, presence_1.trackPing)(userId, socket.id, status)) {
                 void (0, presence_1.broadcastCurrentStatus)(nsp, userId);
             }
         });
-        // Вкладка сообщает, что пользователь отошёл, вернулся или ушёл в фон.
+        // Вкладка сообщает, что ушла в фон, вернулась на экран или вошла в звонок.
         // Статус хранится на каждый сокет: сводный считается по всем устройствам,
         // поэтому свёрнутая вкладка на ноутбуке не гасит активность на телефоне.
         socket.on('dm:status', (payload) => {
-            const raw = (payload ?? {});
-            if (raw.status !== 'online' && raw.status !== 'idle' && raw.status !== 'hidden')
+            const status = readStatus(payload?.status);
+            if (!status)
                 return;
-            void (0, presence_1.setSocketStatus)(nsp, socket, userId, raw.status);
+            void (0, presence_1.setSocketStatus)(nsp, socket, userId, status);
         });
         socket.on('disconnect', () => {
             (0, presence_1.trackDisconnect)(nsp, socket.id, userId);

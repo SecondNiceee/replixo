@@ -83,6 +83,15 @@ class Room {
         const peer = this.peers.get(peerId);
         if (!peer)
             throw new Error(`Peer ${peerId} not found in room ${this.id}`);
+        // A media rebuild can happen while the peer remains in the room. Keep one
+        // transport per direction so consumers can never attach to a stale recv
+        // path left behind by a previous client transport.
+        for (const existingTransport of [...peer.transports.values()]) {
+            if (existingTransport.appData.direction !== direction)
+                continue;
+            peer.transports.delete(existingTransport.id);
+            existingTransport.close();
+        }
         const transport = await this.router.createWebRtcTransport({
             ...config_1.webRtcTransportOptions,
             appData: { direction },
@@ -192,20 +201,17 @@ class Room {
     // ---------------------------------------------------------------------------
     // Consume
     // ---------------------------------------------------------------------------
-    async consume(consumerPeerId, producerId, rtpCapabilities) {
+    async consume(consumerPeerId, transportId, producerId, rtpCapabilities) {
         const consumerPeer = this.peers.get(consumerPeerId);
         if (!consumerPeer)
             throw new Error(`Consumer peer ${consumerPeerId} not found`);
-        // Find recv transport for this peer (marked by appData.direction)
-        let recvTransport = null;
-        for (const transport of consumerPeer.transports.values()) {
-            if (transport.appData.direction === 'recv') {
-                recvTransport = transport;
-                break;
-            }
+        const recvTransport = consumerPeer.getTransport(transportId);
+        if (!recvTransport || recvTransport.closed) {
+            throw new Error(`Recv transport ${transportId} not found for peer ${consumerPeerId}`);
         }
-        if (!recvTransport)
-            throw new Error(`No recv transport found for peer ${consumerPeerId}`);
+        if (recvTransport.appData.direction !== 'recv') {
+            throw new Error(`Transport ${transportId} is not a recv transport`);
+        }
         if (!this.router.canConsume({ producerId, rtpCapabilities })) {
             throw new Error(`Router cannot consume producer ${producerId} with given rtpCapabilities`);
         }
