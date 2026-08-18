@@ -115,6 +115,16 @@ export class Room {
     const peer = this.peers.get(peerId)
     if (!peer) throw new Error(`Peer ${peerId} not found in room ${this.id}`)
 
+    // A peer must have only one transport per direction. Keeping an older recv
+    // transport in a long-lived room makes consume() attach new participants to
+    // a stale path; recreating the room then appears to "fix" missing audio.
+    for (const existing of peer.transports.values()) {
+      if ((existing.appData as Record<string, unknown>).direction !== direction) continue
+      existing.close()
+      peer.transports.delete(existing.id)
+      console.warn(`[media] Replaced stale transport room=${this.id} peer=${peerId} transport=${existing.id} direction=${direction}`)
+    }
+
     const transport = await this.router.createWebRtcTransport({
       ...webRtcTransportOptions,
       appData: { direction },
@@ -254,13 +264,20 @@ export class Room {
 
     // Find recv transport for this peer (marked by appData.direction)
     let recvTransport: WebRtcTransport | null = null
-    for (const transport of consumerPeer.transports.values()) {
-      if ((transport.appData as Record<string, unknown>).direction === 'recv') {
+    for (const transport of [...consumerPeer.transports.values()].reverse()) {
+      if (!transport.closed && (transport.appData as Record<string, unknown>).direction === 'recv') {
         recvTransport = transport
         break
       }
     }
     if (!recvTransport) throw new Error(`No recv transport found for peer ${consumerPeerId}`)
+
+    const producerOwner = [...this.peers.values()].find((peer) => peer.producers.has(producerId))
+    const producer = producerOwner?.getProducer(producerId)
+    if (!producer || producer.closed) {
+      console.warn(`[media] Stale producer requested room=${this.id} peer=${consumerPeerId} producer=${producerId}`)
+      throw new Error(`Producer ${producerId} not found`)
+    }
 
     if (!this.router.canConsume({ producerId, rtpCapabilities } as Parameters<typeof this.router.canConsume>[0])) {
       throw new Error(`Router cannot consume producer ${producerId} with given rtpCapabilities`)
@@ -326,6 +343,17 @@ export class Room {
    * the RTP flowing and free nothing, so the pause must be applied here.
    * Resuming goes through `resumeConsumer`, which also re-requests a keyframe.
    */
+  closeConsumer(peerId: string, consumerId: string): { producerId: string; kind: string } {
+    const peer = this.peers.get(peerId)
+    if (!peer) throw new Error(`Peer ${peerId} not found`)
+    const consumer = peer.getConsumer(consumerId)
+    if (!consumer) throw new Error(`Consumer ${consumerId} not found`)
+    const details = { producerId: consumer.producerId, kind: consumer.kind }
+    consumer.close()
+    peer.consumers.delete(consumerId)
+    return details
+  }
+
   async pauseConsumer(peerId: string, consumerId: string): Promise<void> {
     const peer = this.peers.get(peerId)
     if (!peer) throw new Error(`Peer ${peerId} not found`)
