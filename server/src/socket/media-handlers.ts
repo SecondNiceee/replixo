@@ -69,6 +69,12 @@ async function optional<T>(promise: Promise<T>, ms: number, label: string, fallb
 export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void {
   const { io, socket, session } = ctx
 
+  const ownsPeer = (roomId: string, peerId: string): boolean => (
+    session.roomId === roomId &&
+    session.peerId === peerId &&
+    getPeerSocket(roomId, peerId) === socket.id
+  )
+
   // -----------------------------------------------------------------------
   // joinRoom
   // -----------------------------------------------------------------------
@@ -304,8 +310,13 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
 
         const peer = room.getPeer(peerId)
         if (!peer) return err(callback as Callback<never>, `Peer ${peerId} not found`)
+        if (!ownsPeer(roomId, peerId)) {
+          console.warn(`[media] Produce rejected room=${roomId} peer=${peerId} transport=${transportId} socket=${socket.id}`)
+          return err(callback as Callback<never>, 'Socket does not own this peer')
+        }
 
         const result = await room.produce(peerId, transportId, kind, rtpParameters, appData)
+        console.info(`[media] Producer created room=${roomId} peer=${peerId} transport=${transportId} producer=${result.producerId} kind=${kind} source=${String(appData.source ?? "media")}`)
 
         // Notify all other peers in the room about the new producer
         socket.to(roomId).emit('newProducer', {
@@ -334,10 +345,17 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
       try {
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
+        if (!ownsPeer(roomId, peerId)) {
+          console.warn(`[media] Consume rejected room=${roomId} peer=${peerId} producer=${producerId} socket=${socket.id}`)
+          return err(callback as Callback<never>, 'Socket does not own this peer')
+        }
 
         const consumerData = await room.consume(peerId, producerId, rtpCapabilities)
+        const data = consumerData as { consumerId: string; kind: string }
+        console.info(`[media] Consumer created room=${roomId} peer=${peerId} producer=${producerId} consumer=${data.consumerId} kind=${data.kind}`)
         ack(callback, consumerData)
       } catch (e) {
+        console.error(`[media] Consume failed room=${roomId} peer=${peerId} producer=${producerId} socket=${socket.id}`, e)
         err(callback as Callback<never>, (e as Error).message)
       }
     },
@@ -354,11 +372,45 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
       try {
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
+        if (!ownsPeer(roomId, peerId)) {
+          console.warn(`[media] Resume rejected room=${roomId} peer=${peerId} consumer=${consumerId} socket=${socket.id}`)
+          return err(callback as Callback<never>, 'Socket does not own this peer')
+        }
 
         await room.resumeConsumer(peerId, consumerId)
+        console.info(`[media] Consumer resumed room=${roomId} peer=${peerId} consumer=${consumerId}`)
         ack(callback, undefined)
       } catch (e) {
+        console.error(`[media] Resume failed room=${roomId} peer=${peerId} consumer=${consumerId} socket=${socket.id}`, e)
         err(callback as Callback<never>, (e as Error).message)
+      }
+    },
+  )
+
+  // -----------------------------------------------------------------------
+  // closeConsumer — targeted receive-path recovery
+  // -----------------------------------------------------------------------
+  socket.on(
+    'closeConsumer',
+    (payload: ResumeConsumerPayload, callback?: Callback<void>) => {
+      const { roomId, peerId, consumerId } = payload ?? {}
+      try {
+        const room = rooms.get(roomId)
+        if (!room) {
+          if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
+          return
+        }
+        if (!ownsPeer(roomId, peerId)) {
+          console.warn(`[media] Consumer close rejected room=${roomId} peer=${peerId} consumer=${consumerId} socket=${socket.id}`)
+          if (callback) return err(callback as Callback<never>, 'Socket does not own this peer')
+          return
+        }
+        const details = room.closeConsumer(peerId, consumerId)
+        console.warn(`[media] Consumer closed for recovery room=${roomId} peer=${peerId} producer=${details.producerId} consumer=${consumerId} kind=${details.kind}`)
+        if (callback) ack(callback, undefined)
+      } catch (e) {
+        console.warn(`[media] Consumer close failed room=${roomId} peer=${peerId} consumer=${consumerId}: ${(e as Error).message}`)
+        if (callback) err(callback as Callback<never>, (e as Error).message)
       }
     },
   )

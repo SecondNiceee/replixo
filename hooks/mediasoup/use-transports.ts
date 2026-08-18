@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import type { DeviceType, Transport, Consumer, Producer, MediaSource } from "./types"
 import { normalizeSource } from "./types"
@@ -103,17 +103,24 @@ export function useTransports({
   // consumer before its recv transport is ready — see consumeProducer below.
   const waitForTransportConnected = useCallback(
     (transport: Transport, timeoutMs = 8000): Promise<void> =>
-      new Promise((resolve) => {
-        if (transport.closed || transport.connectionState === "connected") { resolve(); return }
+      new Promise((resolve, reject) => {
+        if (transport.closed) { reject(new Error("transport-closed")); return }
+        if (transport.connectionState === "connected") { resolve(); return }
         const started = Date.now()
         const id = setInterval(() => {
-          if (
-            transport.closed ||
-            transport.connectionState === "connected" ||
-            Date.now() - started >= timeoutMs
-          ) {
+          if (transport.closed) {
+            clearInterval(id)
+            reject(new Error("transport-closed"))
+            return
+          }
+          if (transport.connectionState === "connected") {
             clearInterval(id)
             resolve()
+            return
+          }
+          if (Date.now() - started >= timeoutMs) {
+            clearInterval(id)
+            reject(new Error(`transport-connect-timeout:${transport.connectionState}`))
           }
         }, 100)
       }),
@@ -352,6 +359,32 @@ export function useTransports({
   // do not advance; this avoids false positives for a genuinely static screen.
   // ---------------------------------------------------------------------------
   const videoWatchdogTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const audioWatchdogTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const consumeInFlightRef = useRef<Map<string, Promise<void>>>(new Map())
+  const audioRecoveryAttemptsRef = useRef<Map<string, number>>(new Map())
+
+  const clearConsumerTimers = useCallback((consumerId: string) => {
+    const videoTimer = videoWatchdogTimersRef.current.get(consumerId)
+    if (videoTimer) clearTimeout(videoTimer)
+    videoWatchdogTimersRef.current.delete(consumerId)
+    const audioTimer = audioWatchdogTimersRef.current.get(consumerId)
+    if (audioTimer) clearTimeout(audioTimer)
+    audioWatchdogTimersRef.current.delete(consumerId)
+    const recoveryTimers = consumerRecoveryTimersRef.current.get(consumerId) ?? []
+    recoveryTimers.forEach(clearTimeout)
+    consumerRecoveryTimersRef.current.delete(consumerId)
+  }, [])
+
+  useEffect(() => () => {
+    videoWatchdogTimersRef.current.forEach(clearTimeout)
+    audioWatchdogTimersRef.current.forEach(clearTimeout)
+    consumerRecoveryTimersRef.current.forEach((timers) => timers.forEach(clearTimeout))
+    videoWatchdogTimersRef.current.clear()
+    audioWatchdogTimersRef.current.clear()
+    consumerRecoveryTimersRef.current.clear()
+    consumeInFlightRef.current.clear()
+    audioRecoveryAttemptsRef.current.clear()
+  }, [])
 
   const startVideoFrameWatchdog = useCallback(
     (consumer: Consumer, consumerId: string) => {
@@ -384,10 +417,7 @@ export function useTransports({
 
       const tick = async () => {
         if (consumer.closed) {
-          videoWatchdogTimersRef.current.delete(consumerId)
-          const recoveryTimers = consumerRecoveryTimersRef.current.get(consumerId) ?? []
-          recoveryTimers.forEach(clearTimeout)
-          consumerRecoveryTimersRef.current.delete(consumerId)
+          clearConsumerTimers(consumerId)
           return
         }
 
@@ -452,8 +482,22 @@ export function useTransports({
       // Give transport connect + resume a brief head start.
       schedule(600)
     },
-    [roomId, peerIdRef, socketRef, recvTransportRef],
+    [roomId, peerIdRef, socketRef, recvTransportRef, clearConsumerTimers],
   )
+
+  const readInboundAudio = useCallback(async (consumer: Consumer) => {
+    let packetsReceived = 0
+    let bytesReceived = 0
+    let totalAudioEnergy = 0
+    const stats: RTCStatsReport = await consumer.getStats()
+    stats.forEach((report: Record<string, unknown>) => {
+      if (report.type !== "inbound-rtp" || report.kind === "video" || report.mediaType === "video") return
+      if (typeof report.packetsReceived === "number") packetsReceived = Math.max(packetsReceived, report.packetsReceived)
+      if (typeof report.bytesReceived === "number") bytesReceived = Math.max(bytesReceived, report.bytesReceived)
+      if (typeof report.totalAudioEnergy === "number") totalAudioEnergy = Math.max(totalAudioEnergy, report.totalAudioEnergy)
+    })
+    return { packetsReceived, bytesReceived, totalAudioEnergy }
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Consume a remote producer
@@ -466,33 +510,49 @@ export function useTransports({
       kind: "audio" | "video",
       appData?: Record<string, unknown>,
     ) => {
-      const socket = socketRef.current
-      const device = deviceRef.current
-      const recvTransport = recvTransportRef.current
-      if (!socket || !device || !recvTransport) return
+      const existingConsumer = [...consumersRef.current.values()].find(
+        (consumer) => !consumer.closed && consumer.producerId === producerId,
+      )
+      if (existingConsumer) return
+      const inFlight = consumeInFlightRef.current.get(producerId)
+      if (inFlight) return inFlight
 
-      socket.emit(
-        "consume",
-        {
-          roomId,
-          peerId: peerIdRef.current,
-          producerId,
-          rtpCapabilities: device.rtpCapabilities,
-        },
-        async (error: string | null, data: {
+      const runConsume = async (): Promise<void> => {
+        const socket = socketRef.current
+        const device = deviceRef.current
+        const recvTransport = recvTransportRef.current
+        if (!socket || !device || !recvTransport || recvTransport.closed) return
+
+        type ConsumerData = {
           consumerId: string
           producerId: string
           kind: string
           rtpParameters: object
           producerPaused: boolean
           appData: Record<string, unknown>
-        } | undefined) => {
-          if (error || !data) return
+        }
 
-          const rawSource = appData?.source ?? (data.appData as Record<string, unknown>)?.source
-          const source: MediaSource = rawSource === "screen" ? "screen" : "media"
+        const requestConsumer = () => new Promise<ConsumerData>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("consume-ack-timeout")), 8000)
+          socket.emit("consume", {
+            roomId,
+            peerId: peerIdRef.current,
+            producerId,
+            rtpCapabilities: device.rtpCapabilities,
+          }, (error: string | null, data: ConsumerData | undefined) => {
+            clearTimeout(timeout)
+            if (error || !data) reject(new Error(error ?? "consume-missing-data"))
+            else resolve(data)
+          })
+        })
 
-          const consumer = await recvTransport.consume({
+        const data = await requestConsumer()
+        const rawSource = appData?.source ?? data.appData?.source
+        const source: MediaSource = rawSource === "screen" ? "screen" : "media"
+        let consumer: Consumer | null = null
+
+        try {
+          consumer = await recvTransport.consume({
             id: data.consumerId,
             producerId: data.producerId,
             kind: data.kind as "audio" | "video",
@@ -500,58 +560,134 @@ export function useTransports({
             appData: { source },
           })
 
-          // Race guard: producer closed before consumer was ready
           if (pendingClosedProducersRef.current.has(data.producerId)) {
             pendingClosedProducersRef.current.delete(data.producerId)
             consumer.close()
-            dispatch({
-              type: "PEER_PRODUCER_CLOSED",
-              peerId: remotePeerId,
-              source,
-              kind,
-            })
+            socket.emit("closeConsumer", { roomId, peerId: peerIdRef.current, consumerId: data.consumerId })
+            dispatch({ type: "PEER_PRODUCER_CLOSED", peerId: remotePeerId, source, kind })
             return
           }
 
           consumersRef.current.set(data.consumerId, consumer)
+          await waitForTransportConnected(recvTransport)
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("resume-consumer-ack-timeout")), 8000)
+            socket.emit("resumeConsumer", {
+              roomId,
+              peerId: peerIdRef.current,
+              consumerId: data.consumerId,
+            }, (error: string | null) => {
+              clearTimeout(timeout)
+              if (error) reject(new Error(error))
+              else resolve()
+            })
+          })
 
-          const stream = new MediaStream([consumer.track])
-          dispatch({ type: "PEER_STREAM", peerId: remotePeerId, displayName, kind, source, stream })
-
-          // Surface initial mute state
+          dispatch({
+            type: "PEER_STREAM",
+            peerId: remotePeerId,
+            displayName,
+            kind,
+            source,
+            stream: new MediaStream([consumer.track]),
+          })
           if (kind === "audio" && source === "media" && data.producerPaused) {
             dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: true })
           }
 
-          // Wait until the recv transport is actually connected before resuming.
-          // The transport starts its DTLS/ICE handshake when the first consumer
-          // is created (the `consume` above), so on the very first stream in a
-          // room `connectionState` is still "connecting" here. mediasoup asks the
-          // producer for a keyframe the moment a consumer resumes — if we resume
-          // before the transport is connected that keyframe is dropped and the
-          // decoder is left waiting, which shows up as a permanent black frame
-          // until the next keyframe (e.g. after the sender toggles the camera).
-          // Gating resume on "connected" guarantees the keyframe lands on a live
-          // path. Subsequent consumers reuse the already-connected transport and
-          // resolve immediately.
-          await waitForTransportConnected(recvTransport)
+          console.info(`[media] Consumer ready room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} consumer=${data.consumerId} kind=${kind} source=${source} transport=${recvTransport.id} state=${recvTransport.connectionState}`)
 
-          socket.emit("resumeConsumer", {
-            roomId,
-            peerId: peerIdRef.current,
-            consumerId: data.consumerId,
-          })
-
-          // Guard against a persistent black frame (see watchdog above): keep
-          // nudging the server for a keyframe until frames actually decode.
           if (kind === "video") {
             startVideoFrameWatchdog(consumer, data.consumerId)
+            return
           }
-        },
-      )
+          // A deliberately paused producer sends no RTP. Waiting for a later
+          // producerPaused(false) notification is correct; rebuilding it would be
+          // a false positive for an ordinary muted microphone.
+          if (data.producerPaused) return
+
+          let checks = 0
+          const checkAudio = async () => {
+            if (!consumer || consumer.closed || recvTransport.closed) {
+              clearConsumerTimers(data.consumerId)
+              return
+            }
+            try {
+              const stats = await readInboundAudio(consumer)
+              if (stats.packetsReceived > 0 || stats.bytesReceived > 0) {
+                audioRecoveryAttemptsRef.current.delete(producerId)
+                clearConsumerTimers(data.consumerId)
+                console.info(`[media] Audio RTP started room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} consumer=${data.consumerId} packets=${stats.packetsReceived} bytes=${stats.bytesReceived} energy=${stats.totalAudioEnergy}`)
+                return
+              }
+            } catch {
+              // Stats can be unavailable briefly while DTLS settles.
+            }
+            checks += 1
+            if (checks < 6 || recvTransport.connectionState !== "connected") {
+              const timer = setTimeout(checkAudio, 1000)
+              audioWatchdogTimersRef.current.set(data.consumerId, timer)
+              return
+            }
+
+            const attempts = audioRecoveryAttemptsRef.current.get(producerId) ?? 0
+            console.warn(`[media] Audio startup stalled room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} consumer=${data.consumerId} trackMuted=${consumer.track.muted} attempt=${attempts + 1}`)
+            if (attempts === 0) {
+              audioRecoveryAttemptsRef.current.set(producerId, 1)
+              checks = 0
+              socket.emit("resumeConsumer", { roomId, peerId: peerIdRef.current, consumerId: data.consumerId })
+              const timer = setTimeout(checkAudio, 2000)
+              audioWatchdogTimersRef.current.set(data.consumerId, timer)
+              return
+            }
+
+            clearConsumerTimers(data.consumerId)
+            consumersRef.current.delete(data.consumerId)
+            consumer.close()
+            dispatch({ type: "PEER_PRODUCER_CLOSED", peerId: remotePeerId, source, kind })
+            await new Promise<void>((resolve) => {
+              socket.emit("closeConsumer", {
+                roomId,
+                peerId: peerIdRef.current,
+                consumerId: data.consumerId,
+              }, () => resolve())
+              setTimeout(resolve, 3000)
+            })
+
+            if (attempts < 2) {
+              audioRecoveryAttemptsRef.current.set(producerId, attempts + 1)
+              await runConsume()
+            } else {
+              console.error(`[media] Audio recovery exhausted room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId}`)
+              onRecoveryExhausted(`audio-consumer-stalled:${producerId}`)
+            }
+          }
+          const timer = setTimeout(checkAudio, 1000)
+          audioWatchdogTimersRef.current.set(data.consumerId, timer)
+        } catch (error) {
+          if (consumer) {
+            clearConsumerTimers(data.consumerId)
+            consumersRef.current.delete(data.consumerId)
+            consumer.close()
+          }
+          socket.emit("closeConsumer", { roomId, peerId: peerIdRef.current, consumerId: data.consumerId })
+          dispatch({ type: "PEER_PRODUCER_CLOSED", peerId: remotePeerId, source, kind })
+          console.error(`[media] Consumer setup failed room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} consumer=${data.consumerId} kind=${kind} transport=${recvTransport.id} state=${recvTransport.connectionState}`, error)
+          throw error
+        }
+      }
+
+      const promise = runConsume().catch((error) => {
+        console.error(`[media] Consume failed room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} kind=${kind}`, error)
+      }).finally(() => {
+        consumeInFlightRef.current.delete(producerId)
+      })
+      consumeInFlightRef.current.set(producerId, promise)
+      return promise
     },
     [roomId, peerIdRef, socketRef, deviceRef, recvTransportRef, consumersRef,
-     pendingClosedProducersRef, dispatch, waitForTransportConnected, startVideoFrameWatchdog],
+     pendingClosedProducersRef, dispatch, waitForTransportConnected, startVideoFrameWatchdog,
+     clearConsumerTimers, readInboundAudio, onRecoveryExhausted],
   )
 
   return { createTransport, setupTransports, consumeProducer, restartIceForTransport, clearIceRetry }
