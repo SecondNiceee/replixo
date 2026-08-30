@@ -1,6 +1,6 @@
 "use client"
 
-import { Pencil, Eraser, Trash2, X } from "lucide-react"
+import { Pencil, Eraser, Minus, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PEN_WIDTH_OPTIONS, type AnnotationTool } from "@/components/stream-annotation-canvas"
 
@@ -60,6 +60,18 @@ export function AnnotationToolbar({
         <Eraser className="size-5" />
       </button>
 
+      {/* Прямая линия */}
+      <button
+        onClick={() => onToolChange("line")}
+        aria-label="Прямая линия"
+        className={cn(
+          "flex size-9 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10",
+          tool === "line" && "bg-white/15 text-white",
+        )}
+      >
+        <Minus className="size-5 -rotate-45" />
+      </button>
+
       <div className="mx-0.5 h-6 w-px bg-white/15" />
 
       {/* Colour swatches */}
@@ -69,12 +81,14 @@ export function AnnotationToolbar({
             key={c}
             onClick={() => {
               onColorChange(c)
-              onToolChange("pen")
+              // Цвет применяется к рисующему инструменту. Если активен ластик —
+              // переключаемся на карандаш, иначе сохраняем перо/прямую.
+              if (tool === "eraser") onToolChange("pen")
             }}
             aria-label={`Цвет ${c}`}
             className={cn(
               "size-6 rounded-full border border-white/30 transition-transform hover:scale-110",
-              tool === "pen" && color === c && "ring-2 ring-white ring-offset-2 ring-offset-black",
+              tool !== "eraser" && color === c && "ring-2 ring-white ring-offset-2 ring-offset-black",
             )}
             style={{ backgroundColor: c }}
           />
@@ -86,13 +100,14 @@ export function AnnotationToolbar({
       {/* Pen thickness */}
       <div className="flex items-center gap-1">
         {PEN_WIDTH_OPTIONS.map((w, i) => {
-          const selected = tool === "pen" && penWidth === w
+          const selected = tool !== "eraser" && penWidth === w
           return (
             <button
               key={w}
               onClick={() => {
                 onPenWidthChange(w)
-                onToolChange("pen")
+                // Толщина применяется к перу и прямой; с ластика уходим на перо.
+                if (tool === "eraser") onToolChange("pen")
               }}
               aria-label={`Толщина ${i + 1}`}
               className={cn(
