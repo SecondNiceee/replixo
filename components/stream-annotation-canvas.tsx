@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef } from "react"
 // parent unmounts the canvas and the drawing is gone.
 // ---------------------------------------------------------------------------
 
-export type AnnotationTool = "pen" | "eraser"
+export type AnnotationTool = "pen" | "eraser" | "line"
 
 interface Point {
   x: number // 0..1, normalized to the canvas width
@@ -241,7 +241,13 @@ export function StreamAnnotationCanvas({
       const stroke = drawingRef.current
       if (!active || !stroke) return
       e.preventDefault()
-      stroke.points.push(pointFromEvent(e))
+      if (stroke.tool === "line") {
+        // Прямая: держим ровно две точки — старт (нажатие) и текущую позицию
+        // курсора, — так линия всегда остаётся прямой, как на доске.
+        stroke.points = [stroke.points[0], pointFromEvent(e)]
+      } else {
+        stroke.points.push(pointFromEvent(e))
+      }
       render()
       // Throttle network sends to ~33/sec; always include the full point list
       // so a dropped packet self-heals on the next send.
