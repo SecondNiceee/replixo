@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 import { ConversationList } from '@/app/chat/conversation-list'
 import { ConversationView } from '@/app/chat/conversation-view'
+import { EnableNotificationsBanner } from '@/components/enable-notifications-banner'
 import { ProfileTopbar } from './profile-topbar'
 import { AccountDialog } from './account-dialog'
 import { FriendsList } from './friends-list'
@@ -232,6 +233,11 @@ export function ProfileClient({ user }: { user: User }) {
         connected={connected}
         unavailable={unavailable}
       />
+
+      {/* Баннер живёт в кабинете, а не в глобальном DmNotifier: просить
+          разрешение уместно там, где человек и так пришёл за сообщениями, а не
+          на лендинге или посреди звонка. */}
+      <EnableNotificationsBanner />
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-[320px_1fr] md:gap-4">
         {/* Левая панель: аккаунт, переключатель и список. На мобильном скрыта,

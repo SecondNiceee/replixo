@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useUnreadTotal } from '@/hooks/dm/use-unread-total'
 import { useFriendsRealtime } from '@/hooks/dm/use-friends-realtime'
@@ -12,6 +13,7 @@ import {
 import { useDmStore } from '@/stores/dm-store'
 import { playFriendEvent, playIncomingMessage } from '@/lib/sounds'
 import { pushNotification } from '@/stores/notifications-store'
+import { showDesktopNotification, useDesktopNotifications } from '@/lib/desktop-notifications'
 import { useCallsRealtime } from '@/hooks/dm/use-calls'
 import { AppToasts } from '@/components/app-toasts'
 import { CallOverlays } from '@/components/call-overlays'
@@ -78,6 +80,20 @@ function toastFor(n: StoredNotification): void {
 export function DmNotifier({ selfId }: { selfId: string }) {
   const { socket } = useDmSocket()
   const totalUnread = useUnreadTotal()
+  const router = useRouter()
+
+  // Разрешение на системные уведомления читаем один раз при монтировании и
+  // после возврата во вкладку: пользователь мог поменять его в настройках
+  // сайта, пока нас не было, и стор об этом иначе не узнает.
+  const syncPermission = useDesktopNotifications((s) => s.sync)
+  useEffect(() => {
+    syncPermission()
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') syncPermission()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [syncPermission])
 
   // Наша половина presence: heartbeat, уход по скрытой вкладке или потере
   // фокуса окном, уход по закрытию вкладки. Живёт здесь по той же причине, что и
@@ -149,12 +165,29 @@ export function DmNotifier({ selfId }: { selfId: string }) {
       // хотя бы его имя, иначе тост выйдет без содержания.
       const text = message.text?.trim()
       const body = text || (message.attachment?.name ? `Вложение: ${message.attachment.name}` : 'Новое сообщение')
+      const title = message.senderName?.trim() || 'Новое сообщение'
+      const href = conversationId ? `/profile?c=${encodeURIComponent(conversationId)}` : undefined
+
+      // Системное уведомление — только когда наш тост заведомо не увидят:
+      // вкладка скрыта или окно браузера не в фокусе. Во всех остальных случаях
+      // тост в углу уже на экране, и вторая плашка от ОС была бы дублем.
+      // hasFocus() ловит случай «вкладка активна, но поверх неё другое окно»:
+      // visibilityState там остаётся visible.
+      const away = !visible || !document.hasFocus()
+      if (away) {
+        showDesktopNotification({
+          title,
+          body,
+          tag: conversationId ? `dm:${conversationId}` : undefined,
+          onClick: href ? () => router.push(href) : undefined,
+        })
+      }
 
       pushNotification({
         kind: 'message',
-        title: message.senderName?.trim() || 'Новое сообщение',
+        title,
         body,
-        href: conversationId ? `/profile?c=${encodeURIComponent(conversationId)}` : undefined,
+        href,
         actionLabel: conversationId ? 'Открыть чат' : undefined,
         duration: 5000,
         // Поток сообщений из одного диалога сворачиваем в один тост, иначе три
@@ -167,7 +200,7 @@ export function DmNotifier({ selfId }: { selfId: string }) {
     return () => {
       socket.off('dm:message', onMessage)
     }
-  }, [socket, selfId])
+  }, [socket, selfId, router])
 
   // Непрочитанные в заголовке вкладки: «(3) Replixo».
   //
