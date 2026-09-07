@@ -27,8 +27,10 @@ export function MessagesButton() {
       className="relative text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
       aria-label={unread > 0 ? `Сообщения, ${unread} непрочитанных` : 'Сообщения'}
     >
+      {/* Иконка без подписи, как у колокольчика рядом: правая группа шапки
+          должна умещаться в половину свободного места, иначе grid 1fr/auto/1fr
+          расширяет колонку и nav уезжает из центра. Название — в aria-label. */}
       <MessageSquare className="size-4" aria-hidden="true" />
-      <span className="hidden md:inline">Сообщения</span>
       {unread > 0 && (
         <span
           className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground"

@@ -26,7 +26,7 @@ export function AuthButtons({ user }: AuthButtonsProps) {
 
   if (user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 lg:gap-2">
         <MessagesButton />
         {/* Как и MessagesButton — только внутри ветки «авторизован»: хук внутри
             грузит /api/notifications, которое анониму отдаст 401. */}
@@ -36,9 +36,12 @@ export function AuthButtons({ user }: AuthButtonsProps) {
           size="sm"
           onClick={() => router.push('/profile')}
           className="text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label="Профиль"
         >
           <UserCircle className="size-4" aria-hidden="true" />
-          <span className="hidden md:inline">Профиль</span>
+          {/* Подписи только от xl: ниже правая группа с ними шире половины
+              свободного места и наезжает на центрированный nav. */}
+          <span className="hidden xl:inline">Профиль</span>
         </Button>
         <Button
           variant="ghost"
@@ -48,7 +51,7 @@ export function AuthButtons({ user }: AuthButtonsProps) {
           aria-label="Выйти из аккаунта"
         >
           <LogOut className="size-4" aria-hidden="true" />
-          <span className="hidden md:inline">Выйти</span>
+          <span className="hidden xl:inline">Выйти</span>
         </Button>
       </div>
     )

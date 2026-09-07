@@ -1,4 +1,14 @@
-const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, clipboard, Notification } = require("electron")
+const {
+  app,
+  BrowserWindow,
+  shell,
+  session,
+  ipcMain,
+  desktopCapturer,
+  clipboard,
+  Notification,
+  nativeImage,
+} = require("electron")
 const path = require("path")
 const fs = require("fs")
 const os = require("os")
@@ -736,7 +746,7 @@ const AUDIO_MAX_PACKETS_PER_TICK = 25
 // Backpressure на IPC.
 //
 // КРИТИЧНО: webContents.send() — это fire-and-forget. Если renderer занят
-// (GC, перерисовка, энкодер), пакеты не исчезают — они копятся в НЕОГРАНИЧЕННОЙ
+// (GC, перерисовка, энкодер), пакеты не исчезают — они копятся в НЕОГРАНИЧЕНН��Й
 // внутренней очереди Chromium IPC, о которой мы ничего не знаем и которую не
 // можем ни измерить, ни обрезать. Наша аккуратно ограниченная очередь в main при
 // этом выглядит пустой, а память растёт в чужом буфере, пока процесс не умрёт.
@@ -1056,12 +1066,35 @@ function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.flashFrame(false)
   mainWindow.focus()
+}
+
+// Иконку тоста грузим через nativeImage, а не строкой пути: внутри app.asar
+// обычный путь читается только патченным fs самого Electron, а Windows-тост
+// открывает файл средствами ОС. Пустую иконку не передаём вовсе — с битым
+// путём тост на Windows может не показаться совсем.
+let cachedNotificationIcon
+function notificationIcon() {
+  if (cachedNotificationIcon === undefined) {
+    const image = nativeImage.createFromPath(path.join(__dirname, "icons", "icon.png"))
+    if (image.isEmpty()) {
+      log.warn("notify", "icon not loaded, showing toast without it")
+      cachedNotificationIcon = null
+    } else {
+      // 1024px PNG для тоста избыточен, ОС всё равно масштабирует.
+      cachedNotificationIcon = image.resize({ width: 128, height: 128 })
+    }
+  }
+  return cachedNotificationIcon
 }
 
 function setupNotifications() {
   ipcMain.handle("show-notification", (_e, payload) => {
-    if (!Notification.isSupported()) return false
+    if (!Notification.isSupported()) {
+      log.warn("notify", "notifications not supported by OS")
+      return false
+    }
     const title = String(payload?.title ?? "").trim()
     if (!title) return false
     const body = String(payload?.body ?? "")
@@ -1070,25 +1103,47 @@ function setupNotifications() {
 
     if (tag) notificationsByTag.get(tag)?.close()
 
-    const notification = new Notification({
-      title,
-      body,
-      icon: path.join(__dirname, "icons", "icon.png"),
-      silent: false,
-    })
+    // Любой бросок здесь превратился бы в отклонённый invoke, который renderer
+    // не ждёт (void), — то есть в молчаливую пропажу уведомления. Логируем.
+    try {
+      const icon = notificationIcon()
+      const notification = new Notification({
+        title,
+        body,
+        ...(icon ? { icon } : {}),
+        silent: false,
+      })
 
-    notification.on("click", () => {
-      focusMainWindow()
-      mainWindow?.webContents.send("notification-clicked", { id })
-    })
-    notification.on("close", () => {
-      if (tag && notificationsByTag.get(tag) === notification) notificationsByTag.delete(tag)
-      mainWindow?.webContents.send("notification-closed", { id })
-    })
+      notification.on("click", () => {
+        focusMainWindow()
+        mainWindow?.webContents.send("notification-clicked", { id })
+      })
+      notification.on("close", () => {
+        if (tag && notificationsByTag.get(tag) === notification) notificationsByTag.delete(tag)
+        mainWindow?.webContents.send("notification-closed", { id })
+      })
+      notification.on("failed", (_event, error) => {
+        log.error("notify", "toast failed", error)
+      })
 
-    if (tag) notificationsByTag.set(tag, notification)
-    notification.show()
-    return true
+      if (tag) notificationsByTag.set(tag, notification)
+      notification.show()
+
+      // Тост живёт несколько секунд; мигающая кнопка в таскбаре остаётся, пока
+      // человек не вернётся в окно, — единственный след, если он был не за ПК.
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+        mainWindow.flashFrame(true)
+        mainWindow.once("focus", () => {
+          if (!mainWindow.isDestroyed()) mainWindow.flashFrame(false)
+        })
+      }
+
+      log.info("notify", "toast shown", { tag })
+      return true
+    } catch (error) {
+      log.error("notify", "toast threw", error?.message || error)
+      return false
+    }
   })
 }
 
