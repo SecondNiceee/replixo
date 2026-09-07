@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, clipboard } = require("electron")
+const { app, BrowserWindow, shell, session, ipcMain, desktopCapturer, clipboard, Notification } = require("electron")
 const path = require("path")
 const fs = require("fs")
 const os = require("os")
@@ -21,6 +21,12 @@ const {
 // Без этого userData был %APPDATA%\my-project, и папки %APPDATA%\Replixo,
 // описанной в диагностике, на машине пользователя просто не существовало.
 app.setName("Replixo")
+
+// Без AppUserModelID Windows не показывает тосты от приложения вовсе: центру
+// уведомлений нужно знать, к какому ярлыку Start Menu их привязать. Значение
+// должно совпадать с appId из electron-builder.yml — именно его инсталлятор NSIS
+// прописывает в ярлык.
+app.setAppUserModelId("ru.replixo.desktop")
 
 // ---------------------------------------------------------------------------
 // Явный лимит heap + снапшот у предела — чтобы отличать OOM от нативного краша.
@@ -1033,10 +1039,64 @@ function setupAudioCapture() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Системные уведомления из main-процесса.
+//
+// Renderer мог бы вызвать new Notification() сам, но в Electron на Windows этот
+// путь ненадёжен: без зарегистрированного AUMID тост не показывается, а клик по
+// нему не возвращает фокус безрамочному окну. Модуль Notification из main
+// работает всегда и даёт нормальный клик: разворачиваем окно и говорим
+// renderer'у, куда перейти.
+// ---------------------------------------------------------------------------
+// Уведомления с одинаковым tag заменяют друг друга, а не копятся — это аналог
+// tag у браузерного Notification API, которого у Electron-модуля нет.
+const notificationsByTag = new Map()
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  if (!mainWindow.isVisible()) mainWindow.show()
+  mainWindow.focus()
+}
+
+function setupNotifications() {
+  ipcMain.handle("show-notification", (_e, payload) => {
+    if (!Notification.isSupported()) return false
+    const title = String(payload?.title ?? "").trim()
+    if (!title) return false
+    const body = String(payload?.body ?? "")
+    const tag = typeof payload?.tag === "string" ? payload.tag : null
+    const id = typeof payload?.id === "string" ? payload.id : null
+
+    if (tag) notificationsByTag.get(tag)?.close()
+
+    const notification = new Notification({
+      title,
+      body,
+      icon: path.join(__dirname, "icons", "icon.png"),
+      silent: false,
+    })
+
+    notification.on("click", () => {
+      focusMainWindow()
+      mainWindow?.webContents.send("notification-clicked", { id })
+    })
+    notification.on("close", () => {
+      if (tag && notificationsByTag.get(tag) === notification) notificationsByTag.delete(tag)
+      mainWindow?.webContents.send("notification-closed", { id })
+    })
+
+    if (tag) notificationsByTag.set(tag, notification)
+    notification.show()
+    return true
+  })
+}
+
 app.whenReady().then(() => {
   setupMediaPermissions()
   setupDesktopCapturer()
   setupPresentationWatch()
+  setupNotifications()
   setupWindowControls()
   setupOverlayMode()
   setupClipboard()

@@ -55,11 +55,13 @@ export default async function ProfilePage() {
   const presence = { ...snapshot, serverNow: Date.now() }
 
   return (
-    // h-dvh + flex: переписка должна скроллиться внутри своей колонки, а не
+    // h-app + flex: переписка должна скроллиться внутри своей колонки, а не
     // растягивать страницу — иначе композер уезжает за нижний край экрана.
-    // app-dark — тёмная палитра кабинета в оттенке лендинга; сам класс нужен и
-    // для диалогов, которые рендерятся в портал вне <main>.
-    <main className="app-dark app-shell-surface flex h-dvh flex-col overflow-hidden px-3 py-3 md:px-5 md:py-5">
+    // h-app (а не h-dvh) вычитает титлбар десктопа: с h-dvh в Electron body
+    // прокручивался на его 32px. app-dark — тёмная палитра кабинета в оттенке
+    // лендинга; сам класс нужен и для диалогов, которые рендерятся в портал вне
+    // <main>.
+    <main className="app-dark app-shell-surface flex h-app flex-col overflow-hidden px-3 py-3 md:px-5 md:py-5">
       {/* ProfileClient читает ?c= и ?u= через useSearchParams — на сервере это
           требует Suspense. */}
       <Suspense fallback={null}>
