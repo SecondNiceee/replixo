@@ -10,8 +10,9 @@ import { create } from 'zustand'
 // Но работает только пока вкладка жива — соединение с сокет-сервером держит
 // именно она. Закрытую вкладку накроет только Web Push (уровень 2).
 //
-// В Electron-сборке тот же API работает без запроса разрешения: приложение
-// живёт в трее, сокет не рвётся, и системное уведомление — ровно то, что нужно.
+// В Electron-сборке уведомление показывает main-процесс через IPC-мост: в
+// безрамочном окне на Windows renderer-ный Notification API молчит (см.
+// setupNotifications в electron/main.js). Разрешение там выдано всегда.
 // ---------------------------------------------------------------------------
 
 /** Состояние разрешения. 'unsupported' — API нет (старый Safari, iOS не-PWA). */
@@ -28,9 +29,38 @@ interface PermissionState {
 
 const DISMISS_KEY = 'replixo:notifications-banner-dismissed'
 
+function isElectron(): boolean {
+  return typeof window !== 'undefined' && !!window.electronAPI?.showNotification
+}
+
 function readPermission(): DesktopPermission {
-  if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'unsupported'
+  if (typeof window === 'undefined') return 'unsupported'
+  // В десктопе разрешение выдаёт setPermissionCheckHandler в main — промпта
+  // нет, баннер не нужен.
+  if (isElectron()) return 'granted'
+  if (typeof Notification === 'undefined') return 'unsupported'
   return Notification.permission
+}
+
+// Клики по уведомлениям приходят из main одним IPC-каналом, поэтому обработчики
+// держим по id и подписываемся на канал один раз, лениво — при первом показе.
+const electronClickHandlers = new Map<string, () => void>()
+let electronBridgeReady = false
+
+function ensureElectronBridge() {
+  if (electronBridgeReady || !isElectron()) return
+  electronBridgeReady = true
+  window.electronAPI!.onNotificationClick(({ id }) => {
+    if (!id) return
+    const handler = electronClickHandlers.get(id)
+    electronClickHandlers.delete(id)
+    handler?.()
+  })
+  // Закрытое без клика уведомление больше не сработает — освобождаем обработчик,
+  // иначе Map росла бы на каждое сообщение до перезагрузки окна.
+  window.electronAPI!.onNotificationClose(({ id }) => {
+    if (id) electronClickHandlers.delete(id)
+  })
 }
 
 function readDismissed(): boolean {
@@ -99,6 +129,16 @@ export function showDesktopNotification({
   onClick,
 }: DesktopNotificationOptions): boolean {
   if (readPermission() !== 'granted') return false
+
+  if (isElectron()) {
+    ensureElectronBridge()
+    const id = crypto.randomUUID()
+    if (onClick) electronClickHandlers.set(id, onClick)
+    // Фокус окна берёт на себя main (focusMainWindow) — из renderer свёрнутое
+    // безрамочное окно window.focus() не поднимает.
+    void window.electronAPI!.showNotification({ id, title, body, tag })
+    return true
+  }
 
   try {
     const notification = new Notification(title, {

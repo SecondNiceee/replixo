@@ -39,6 +39,10 @@ interface ElectronAPI {
   onGlobalDoubleClick: (callback: (point: { x: number; y: number }) => void) => () => void
   // Нативная запись в буфер обмена ОС
   writeClipboardText: (text: string) => Promise<boolean>
+  // Системные уведомления из main-процесса (см. setupNotifications в main.js)
+  showNotification: (payload: DesktopNotificationPayload) => Promise<boolean>
+  onNotificationClick: (callback: (info: { id: string | null }) => void) => () => void
+  onNotificationClose: (callback: (info: { id: string | null }) => void) => () => void
 
   // Variant A — нативный захват системного звука (WASAPI process-loopback),
   // исключающий дерево процессов Electron. См. about/echo-fix/plan.md.
@@ -53,6 +57,15 @@ interface ElectronAPI {
   // Диагностика крашей: путь к main.log и открытие папки логов.
   getLogPath: () => Promise<string | null>
   openLogsFolder: () => Promise<boolean>
+}
+
+interface DesktopNotificationPayload {
+  /** Идентификатор для сопоставления клика с обработчиком в renderer. */
+  id: string
+  title: string
+  body: string
+  /** Уведомления с одним tag заменяют друг друга. */
+  tag?: string
 }
 
 interface PresentationSourceChange {

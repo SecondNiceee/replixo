@@ -8,15 +8,31 @@
    Electron desktop (безрамочное окно + кастомный титлбар + overlay-режим)
    --------------------------------------------------------------------------- */
 
-/* Резервируем 32px сверху под кастомный титлбар (DesktopTitlebar h-8). */
+/* Резервируем 32px сверху под кастомный титлбар (DesktopTitlebar h-8).
+   Высота вынесена в переменную: полноэкранные раскладки (кабинет) считают
+   свою высоту от неё, иначе h-dvh + отступ body дают лишние 32px и body
+   прокручивается на высоту титлбара. */
+:root {
+  --titlebar-h: 0px;
+}
+html.is-electron {
+  --titlebar-h: 32px;
+}
 html.is-electron body {
-  padding-top: 32px;
+  padding-top: var(--titlebar-h);
+}
+
+/* Высота «во весь экран приложения» с учётом титлбара десктопа. В браузере
+   равна обычному h-dvh. */
+@utility h-app {
+  height: calc(100dvh - var(--titlebar-h));
 }
 
 /* Overlay-режим (демонстрация экрана): окно прозрачное, видно рабочий стол.
    Делаем фон документа полностью прозрачным и убираем резерв под титлбар. */
 html[data-overlay='1'] {
   background: transparent !important;
+  --titlebar-h: 0px;
 }
 html[data-overlay='1'] body {
   background: transparent !important;

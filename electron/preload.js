@@ -73,6 +73,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // безрамочном/прозрачном окне Electron).
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),
 
+  // Системные уведомления из main-процесса (см. setupNotifications в main.js):
+  // в безрамочном окне на Windows renderer-ный Notification API молчит.
+  showNotification: (payload) => ipcRenderer.invoke("show-notification", payload),
+  onNotificationClick: (callback) => {
+    const handler = (_e, info) => callback(info)
+    ipcRenderer.on("notification-clicked", handler)
+    return () => ipcRenderer.removeListener("notification-clicked", handler)
+  },
+  onNotificationClose: (callback) => {
+    const handler = (_e, info) => callback(info)
+    ipcRenderer.on("notification-closed", handler)
+    return () => ipcRenderer.removeListener("notification-closed", handler)
+  },
+
   // -------------------------------------------------------------------------
   // Variant A: нативный захват системного звука через WASAPI process-loopback
   // c исключением дерева процессов Electron (см. about/echo-fix/plan.md).
