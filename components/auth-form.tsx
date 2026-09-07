@@ -6,9 +6,15 @@ import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Logo } from '@/components/logo'
+import type { AuthMode } from '@/stores/auth-dialog-store'
 
-export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
+interface AuthFormProps {
+  mode: AuthMode
+  onSwitchMode: (mode: AuthMode) => void
+  onSuccess?: () => void
+}
+
+export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
   const router = useRouter()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -78,134 +84,106 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       'replixo:annotation-auth-mode',
       isSignUp ? 'sign-up' : 'sign-in',
     )
+    onSuccess?.()
     router.replace('/profile')
     router.refresh()
   }
 
   return (
-    <main className="min-h-svh bg-background flex flex-col items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex justify-center mb-8">
-          <Logo />
-        </div>
+    <div className="flex flex-col gap-6">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">
+          {isSignUp ? 'Создать аккаунт' : 'Добро пожаловать'}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {isSignUp ? 'Зарегистрируйтесь, чтобы начать' : 'Войдите в свой аккаунт'}
+        </p>
+      </div>
 
-        {/* Card */}
-        <div className="rounded-2xl border border-border bg-card p-8">
-          <div className="mb-6">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">
-              {isSignUp ? 'Создать аккаунт' : 'Добро пожаловать'}
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {isSignUp
-                ? 'Зарегистрируйтесь, чтобы начать'
-                : 'Войдите в свой аккаунт'}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {isSignUp && (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="auth-username" className="text-sm font-medium text-foreground">
+              Username
+            </label>
+            <Input
+              id="auth-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="cooluser"
+              required
+              maxLength={20}
+              autoComplete="username"
+            />
+            <p className="text-xs text-muted-foreground">
+              Допустимы: англ. буквы, цифры, нижнее подчеркивание
             </p>
           </div>
+        )}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            {isSignUp && (
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="username"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Username
-                </label>
-                <Input
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="cooluser"
-                  required
-                  maxLength={20}
-                  autoComplete="username"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Допустимы: англ. буквы, цифры, нижнее подчеркивание
-                </p>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="email"
-                className="text-sm font-medium text-foreground"
-              >
-                Почта
-              </label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-                autoComplete="email"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="password"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Пароль
-                </label>
-                {!isSignUp && (
-                  <Link
-                    href="/forgot-password"
-                    className="text-xs text-muted-foreground underline-offset-4 hover:underline hover:text-foreground transition-colors"
-                    tabIndex={-1}
-                  >
-                    Забыли пароль?
-                  </Link>
-                )}
-              </div>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Минимум 8 символов"
-                required
-                minLength={8}
-                autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              />
-            </div>
-
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-1"
-              size="lg"
-            >
-              {loading
-                ? 'Подождите...'
-                : isSignUp
-                  ? 'Создать аккаунт'
-                  : 'Войти'}
-            </Button>
-          </form>
-
-          <p className="text-sm text-muted-foreground text-center mt-6">
-            {isSignUp ? 'Уже есть аккаунт? ' : 'Нет аккаунта? '}
-            <Link
-              href={isSignUp ? '/sign-in' : '/sign-up'}
-              className="text-foreground font-medium underline-offset-4 hover:underline"
-            >
-              {isSignUp ? 'Войти' : 'Зарегистрироваться'}
-            </Link>
-          </p>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="auth-email" className="text-sm font-medium text-foreground">
+            Почта
+          </label>
+          <Input
+            id="auth-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            required
+            autoComplete="email"
+          />
         </div>
-      </div>
-    </main>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label htmlFor="auth-password" className="text-sm font-medium text-foreground">
+              Пароль
+            </label>
+            {!isSignUp && (
+              <Link
+                href="/forgot-password"
+                className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                tabIndex={-1}
+              >
+                Забыли пароль?
+              </Link>
+            )}
+          </div>
+          <Input
+            id="auth-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Минимум 8 символов"
+            required
+            minLength={8}
+            autoComplete={isSignUp ? 'new-password' : 'current-password'}
+          />
+        </div>
+
+        {error && (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" disabled={loading} className="mt-1 w-full" size="lg">
+          {loading ? 'Подождите...' : isSignUp ? 'Создать аккаунт' : 'Войти'}
+        </Button>
+      </form>
+
+      <p className="text-center text-sm text-muted-foreground">
+        {isSignUp ? 'Уже есть аккаунт? ' : 'Нет аккаунта? '}
+        <button
+          type="button"
+          onClick={() => onSwitchMode(isSignUp ? 'sign-in' : 'sign-up')}
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          {isSignUp ? 'Войти' : 'Зарегистрироваться'}
+        </button>
+      </p>
+    </div>
   )
 }

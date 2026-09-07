@@ -1,10 +1,13 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { MessagesButton } from '@/components/messages-button'
 import { NotificationsButton } from '@/components/notifications-button'
+import { AuthDialog } from '@/components/auth-dialog'
+import { useAuthDialog } from '@/stores/auth-dialog-store'
 import { LogOut, UserCircle } from 'lucide-react'
 
 interface AuthButtonsProps {
@@ -13,6 +16,7 @@ interface AuthButtonsProps {
 
 export function AuthButtons({ user }: AuthButtonsProps) {
   const router = useRouter()
+  const openAuth = useAuthDialog((s) => s.open)
 
   const handleSignOut = async () => {
     await authClient.signOut()
@@ -55,18 +59,23 @@ export function AuthButtons({ user }: AuthButtonsProps) {
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => router.push('/sign-in')}
+        onClick={() => openAuth('sign-in')}
         className="hidden h-9 px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground active:scale-95 sm:inline-flex"
       >
         Войти
       </Button>
       <Button
         size="sm"
-        onClick={() => router.push('/sign-up')}
+        onClick={() => openAuth('sign-up')}
         className="h-9 px-4 text-sm font-medium transition-all hover:opacity-90 active:scale-95"
       >
         Зарегистрироваться
       </Button>
+      {/* Диалог монтируем только для анонима — авторизованному он не нужен.
+          Suspense — из-за useSearchParams внутри (читает ?auth=). */}
+      <Suspense fallback={null}>
+        <AuthDialog />
+      </Suspense>
     </div>
   )
 }

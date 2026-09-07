@@ -17,8 +17,10 @@ export const metadata: Metadata = {
 export default async function ProfilePage() {
   const session = await auth.api.getSession({ headers: await headers() })
 
+  // Аноним уходит на лендинг; ?auth=sign-in там сразу открывает попап входа,
+  // чтобы не заставлять искать кнопку в шапке.
   if (!session?.user) {
-    redirect('/sign-in')
+    redirect('/?auth=sign-in')
   }
 
   // Списки и статусы снимаем здесь, а не в браузере: пока запросы летели с
