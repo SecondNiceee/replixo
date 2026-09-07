@@ -33,6 +33,15 @@ function isElectron(): boolean {
   return typeof window !== 'undefined' && !!window.electronAPI?.showNotification
 }
 
+/**
+ * Десктоп со старой оболочкой: сайт обновляется сам, а main/preload живут в
+ * установленном .exe, поэтому IPC-моста в нём может не быть. Проверка нужна,
+ * чтобы такая сборка отличалась в логах от «уведомления просто не работают».
+ */
+function isStaleElectronShell(): boolean {
+  return typeof window !== 'undefined' && !!window.electronAPI && !window.electronAPI.showNotification
+}
+
 function readPermission(): DesktopPermission {
   if (typeof window === 'undefined') return 'unsupported'
   // В десктопе разрешение выдаёт setPermissionCheckHandler в main — промпта
@@ -129,6 +138,14 @@ export function showDesktopNotification({
   onClick,
 }: DesktopNotificationOptions): boolean {
   if (readPermission() !== 'granted') return false
+
+  if (isStaleElectronShell()) {
+    // Renderer-ный Notification на Windows без AUMID из main обычно молчит,
+    // поэтому дальше уведомления, скорее всего, не будет — но падать не нужно.
+    console.warn(
+      '[v0] Десктоп-оболочка без IPC-моста уведомлений: нужна пересборка приложения (npm run dist)',
+    )
+  }
 
   if (isElectron()) {
     ensureElectronBridge()
