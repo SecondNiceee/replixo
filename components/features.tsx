@@ -2,49 +2,49 @@ import {
   ShieldOff,
   MonitorPlay,
   Infinity as InfinityIcon,
-  Download,
-  Lock,
+  PenTool,
+  Baby,
   Zap,
 } from "lucide-react"
 
 const features = [
   {
-    icon: ShieldOff,
-    title: "Работает без VPN",
+    icon: PenTool,
+    title: "Интерактивная доска",
     description:
-      "Прямое соединение между участниками. Никаких блокировок, прокси и обходных путей — просто откройте ссылку.",
+      "Объясняйте на общей доске и рисуйте поверх экрана: формулы, схемы, разбор задач — ученик видит всё в реальном времени.",
     featured: true,
-    badge: "Без VPN",
+    badge: "Для уроков",
   },
   {
     icon: InfinityIcon,
-    title: "Без ограничений по времени",
+    title: "Уроки без таймера",
     description:
-      "Ни таймеров, ни автоотключений на 40 минутах. Разговаривайте столько, сколько нужно.",
-  },
-  {
-    icon: Download,
-    title: "Без установки приложений",
-    description:
-      "Всё работает прямо в браузере. Не нужно ничего скачивать ни вам, ни вашим собеседникам.",
-  },
-  {
-    icon: Lock,
-    title: "Приватность по умолчанию",
-    description:
-      "Соединения шифруются, а комнаты доступны только по коду. Ваши разговоры остаются вашими.",
-  },
-  {
-    icon: Zap,
-    title: "Подключение в один клик",
-    description:
-      "Создайте комнату или войдите по коду за пару секунд. Без регистрации и долгих настроек.",
+      "Никаких автоотключений на 40 минутах. Проводите занятие столько, сколько нужно ученику.",
   },
   {
     icon: MonitorPlay,
     title: "Демонстрация экрана",
     description:
-      "Делитесь экраном в высоком качестве для презентаций, созвонов и совместной работы.",
+      "Показывайте презентации, учебники и упражнения в высоком качестве — прямо во время урока.",
+  },
+  {
+    icon: Baby,
+    title: "Просто для учеников и родителей",
+    description:
+      "Ребёнку не нужен аккаунт и установка. Отправьте код урока — и он заходит в один клик из браузера.",
+  },
+  {
+    icon: ShieldOff,
+    title: "Работает без VPN",
+    description:
+      "Прямое соединение между участниками. Никаких блокировок и обходных путей — урок начинается сразу.",
+  },
+  {
+    icon: Zap,
+    title: "Кабинет преподавателя",
+    description:
+      "Список учеников, личные сообщения и быстрый запуск занятий — всё в одном месте, без лишних настроек.",
   },
 ]
 
@@ -60,13 +60,14 @@ export function Features() {
       <div className="mx-auto max-w-6xl">
         <div className="mx-auto max-w-2xl text-center">
           <span className="inline-flex items-center rounded-full border border-border bg-secondary/50 px-4 py-1.5 text-xs font-medium text-muted-foreground">
-            Преимущества
+            Возможности
           </span>
           <h2 className="mt-6 text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl md:text-5xl">
-            Всё для общения. Ничего лишнего.
+            Всё для урока. Ничего лишнего.
           </h2>
           <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            Видеозвонки, которые просто работают — где угодно и без компромиссов.
+            Инструменты преподавателя, которые просто работают — на любом
+            устройстве и без компромиссов.
           </p>
         </div>
 

@@ -56,16 +56,16 @@ export function Hero() {
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-foreground opacity-60" />
           <span className="relative inline-flex size-2 rounded-full bg-foreground" />
         </span>
-        В эфире — без установки приложений
+        Для преподавателей — уроки прямо в браузере
       </span>
 
       <h1 className="max-w-6xl text-balance text-5xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-6xl md:text-7xl">
-        Бессрочные видеозвонки в один клик.
+        Видеоплатформа для онлайн-уроков.
       </h1>
 
       <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Никаких таймеров и сложных настроек. Создайте комнату или присоединитесь
-        по коду — и говорите столько, сколько нужно.
+        Проводите занятия с учениками без таймеров и установки приложений.
+        Создайте комнату урока и отправьте код — ученик подключается в один клик.
       </p>
 
       <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
@@ -75,7 +75,7 @@ export function Hero() {
           onClick={() => setStartOpen(true)}
         >
           <Video className="size-5" strokeWidth={2.25} aria-hidden="true" />
-          Начать звонок
+          Начать урок
           <ArrowRight
             className="size-4 transition-transform group-hover:translate-x-1"
             aria-hidden="true"
@@ -87,7 +87,7 @@ export function Hero() {
           className="h-14 rounded-full px-6 text-base text-muted-foreground hover:bg-secondary hover:text-foreground"
           onClick={() => setJoinOpen(true)}
         >
-          Войти по коду
+          Войти по коду урока
         </Button>
       </div>
 
