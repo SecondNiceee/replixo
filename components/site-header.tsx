@@ -16,19 +16,19 @@ export async function SiteHeader() {
           справа контента больше, чем слева. Голый 1fr не может стать уже своего
           контента — с ним широкая правая группа расширяла колонку и сдвигала
           nav. На мобильных nav скрыт, там хватает обычного flex + justify-between. */}
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:gap-x-6">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-x-6">
         <div className="flex justify-start">
           <Logo />
         </div>
-        <nav className="hidden items-center gap-5 text-sm text-muted-foreground md:flex lg:gap-8">
+        <nav className="hidden items-center gap-6 text-sm text-muted-foreground lg:flex lg:gap-8">
           <a href="#" className="transition-colors hover:text-foreground">
             Возможности
           </a>
           <a href="#" className="transition-colors hover:text-foreground">
-            Тарифы
+            Для преподавателей
           </a>
           <a href="#" className="transition-colors hover:text-foreground">
-            Компания
+            Тарифы
           </a>
           <a
             href="/app-download"

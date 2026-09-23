@@ -2,9 +2,9 @@ import { Check, Sparkles } from "lucide-react"
 
 const points = [
   "Чёткое видео Full HD 1080p",
-  "Кристально чистый звук",
+  "Кристально чистый звук для объяснений",
   "Без водяных знаков и рекламы",
-  "Доступно каждому участнику",
+  "Доступно каждому ученику",
 ]
 
 export function QualityBanner() {
@@ -41,7 +41,7 @@ export function QualityBanner() {
 
           <p className="mx-auto mt-8 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
             Никаких платных тарифов ради нормальной картинки. Full HD доступно
-            всем и сразу — просто начните звонок.
+            каждому преподавателю и ученику сразу — просто начните урок.
           </p>
 
           <ul className="mx-auto mt-12 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
