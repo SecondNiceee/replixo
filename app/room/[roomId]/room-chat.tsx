@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { memo, useEffect, useRef, useState, useCallback } from "react"
 import {
   SendHorizonal,
   ChevronRight,
@@ -35,7 +35,7 @@ interface RoomChatProps {
   peerIds: string[]
 }
 
-export function RoomChat({
+export const RoomChat = memo(function RoomChat({
   open,
   onClose,
   messages,
@@ -289,4 +289,4 @@ export function RoomChat({
       </form>
     </aside>
   )
-}
+})

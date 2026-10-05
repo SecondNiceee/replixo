@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { NetworkBanner } from "@/components/network-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
@@ -220,6 +220,11 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
     markChatRead,
   })
 
+  // Stable array identity so the memoized chat doesn't re-render whenever the
+  // peers Map changes for unrelated reasons (tracks, streams, stats).
+  const peerIdsKey = Array.from(peers.keys()).join("|")
+  const peerIds = useMemo(() => (peerIdsKey ? peerIdsKey.split("|") : []), [peerIdsKey])
+
   // Перо включается/выключается сразу, без подсказки о двойном нажатии.
   const handleAnnotationButtonClick = toggleAnnotation
 
@@ -394,7 +399,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             className={cn(
               "pointer-events-auto",
               overlayMode
-                // Overlay (Electron, идёт демонстрация): доска растянута на всё
+                // Overlay (Electron, идёт демонстрация): доска растянута на вс��
                 // прозрачное окно, поверх видеослоя, но ниже overlay-контролов
                 // (z-9990+). Сайдбар участников — fixed слева, поэтому
                 // отступаем, чтобы он не накрывал доску.
@@ -487,7 +492,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
           mediaBaseUrl={mediaBaseUrl}
           unreadFromIndex={unreadFromIndex}
           readMarkers={readMarkers}
-          peerIds={Array.from(peers.keys())}
+          peerIds={peerIds}
         />
       </div>
 
