@@ -67,6 +67,7 @@ interface RoomControlsProps {
   onSetScreenQuality: (q: ScreenQuality) => void
   onSwitchMic: (deviceId: string) => Promise<boolean>
   onLeave: () => void
+  lessonSummary?: React.ReactNode
 }
 
 export function RoomControls({
@@ -93,6 +94,7 @@ export function RoomControls({
   onSetScreenQuality,
   onSwitchMic,
   onLeave,
+  lessonSummary,
 }: RoomControlsProps) {
   const [micSettingsOpen, setMicSettingsOpen] = useState(false)
   // Recreate the meter stream after a device switch. The call stream itself is
@@ -354,6 +356,8 @@ export function RoomControls({
 
       {/* Chat now lives in a draggable floating button (FloatingChatButton),
           so it's no longer part of the footer cluster. */}
+
+      {lessonSummary}
 
       {/* Leave */}
       <Button
