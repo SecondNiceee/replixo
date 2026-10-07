@@ -44,6 +44,5 @@ export async function POST(req: NextRequest) {
   }
 
   const data = (await res.json()) as { result?: string }
-  if (!data.result) console.warn('SpeechKit empty result', audio.byteLength, JSON.stringify(data))
   return NextResponse.json({ text: data.result ?? '' })
 }
