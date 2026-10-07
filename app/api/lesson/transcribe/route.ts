@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   url.searchParams.set('lang', 'ru-RU')
   url.searchParams.set('format', 'lpcm')
   url.searchParams.set('sampleRateHertz', '16000')
-  if (process.env.YANDEX_FOLDER_ID) url.searchParams.set('folderId', process.env.YANDEX_FOLDER_ID)
+  // With Api-Key auth the folder is derived from the service account; passing a different folderId causes 401.
 
   const res = await fetch(url, {
     method: 'POST',
