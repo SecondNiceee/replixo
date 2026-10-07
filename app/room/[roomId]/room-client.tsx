@@ -11,6 +11,7 @@ import { setInCall } from "@/lib/chat/tab-status"
 import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
+import { LessonSummaryButton } from "./lesson-summary-button"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
@@ -446,6 +447,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
             onLeave={handleLeave}
+            lessonSummary={<LessonSummaryButton localStream={localStream} peers={peers} />}
           />
         </div>
       )}
