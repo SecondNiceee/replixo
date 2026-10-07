@@ -39,8 +39,12 @@ export async function POST(req: NextRequest) {
   })
 
   if (!res.ok) {
-    console.error('SpeechKit error', res.status, await res.text())
-    return NextResponse.json({ error: 'Ошибка распознавания' }, { status: 502 })
+    const details = await res.text()
+    console.error('SpeechKit error', res.status, details)
+    return NextResponse.json(
+      { error: 'Ошибка распознавания', speechkitStatus: res.status, details },
+      { status: 502 },
+    )
   }
 
   const data = (await res.json()) as { result?: string }
