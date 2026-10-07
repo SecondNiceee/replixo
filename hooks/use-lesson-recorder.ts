@@ -7,7 +7,8 @@ const TARGET_RATE = 16000
 const CHUNK_SECONDS = 25
 const CHUNK_SAMPLES = TARGET_RATE * CHUNK_SECONDS
 // Тишину не отправляем, чтобы не платить за пустые минуты.
-const SILENCE_RMS = 0.01
+// RMS усредняется за весь кусок вместе с паузами, поэтому порог низкий.
+const SILENCE_RMS = 0.002
 
 export type LessonRecorderStatus = "idle" | "recording" | "summarizing" | "done" | "error"
 
@@ -40,6 +41,7 @@ export function useLessonRecorder(streams: MediaStream[]) {
   const transcriptRef = useRef<{ at: number; text: string }[]>([])
   const pendingRef = useRef<Promise<void>[]>([])
   const transcribeErrorRef = useRef<string | null>(null)
+  const statsRef = useRef({ sent: 0, maxRms: 0 })
 
   const flush = useCallback(() => {
     const rec = recorderRef.current
@@ -50,7 +52,9 @@ export function useLessonRecorder(streams: MediaStream[]) {
     rec.length = 0
     rec.sumSquares = 0
     rec.chunkStartedAt = performance.now()
+    statsRef.current.maxRms = Math.max(statsRef.current.maxRms, rms)
     if (rms < SILENCE_RMS || samples.length < TARGET_RATE) return
+    statsRef.current.sent++
 
     const job = fetch("/api/lesson/transcribe", {
       method: "POST",
@@ -128,6 +132,7 @@ export function useLessonRecorder(streams: MediaStream[]) {
     transcriptRef.current = []
     pendingRef.current = []
     transcribeErrorRef.current = null
+    statsRef.current = { sent: 0, maxRms: 0 }
     setSummary("")
     setError(null)
     setStatus("recording")
@@ -152,9 +157,12 @@ export function useLessonRecorder(streams: MediaStream[]) {
       .join("\n")
 
     if (!transcript) {
+      const { sent, maxRms } = statsRef.current
       setError(
         transcribeErrorRef.current ??
-          "Не удалось распознать речь — возможно, на уроке было слишком тихо.",
+          (sent === 0
+            ? `Микрофон не уловил звук (уровень ${maxRms.toFixed(4)}). Проверьте, что микрофон включён в звонке.`
+            : `SpeechKit получил ${sent} фрагм. аудио, но вернул пустой текст. Смотрите pm2 logs.`),
       )
       setStatus("error")
       return
