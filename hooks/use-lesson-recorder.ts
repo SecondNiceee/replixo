@@ -39,6 +39,7 @@ export function useLessonRecorder(streams: MediaStream[]) {
   const recorderRef = useRef<Recorder | null>(null)
   const transcriptRef = useRef<{ at: number; text: string }[]>([])
   const pendingRef = useRef<Promise<void>[]>([])
+  const transcribeErrorRef = useRef<string | null>(null)
 
   const flush = useCallback(() => {
     const rec = recorderRef.current
@@ -56,11 +57,15 @@ export function useLessonRecorder(streams: MediaStream[]) {
       headers: { "Content-Type": "application/octet-stream" },
       body: samples.buffer,
     })
-      .then((res) => (res.ok ? res.json() : { text: "" }))
-      .then(({ text }: { text?: string }) => {
+      .then(async (res) => {
+        if (res.status === 401) throw new Error("Войдите в аккаунт, чтобы записывать конспект урока.")
+        if (!res.ok) throw new Error(`Ошибка распознавания речи (${res.status}). Проверьте логи сервера.`)
+        const { text } = (await res.json()) as { text?: string }
         if (text) transcriptRef.current.push({ at, text })
       })
-      .catch(() => {})
+      .catch((e: unknown) => {
+        transcribeErrorRef.current = e instanceof Error ? e.message : "Ошибка распознавания речи"
+      })
     pendingRef.current.push(job)
   }, [])
 
@@ -122,6 +127,7 @@ export function useLessonRecorder(streams: MediaStream[]) {
     recorderRef.current = rec
     transcriptRef.current = []
     pendingRef.current = []
+    transcribeErrorRef.current = null
     setSummary("")
     setError(null)
     setStatus("recording")
@@ -146,7 +152,10 @@ export function useLessonRecorder(streams: MediaStream[]) {
       .join("\n")
 
     if (!transcript) {
-      setError("Не удалось распознать речь — возможно, на уроке было слишком тихо.")
+      setError(
+        transcribeErrorRef.current ??
+          "Не удалось распознать речь — возможно, на уроке было слишком тихо.",
+      )
       setStatus("error")
       return
     }
