@@ -38,6 +38,33 @@ export const auth = betterAuth({
     }),
   ],
   baseURL: APP_URL,
+  user: {
+    additionalFields: {
+      role: {
+        type: 'string',
+        required: false,
+        defaultValue: 'student',
+        input: true,
+      },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => ({
+          data: { ...user, role: user.role === 'teacher' ? 'teacher' : 'student' },
+        }),
+      },
+      update: {
+        // Роль задаётся только при регистрации — клиент не может сам себя
+        // «повысить» до преподавателя через updateUser.
+        before: async (data) => {
+          const { role: _ignored, ...rest } = data as Record<string, unknown>
+          return { data: rest }
+        },
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,

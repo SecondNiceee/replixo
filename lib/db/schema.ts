@@ -22,6 +22,7 @@ export const user = pgTable('user', {
   // таблице. Переименовывать нельзя: на неё смотрит SQL сокет-сервера, который
   // работает с таблицами напрямую, без drizzle.
   lastSeenAt: timestamp('lastSeenAt'),
+  role: text('role').notNull().default('student'),
 })
 
 export const session = pgTable('session', {
@@ -149,7 +150,7 @@ export const conversation = pgTable(
   (t) => [index('dm_conversation_lastMessageAt_idx').on(t.lastMessageAt)],
 )
 
-// Участник диалога + его личное состояние прочитанности.
+// Участник диалога + его личное состояние прочит��нности.
 export const conversationMember = pgTable(
   'dm_conversation_member',
   {

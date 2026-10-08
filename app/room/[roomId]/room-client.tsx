@@ -47,9 +47,10 @@ interface RoomClientProps {
   roomId: string
   create: boolean
   serverDisplayName: string | null
+  isTeacher: boolean
 }
 
-export default function RoomClient({ roomId, create, serverDisplayName }: RoomClientProps) {
+export default function RoomClient({ roomId, create, serverDisplayName, isTeacher }: RoomClientProps) {
   const [displayName, setResolvedDisplayName] = useState<string | null>(serverDisplayName)
   const [nameInput, setNameInput] = useState("")
   const [storageChecked, setStorageChecked] = useState(serverDisplayName !== null)
@@ -114,10 +115,10 @@ export default function RoomClient({ roomId, create, serverDisplayName }: RoomCl
     )
   }
 
-  return <ConnectedRoomClient roomId={roomId} create={create} displayName={displayName} />
+  return <ConnectedRoomClient roomId={roomId} create={create} displayName={displayName} isTeacher={isTeacher} />
 }
 
-function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientProps, "serverDisplayName"> & { displayName: string }) {
+function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<RoomClientProps, "serverDisplayName"> & { displayName: string }) {
   const router = useRouter()
 
   const {
@@ -447,7 +448,7 @@ function ConnectedRoomClient({ roomId, create, displayName }: Omit<RoomClientPro
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
             onLeave={handleLeave}
-            lessonSummary={<LessonSummaryButton localStream={localStream} peers={peers} />}
+            lessonSummary={isTeacher ? <LessonSummaryButton localStream={localStream} peers={peers} /> : null}
           />
         </div>
       )}
