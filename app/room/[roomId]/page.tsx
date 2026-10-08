@@ -28,6 +28,7 @@ export default async function RoomPage({
       roomId={canonicalRoomId}
       create={create === "true"}
       serverDisplayName={session?.user.name?.trim() || null}
+      isTeacher={session?.user.role === "teacher"}
     />
   )
 }

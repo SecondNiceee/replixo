@@ -18,7 +18,7 @@ import { db } from '@/lib/db'
 import { notification } from '@/lib/db/schema'
 
 /** Виды уведомлений о дружбе. Совпадают с NotificationKind на клиенте. */
-export type FriendNotificationKind = 'friend-request' | 'friend-accepted' | 'friend-declined'
+export type FriendNotificationKind = 'friend-request' | 'friend-accepted' | 'friend-declined' | 'note-shared'
 
 /**
  * Создать (или обновить) уведомление для `recipientId` о действии `actorId`.

@@ -575,3 +575,38 @@ html[data-overlay='1'] .desktop-titlebar {
     cursor: pointer;
   }
 }
+
+/* Лист конспекта: светлый «бумажный» документ поверх тёмного кабинета и при печати в PDF. */
+:root {
+  --paper: oklch(0.995 0.002 250);
+  --paper-foreground: oklch(0.22 0.02 260);
+  --paper-muted: oklch(0.5 0.02 260);
+  --paper-rule: oklch(0.91 0.008 260);
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-foreground: var(--paper-foreground);
+  --color-paper-muted: var(--paper-muted);
+  --color-paper-rule: var(--paper-rule);
+}
+
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+  html,
+  body {
+    background: var(--paper) !important;
+  }
+  body {
+    padding-top: 0 !important;
+  }
+  .note-paper {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  [data-desktop-titlebar] {
+    display: none !important;
+  }
+}

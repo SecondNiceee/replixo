@@ -14,6 +14,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  if (session.user.role !== 'teacher') {
+    return NextResponse.json({ error: 'Только для преподавателей' }, { status: 403 })
+  }
 
   const apiKey = process.env.YANDEX_SPEECHKIT_API_KEY
   if (!apiKey) {

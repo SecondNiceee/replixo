@@ -20,7 +20,7 @@ import { chatFetcher } from '@/app/chat/types'
 
 export const NOTIFICATIONS_KEY = '/api/notifications'
 
-export type AppNotificationKind = 'friend-request' | 'friend-accepted' | 'friend-declined'
+export type AppNotificationKind = 'friend-request' | 'friend-accepted' | 'friend-declined' | 'note-shared'
 
 export interface StoredNotification {
   id: string

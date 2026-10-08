@@ -19,6 +19,7 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [role, setRole] = useState<'teacher' | 'student'>('student')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -59,6 +60,7 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
           password,
           name: trimmedUsername,
           username: trimmedUsername,
+          role,
         })
       : await authClient.signIn.email({
           email: normalizedEmail,
@@ -101,6 +103,36 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {isSignUp && (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="mb-1.5 text-sm font-medium text-foreground">Я</legend>
+            <div role="radiogroup" className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  { value: 'student', label: 'Ученик' },
+                  { value: 'teacher', label: 'Преподаватель' },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={role === option.value}
+                  onClick={() => setRole(option.value)}
+                  className={
+                    'h-10 rounded-md border text-sm font-medium transition-colors ' +
+                    (role === option.value
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-transparent text-muted-foreground hover:text-foreground')
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
         {isSignUp && (
           <div className="flex flex-col gap-1.5">
             <label htmlFor="auth-username" className="text-sm font-medium text-foreground">
