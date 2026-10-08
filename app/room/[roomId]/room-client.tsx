@@ -448,7 +448,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
             onLeave={handleLeave}
-            lessonSummary={isTeacher ? <LessonSummaryButton localStream={localStream} peers={peers} /> : null}
+            lessonSummary={isTeacher ? <LessonSummaryButton roomId={roomId} localStream={localStream} peers={peers} /> : null}
           />
         </div>
       )}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, UserCheck, UserPlus, UserX, X } from 'lucide-react'
+import { Bell, Check, FileText, UserCheck, UserPlus, UserX, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   useNotifications,
@@ -29,12 +29,14 @@ const ICONS: Record<AppNotificationKind, typeof UserPlus> = {
   'friend-request': UserPlus,
   'friend-accepted': UserCheck,
   'friend-declined': UserX,
+  'note-shared': FileText,
 }
 
 /** Текст уведомления. Единственное место, где вид превращается во фразу. */
 function describe(kind: AppNotificationKind): string {
   if (kind === 'friend-request') return 'хочет добавить вас в друзья'
   if (kind === 'friend-accepted') return 'принял вашу заявку в друзья'
+  if (kind === 'note-shared') return 'отправил вам конспект урока'
   return 'отклонил вашу заявку в друзья'
 }
 
@@ -42,6 +44,7 @@ function describe(kind: AppNotificationKind): string {
 function linkFor(n: StoredNotification): string | null {
   if (n.kind === 'friend-request') return '/profile'
   if (n.kind === 'friend-accepted') return `/chat?u=${encodeURIComponent(n.actorId)}`
+  if (n.kind === 'note-shared') return '/profile?tab=notes'
   return null
 }
 

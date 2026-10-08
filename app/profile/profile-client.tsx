@@ -19,6 +19,7 @@ import { EnableNotificationsBanner } from '@/components/enable-notifications-ban
 import { ProfileTopbar } from './profile-topbar'
 import { AccountDialog } from './account-dialog'
 import { FriendsList } from './friends-list'
+import { NotesList } from './notes-list'
 import {
   fetcher,
   type User,
@@ -27,7 +28,7 @@ import {
   type SentRequest,
 } from './types'
 
-type Pane = 'chats' | 'friends'
+type Pane = 'chats' | 'friends' | 'notes'
 
 /**
  * Личный кабинет в раскладке мессенджера: слева список чатов и друзей, справа
@@ -156,6 +157,10 @@ export function ProfileClient({ user }: { user: User }) {
   // уведомления и кнопка «Сообщения» в шапке.
   const searchParams = useSearchParams()
   useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab === 'notes' || tab === 'friends' || tab === 'chats') setPane(tab)
+  }, [searchParams])
+  useEffect(() => {
     const fromUrl = searchParams.get('c')
     // Через openConversation, а не setActiveId: ссылка может вести в ещё не
     // созданное «Избранное». Чужой self-id при этом не утечёт — ensureFavorites
@@ -188,7 +193,7 @@ export function ProfileClient({ user }: { user: User }) {
     if (restored.current || isLoading) return
     restored.current = true
 
-    // Глубокая ссылка важнее памяти: если человек пришёл по ?c= или ?u=, он
+    // Глубокая ссылка важнее памя��и: если человек пришёл по ?c= или ?u=, он
     // просил конкретный диалог, а не тот, что был открыт в прошлый раз.
     if (searchParams.get('c') || searchParams.get('u')) return
 
@@ -221,6 +226,7 @@ export function ProfileClient({ user }: { user: User }) {
   const panes: { id: Pane; label: string; dot: boolean }[] = [
     { id: 'chats', label: 'Чаты', dot: totalUnread > 0 },
     { id: 'friends', label: 'Друзья', dot: false },
+    { id: 'notes', label: 'Конспекты', dot: false },
   ]
 
   return (
@@ -319,6 +325,8 @@ export function ProfileClient({ user }: { user: User }) {
                 onSelect={openConversation}
                 onStartWithFriend={openWithFriend}
               />
+            ) : pane === 'notes' ? (
+              <NotesList />
             ) : (
               <FriendsList
                 friends={friends}

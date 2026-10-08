@@ -317,3 +317,40 @@ export const presentationDrawing = pgTable(
 )
 
 
+
+// --- Конспекты уроков --------------------------------------------------------
+// Черновик составляет ИИ, преподаватель правит и сохраняет. Получатели из
+// lesson_note_share могут только читать. SQL: drizzle/add_lesson_notes.sql.
+
+export const lessonNote = pgTable(
+  'lesson_note',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('ownerId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    content: text('content').notNull(),
+    roomId: text('roomId'),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+  },
+  (t) => [index('lesson_note_owner_idx').on(t.ownerId, t.updatedAt)],
+)
+
+export const lessonNoteShare = pgTable(
+  'lesson_note_share',
+  {
+    noteId: text('noteId')
+      .notNull()
+      .references(() => lessonNote.id, { onDelete: 'cascade' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    sharedAt: timestamp('sharedAt').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.noteId, t.userId] }),
+    index('lesson_note_share_user_idx').on(t.userId, t.sharedAt),
+  ],
+)
