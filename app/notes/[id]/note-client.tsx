@@ -19,6 +19,7 @@ export function NoteClient({ note: initial, isOwner }: { note: NoteDetail; isOwn
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
   const save = async () => {
     setSaving(true)
@@ -46,13 +47,22 @@ export function NoteClient({ note: initial, isOwner }: { note: NoteDetail; isOwn
     if (res.ok) router.push('/profile?tab=notes')
   }
 
-  // Браузерная печать даёт настоящий векторный PDF с кириллицей. Заголовок
-  // вкладки становится именем файла по умолчанию.
-  const downloadPdf = () => {
-    const previous = document.title
-    document.title = note.title
-    window.print()
-    document.title = previous
+  const downloadPdf = async () => {
+    setDownloading(true)
+    try {
+      const { downloadNotePdf } = await import('@/lib/note-pdf')
+      await downloadNotePdf({
+        title: note.title,
+        content: note.content,
+        author: note.ownerName,
+        date: note.createdAt,
+      })
+    } catch (e) {
+      console.error('PDF generation failed', e)
+      window.alert('Не удалось создать PDF. Попробуйте ещё раз.')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   return (
@@ -71,8 +81,8 @@ export function NoteClient({ note: initial, isOwner }: { note: NoteDetail; isOwn
                 Редактировать
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={downloadPdf}>
-              <Download />
+            <Button variant="outline" size="sm" onClick={downloadPdf} disabled={downloading}>
+              {downloading ? <Loader2 className="animate-spin" /> : <Download />}
               Скачать PDF
             </Button>
             {isOwner && (

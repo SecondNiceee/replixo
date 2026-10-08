@@ -14,7 +14,7 @@ export function extractTopic(content: string): string | null {
  * «Раздел:» — заголовок, «- пункт» — список. Так его легко править в
  * textarea, а здесь он превращается в свёрстанный документ.
  */
-function parse(content: string): Block[] {
+export function parseNote(content: string): Block[] {
   const blocks: Block[] = []
   let list: { type: 'bullets'; items: string[] } | null = null
 
@@ -57,7 +57,7 @@ export function NoteDocument({
   author: string
   date: number
 }) {
-  const blocks = parse(content)
+  const blocks = parseNote(content)
   const formatted = new Date(date).toLocaleDateString('ru-RU', {
     day: 'numeric',
     month: 'long',
