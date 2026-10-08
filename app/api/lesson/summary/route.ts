@@ -46,30 +46,51 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Пустая расшифровка' }, { status: 400 })
   }
 
-  const model = process.env.YANDEX_LLM_MODEL || 'deepseek-v4-flash'
+  const models = [
+    process.env.YANDEX_LLM_MODEL || 'deepseek-v4-flash',
+    process.env.YANDEX_LLM_FALLBACK_MODEL || 'yandexgpt/latest',
+  ]
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: transcript.slice(0, MAX_TRANSCRIPT_CHARS) },
+  ]
 
-  const res = await fetch('https://llm.api.cloud.yandex.net/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Api-Key ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: `gpt://${folderId}/${model}`,
-      temperature: 0.3,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: transcript.slice(0, MAX_TRANSCRIPT_CHARS) },
-      ],
-    }),
-  })
+  for (const model of models) {
+    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
+      const res = await fetch('https://llm.api.cloud.yandex.net/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Api-Key ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: `gpt://${folderId}/${model}`,
+          temperature: 0.3,
+          messages,
+        }),
+      })
 
-  if (!res.ok) {
-    console.error('Yandex LLM error', res.status, await res.text())
-    return NextResponse.json({ error: 'Не удалось составить конспект' }, { status: 502 })
+      if (res.ok) {
+        const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+        const summary = data.choices?.[0]?.message?.content?.trim() ?? ''
+        return NextResponse.json({ summary, model })
+      }
+
+      console.error(`Yandex LLM error (${model}, попытка ${attempt + 1})`, res.status, await res.text())
+
+      // Ретраить имеет смысл только перегрузку/лимиты; 4xx (ключ, каталог, модель) не исправятся сами.
+      if (!RETRYABLE_STATUSES.has(res.status)) break
+      if (attempt < ATTEMPTS_PER_MODEL - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
+      }
+    }
   }
 
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
-  const summary = data.choices?.[0]?.message?.content?.trim() ?? ''
-  return NextResponse.json({ summary })
+  return NextResponse.json(
+    { error: 'Сервис ИИ сейчас перегружен, попробуйте составить конспект ещё раз через минуту' },
+    { status: 503 },
+  )
 }
+
+const ATTEMPTS_PER_MODEL = 3
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504])
