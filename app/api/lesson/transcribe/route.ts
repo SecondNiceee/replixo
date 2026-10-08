@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   url.searchParams.set('lang', 'ru-RU')
   url.searchParams.set('format', 'lpcm')
   url.searchParams.set('sampleRateHertz', '16000')
-  if (process.env.YANDEX_FOLDER_ID) url.searchParams.set('folderId', process.env.YANDEX_FOLDER_ID)
+  // With Api-Key auth the folder is derived from the service account; passing a different folderId causes 401.
 
   const res = await fetch(url, {
     method: 'POST',
@@ -39,8 +39,12 @@ export async function POST(req: NextRequest) {
   })
 
   if (!res.ok) {
-    console.error('SpeechKit error', res.status, await res.text())
-    return NextResponse.json({ error: 'Ошибка распознавания' }, { status: 502 })
+    const details = await res.text()
+    console.error('SpeechKit error', res.status, details)
+    return NextResponse.json(
+      { error: 'Ошибка распознавания', speechkitStatus: res.status, details },
+      { status: 502 },
+    )
   }
 
   const data = (await res.json()) as { result?: string }
