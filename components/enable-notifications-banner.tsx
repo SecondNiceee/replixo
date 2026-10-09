@@ -41,8 +41,8 @@ export function EnableNotificationsBanner() {
       aria-label="Уведомления"
       className="panel-surface flex shrink-0 items-center gap-3 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4"
     >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-        <Bell className="size-4" aria-hidden="true" />
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+        <Bell className="size-5" aria-hidden="true" />
       </span>
 
       <div className="min-w-0 flex-1">
