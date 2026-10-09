@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { UserMinus, Loader2 } from 'lucide-react'
+import { UserMinus, UserPlus, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { AddFriendDialog } from './add-friend-dialog'
 import {
   usePresenceLastSeen,
   usePresenceServerNow,
@@ -83,7 +85,7 @@ export function FriendsList({ friends, isLoading, onMessage }: FriendsListProps)
           </div>
         ) : visible.length === 0 ? (
           // Текстом по левому краю, без иконки-призрака — как и в списке чатов.
-          <div className="flex flex-col gap-1 px-4 py-8">
+          <div className="flex flex-col gap-1 px-4 pb-6 pt-2">
             {search ? (
               <>
                 <p className="text-sm font-medium text-foreground">Никого не нашлось</p>
@@ -95,9 +97,16 @@ export function FriendsList({ friends, isLoading, onMessage }: FriendsListProps)
               <>
                 <p className="text-sm font-medium text-foreground">Друзей пока нет</p>
                 <p className="text-pretty text-xs leading-relaxed text-muted-foreground">
-                  Найдите человека по username кнопкой «Добавить в друзья» в шапке — после
-                  подтверждения он появится здесь.
+                  Найдите человека по username — после подтверждения он появится здесь.
                 </p>
+                {friends.length === 0 && (
+                  <div className="mt-3">
+                    <AddFriendDialog trigger={<Button type="button" size="sm" className="gap-1.5" />}>
+                      <UserPlus className="size-4" aria-hidden="true" />
+                      Добавить друга
+                    </AddFriendDialog>
+                  </div>
+                )}
               </>
             )}
           </div>

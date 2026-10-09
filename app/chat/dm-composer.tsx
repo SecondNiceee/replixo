@@ -1,8 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, Loader2, Paperclip, SendHorizonal, X } from 'lucide-react'
+import { FileText, Loader2, NotebookText, Paperclip, Plus, SendHorizonal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { NotePickerDialog } from './note-picker-dialog'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatFileSize, isImageAttachment } from '@/lib/chat-format'
 import { normalizeAttachment, type DmAttachment } from './types'
@@ -16,6 +23,8 @@ interface DmComposerProps {
   /** Вызывается при наборе текста; троттлинг событий — внутри useTyping. */
   onTyping: () => void
   disabled: boolean
+  /** Есть только у преподавателя: пункт «Конспект» в меню «+». */
+  onSendNote?: (note: { id: string; title: string }) => Promise<void>
 }
 
 /** Больше — неудобно листать превью и незачем: это личный чат, не файлообменник. */
@@ -26,8 +35,10 @@ export function DmComposer({
   onSend,
   onTyping,
   disabled,
+  onSendNote,
 }: DmComposerProps) {
   const [text, setText] = useState('')
+  const [notePickerOpen, setNotePickerOpen] = useState(false)
   // Загруженные вложения, ожидающие отправки. Каждое уходит своим сообщением
   // (см. ConversationView.handleSend), а текст из поля — только к последнему.
   // Файлы уже лежат на сервере: так отправка мгновенна, а ошибка загрузки
@@ -274,22 +285,42 @@ export function DmComposer({
           aria-hidden="true"
           tabIndex={-1}
         />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || uploading || pendingList.length >= MAX_ATTACHMENTS}
-          // Кружок виден всегда, а не только под курсором: у ghost-варианта фон
-          // появляется лишь на hover, и до наведения скрепка висела в пустоте
-          // рядом с явно очерченными полем и кнопкой отправки. Фон берём тот же,
-          // что у поля ввода, чтобы круг читался как часть строки, а не как
-          // вторая акцентная кнопка возле «Отправить».
-          className="size-10 shrink-0 rounded-full bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-          aria-label="Прикрепить файл"
-        >
-          <Paperclip className="size-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            openOnHover
+            delay={60}
+            disabled={disabled}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                // Кружок виден всегда, а не только под курсором: фон тот же, что
+                // у поля ввода, чтобы круг читался как часть строки, а не как
+                // вторая акцентная кнопка возле «Отправить».
+                className="size-10 shrink-0 rounded-full bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground data-[popup-open]:bg-foreground/10 data-[popup-open]:text-foreground"
+                aria-label="Прикрепить"
+              />
+            }
+          >
+            <Plus className="size-5 transition-transform in-data-[popup-open]:rotate-45" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="min-w-44">
+            <DropdownMenuItem
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || pendingList.length >= MAX_ATTACHMENTS}
+            >
+              <Paperclip />
+              Файл
+            </DropdownMenuItem>
+            {onSendNote && (
+              <DropdownMenuItem onClick={() => setNotePickerOpen(true)}>
+                <NotebookText />
+                Конспект
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         {/* Само поле — в ComposerTextarea: там авторост, скролл и Enter. */}
         <ComposerTextarea
           value={text}
@@ -311,6 +342,10 @@ export function DmComposer({
           <SendHorizonal className="size-4" />
         </Button>
       </form>
+
+      {onSendNote && (
+        <NotePickerDialog open={notePickerOpen} onOpenChange={setNotePickerOpen} onPick={onSendNote} />
+      )}
     </div>
   )
 }

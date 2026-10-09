@@ -167,7 +167,7 @@ export function LessonSummaryButton({ roomId, localStream, peers }: LessonSummar
         </DialogContent>
       </Dialog>
 
-      <ShareNoteDialog noteId={savedId} open={shareOpen} onOpenChange={setShareOpen} />
+      <ShareNoteDialog noteId={savedId} noteTitle={title} open={shareOpen} onOpenChange={setShareOpen} />
     </>
   )
 }

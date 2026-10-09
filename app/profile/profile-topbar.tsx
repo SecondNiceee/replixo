@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { StartCallDialog } from '@/components/start-call-dialog'
 import { cn } from '@/lib/utils'
-import { AddFriendForm } from './add-friend-form'
+import { AddFriendDialog } from './add-friend-dialog'
 import { PendingRequests } from './pending-requests'
 import { SentRequests } from './sent-requests'
 import type { PendingRequest, SentRequest } from './types'
@@ -91,28 +91,14 @@ export function ProfileTopbar({
         </Button>
 
         {/* Добавить в друзья */}
-        <Dialog>
-          <DialogTrigger
-            render={
-              <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground" />
-            }
-          >
-            <UserPlus className="size-4" aria-hidden="true" />
-            <span className="hidden sm:inline">Добавить в друзья</span>
-          </DialogTrigger>
-          {/* app-dark обязателен: DialogContent рендерится в портал у <body>,
-              вне <main class="app-dark">, и без класса взял бы палитру :root
-              без акцента кабинета. */}
-          <DialogContent className="app-dark bg-card sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Добавить в друзья</DialogTitle>
-              <DialogDescription>
-                Введите username — человек получит заявку и сможет её принять.
-              </DialogDescription>
-            </DialogHeader>
-            <AddFriendForm />
-          </DialogContent>
-        </Dialog>
+        <AddFriendDialog
+          trigger={
+            <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground" />
+          }
+        >
+          <UserPlus className="size-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Добавить в друзья</span>
+        </AddFriendDialog>
 
         {/* Заявки */}
         <Dialog>
@@ -211,7 +197,7 @@ export function ProfileTopbar({
               aria-hidden="true"
             />
             {/* На узком экране остаётся только точка, поэтому подпись дублируется
-                для скринридера — цвет сам по себе ничего не сообщает. */}
+                для скринридера — цвет с��м по себе ничего не сообщает. */}
             <span className="sr-only md:hidden">
               {unavailable ? 'Чат недоступен' : 'Подключение'}
             </span>

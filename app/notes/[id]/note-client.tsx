@@ -126,7 +126,7 @@ export function NoteClient({ note: initial, isOwner }: { note: NoteDetail; isOwn
         <NoteDocument title={note.title} content={note.content} author={note.ownerName} date={note.createdAt} />
       )}
 
-      {isOwner && <ShareNoteDialog noteId={note.id} open={shareOpen} onOpenChange={setShareOpen} />}
+      {isOwner && <ShareNoteDialog noteId={note.id} noteTitle={note.title} open={shareOpen} onOpenChange={setShareOpen} />}
     </div>
   )
 }
