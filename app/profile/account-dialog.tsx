@@ -6,6 +6,7 @@ import { AtSign, Check, Loader2, LogOut, Mail, Pencil, Settings, X } from 'lucid
 import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { UserAvatar } from '@/components/user-avatar'
 import {
   Dialog,
   DialogContent,
@@ -90,9 +91,7 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
       >
         {/* Аватар плоский, с моноширинной буквой и тонким кольцом: градиент
             остался только у логотипа, чтобы акцент в панели был один. */}
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm font-medium text-foreground ring-1 ring-inset ring-border">
-          {displayName.charAt(0).toUpperCase()}
-        </span>
+        <UserAvatar name={displayName} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="truncate text-sm font-medium leading-tight text-foreground">
             {displayName}
@@ -112,9 +111,7 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
         </DialogHeader>
 
         <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-secondary/20 p-3">
-          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-lg text-foreground ring-1 ring-inset ring-border">
-            {displayName.charAt(0).toUpperCase()}
-          </span>
+          <UserAvatar name={displayName} size="lg" />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-base font-semibold text-foreground">{displayName}</span>
             <span className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">

@@ -13,6 +13,7 @@ import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import { useNow } from '@/hooks/use-now'
 import { ListSearch } from '@/components/chat/list-search'
 import { PresenceDot } from '@/components/chat/presence-dot'
+import { UserAvatar } from '@/components/user-avatar'
 import { presenceLabel } from '@/app/chat/types'
 import {
   friendsAction,
@@ -175,12 +176,11 @@ function FriendRow({ friend, removing, onMessage, onRemove }: FriendRowProps) {
         className="flex w-full items-center gap-3 rounded-xl py-2 pl-2 pr-10 text-left transition-colors group-hover:bg-foreground/5"
         aria-label={`Написать ${name}`}
       >
-        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
-          {name.charAt(0).toUpperCase()}
+        <UserAvatar name={name}>
           {/* label пустой: статус уже написан текстом ниже, и озвучивать его
               скринридеру дважды не нужно. */}
           <PresenceDot status={status} />
-        </span>
+        </UserAvatar>
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm text-foreground">{name}</span>
           {/* Подпись всегда приглушённая. Зелёное «в сети» повторяло цвет точки
