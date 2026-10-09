@@ -14,15 +14,19 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { fetcher, type FriendsResponse } from '@/app/profile/types'
+import { useDmSocket } from '@/hooks/dm/use-dm-socket'
+import { shareNoteWithFriends } from '@/lib/chat/share-note'
 
 interface ShareNoteDialogProps {
   noteId: string | null
+  noteTitle: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-export function ShareNoteDialog({ noteId, open, onOpenChange }: ShareNoteDialogProps) {
+export function ShareNoteDialog({ noteId, noteTitle, open, onOpenChange }: ShareNoteDialogProps) {
   const { data, isLoading } = useSWR<FriendsResponse>(open ? '/api/friends' : null, fetcher)
+  const { socket } = useDmSocket()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<string | null>(null)
@@ -45,14 +49,12 @@ export function ShareNoteDialog({ noteId, open, onOpenChange }: ShareNoteDialogP
     setSending(true)
     setError(null)
     try {
-      const res = await fetch(`/api/notes/${noteId}/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userIds: [...selected] }),
-      })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error || 'Не удалось отправить')
-      setResult(`Отправлено: ${json.shared}`)
+      const shared = await shareNoteWithFriends(
+        { id: noteId, title: noteTitle },
+        [...selected],
+        socket,
+      )
+      setResult(`Отправлено: ${shared}`)
       setSelected(new Set())
     } catch (e) {
       setError((e as Error).message)
@@ -75,7 +77,7 @@ export function ShareNoteDialog({ noteId, open, onOpenChange }: ShareNoteDialogP
         <DialogHeader>
           <DialogTitle>Отправить конспект</DialogTitle>
           <DialogDescription>
-            Выбранные друзья увидят его в разделе «Конспекты» и получат уведомление.
+            Конспект придёт друзьям в личный чат и появится у них в разделе «Конспекты».
           </DialogDescription>
         </DialogHeader>
 

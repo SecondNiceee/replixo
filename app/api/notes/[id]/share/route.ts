@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { and, eq } from 'drizzle-orm'
 import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { lessonNote, lessonNoteShare } from '@/lib/db/schema'
+import { conversation, conversationMember, lessonNote, lessonNoteShare } from '@/lib/db/schema'
+import { directConversationId } from '@/lib/chat/conversation-id'
 import { listFriends } from '@/lib/chat/friends'
 import { createFriendNotification } from '@/lib/chat/notifications'
 
@@ -44,5 +45,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   await Promise.all(recipients.map((r) => createFriendNotification(r, ownerId, 'note-shared')))
 
-  return NextResponse.json({ shared: recipients.length })
+  // Диалоги нужны клиенту, чтобы следом отправить конспект сообщением в чат.
+  // Создаём их так же, как POST /api/chat/conversations: idempotent upsert.
+  const conversationIds = recipients.map((r) => directConversationId(ownerId, r))
+  await db
+    .insert(conversation)
+    .values(conversationIds.map((cid) => ({ id: cid, type: 'direct' })))
+    .onConflictDoNothing()
+  await db
+    .insert(conversationMember)
+    .values(
+      recipients.flatMap((r, i) => [
+        { conversationId: conversationIds[i], userId: ownerId },
+        { conversationId: conversationIds[i], userId: r },
+      ]),
+    )
+    .onConflictDoNothing()
+
+  return NextResponse.json({ shared: recipients.length, conversationIds })
 }

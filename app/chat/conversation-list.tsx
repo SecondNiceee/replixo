@@ -8,6 +8,7 @@ import { usePresenceStatus } from '@/components/chat/presence-provider'
 import { ListSearch } from '@/components/chat/list-search'
 import { PresenceDot } from '@/components/chat/presence-dot'
 import type { Friend } from '@/app/profile/types'
+import { isNoteAttachment } from '@/lib/chat/note-attachment'
 import {
   FAVORITES_HINT,
   conversationTitle,
@@ -64,7 +65,11 @@ function formatListTime(iso: string | null): string {
  */
 function formatPreview(c: DmConversation, selfId: string): string {
   const attachment = normalizeAttachment(c.lastMessageAttachment)
-  const body = c.lastMessageText || (attachment ? `Файл: ${attachment.name}` : '')
+  const body =
+    c.lastMessageText ||
+    (attachment
+      ? `${isNoteAttachment(attachment) ? 'Конспект' : 'Файл'}: ${attachment.name}`
+      : '')
   // «Избранное» пустым описывает себя, а не отчитывается об отсутствии
   // сообщений: строка стоит в списке всегда, в том числе до первой заметки, и
   // «Нет сообщений» не объясняло бы, зачем она там.
@@ -277,7 +282,7 @@ export function ConversationList({
               </div>
             )}
 
-            {/* Пусто по двум разным причинам: либо друзей ещё нет, либо ничего
+            {/* Пусто по двум разным прич��нам: либо друзей ещё нет, либо ничего
                 не нашлось по запросу. Один текст на оба случая сбивал бы с
                 толку — при активном поиске он советовал бы добавить друзей. */}
             {nothingFound && (

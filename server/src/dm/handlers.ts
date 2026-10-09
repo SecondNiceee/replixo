@@ -23,6 +23,8 @@ import { isDmAttachmentUrl } from './uploads'
 const MAX_TEXT_LENGTH = 4000
 const MAX_ID_LENGTH = 64
 const MAX_CONVERSATION_ID_LENGTH = 128
+const NOTE_ATTACHMENT_MIME = 'application/x-replixo-note'
+const NOTE_URL_RE = /^\/notes\/[0-9a-f-]{36}$/i
 
 type Ack = (res: { ok: true; id: string; createdAt: number } | { ok: false; error: string }) => void
 
@@ -69,6 +71,15 @@ function parseAttachment(
   if (typeof raw !== 'object') return null
 
   const { url, name, size, mime } = raw as Record<string, unknown>
+
+  // Конспект — ссылка на страницу приложения, а не файл на диске. Доступ к ней
+  // проверяет сама страница /notes/<id>, поэтому здесь достаточно формы ссылки.
+  if (mime === NOTE_ATTACHMENT_MIME) {
+    if (typeof url !== 'string' || !NOTE_URL_RE.test(url)) return null
+    if (typeof name !== 'string' || !name) return null
+    return { url, name: name.slice(0, MAX_NAME_LENGTH), size: 0, mime: NOTE_ATTACHMENT_MIME }
+  }
+
   if (typeof url !== 'string' || !isDmAttachmentUrl(url, conversationId)) return null
   if (typeof name !== 'string' || !name) return null
   if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return null
