@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Send, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { UserAvatar } from '@/components/user-avatar'
 import { useDmSocket } from '@/hooks/dm/use-dm-socket'
 import {
   friendsAction,
@@ -70,9 +71,7 @@ export function SentRequests({ sent, isLoading }: SentRequestsProps) {
                 )}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
-                    {(s.addresseeUsername ?? s.addresseeName).charAt(0).toUpperCase()}
-                  </span>
+                  <UserAvatar name={s.addresseeUsername ?? s.addresseeName} size="sm" />
                   <div className="flex min-w-0 flex-col">
                     <span className="truncate text-sm font-medium text-foreground">
                       {s.addresseeUsername ?? s.addresseeName}
