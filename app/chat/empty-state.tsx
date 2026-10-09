@@ -19,7 +19,7 @@ export function EmptyState() {
           колонку прежние 14–16px выглядели подписью под несуществующей
           картинкой. */}
       <div className="flex max-w-xl flex-col items-center gap-3 text-center">
-        <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground lg:text-3xl">
+        <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground">
           Диалог не выбран
         </h2>
         <p className="text-pretty text-base leading-relaxed text-muted-foreground lg:text-lg">
