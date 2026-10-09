@@ -19,6 +19,8 @@ import { useNow } from '@/hooks/use-now'
 import { useScrollbarAutohide } from '@/hooks/use-scrollbar-autohide'
 import { PresenceDot } from '@/components/chat/presence-dot'
 import { cn } from '@/lib/utils'
+import { useSession } from '@/lib/auth-client'
+import { noteAttachment } from '@/lib/chat/note-attachment'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
@@ -184,6 +186,30 @@ export function ConversationView({
     [send, stopTyping],
   )
 
+  const { data: session } = useSession()
+  const isTeacher = session?.user.role === 'teacher'
+  const friendId = conversation?.friendId
+
+  // Сначала выдаём собеседнику доступ (иначе ссылка на конспект откроется у
+  // него с 404), потом шлём карточку обычным путём — с оптимистичным показом.
+  const handleSendNote = useCallback(
+    async (note: { id: string; title: string }) => {
+      if (!isSelfChat && friendId) {
+        const res = await fetch(`/api/notes/${note.id}/share`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userIds: [friendId] }),
+        })
+        if (!res.ok) {
+          const json = (await res.json().catch(() => ({}))) as { error?: string }
+          throw new Error(json.error || 'Не удалось отправить конспект')
+        }
+      }
+      handleSend('', [noteAttachment(note.id, note.title) as DmAttachment])
+    },
+    [isSelfChat, friendId, handleSend],
+  )
+
   if (!conversation) {
     return <EmptyState />
   }
@@ -312,6 +338,7 @@ export function ConversationView({
         onSend={handleSend}
         onTyping={notifyTyping}
         disabled={!connected}
+        onSendNote={isTeacher ? handleSendNote : undefined}
       />
     </section>
   )
