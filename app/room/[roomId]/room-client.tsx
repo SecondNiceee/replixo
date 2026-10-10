@@ -11,7 +11,7 @@ import { setInCall } from "@/lib/chat/tab-status"
 import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
-import { LessonSummaryButton } from "./lesson-summary-button"
+import { LessonSummaryButton, LessonSummaryDialogs, useLessonSummary } from "./lesson-summary-button"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
@@ -215,6 +215,8 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
     overlayMode,
     captureRegion,
   } = useAnnotationOverlay({ isScreenSharing, peers })
+
+  const lessonRecorder = useLessonSummary(localStream, peers)
 
   // Chat panel state: open/close, unread counter, read receipts, chime, hotkey.
   const { chatOpen, unreadCount, unreadFromIndex, toggleChat, closeChat } = useChatPanel({
@@ -448,7 +450,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
             onLeave={handleLeave}
-            lessonSummary={isTeacher ? <LessonSummaryButton roomId={roomId} localStream={localStream} peers={peers} /> : null}
+            lessonSummary={isTeacher ? <LessonSummaryButton recorder={lessonRecorder} /> : null}
           />
         </div>
       )}
@@ -528,6 +530,8 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
           RoomOverlayLayer. */}
       <RoomSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialTab={settingsTab} />
 
+      {isTeacher && <LessonSummaryDialogs recorder={lessonRecorder} roomId={roomId} hidden={overlayMode} />}
+
       {overlayMode && (
         <RoomOverlayLayer
           annotationActive={annotationActive}
@@ -554,6 +558,9 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
           onToggleCam={handleToggleCam}
           onStopScreenShare={stopScreenShare}
           captureRegion={captureRegion}
+          lessonRecording={isTeacher && lessonRecorder.status === "recording"}
+          lessonSummarizing={isTeacher && lessonRecorder.status === "summarizing"}
+          onStopLessonRecording={isTeacher ? () => void lessonRecorder.stop() : undefined}
         />
       )}
     </div>

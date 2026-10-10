@@ -9,16 +9,53 @@ import { auth } from '@/lib/auth'
 // ---------------------------------------------------------------------------
 const MAX_TRANSCRIPT_CHARS = 200_000
 
-const SYSTEM_PROMPT = `Ты — помощник преподавателя. Тебе дают расшифровку онлайн-урока (распознанная речь, возможны ошибки распознавания).
-Составь конспект урока на русском языке строго в формате:
+// Живая речь на уроке — примерно 110 слов в минуту, страница конспекта — ~400 слов.
+const WORDS_PER_MINUTE = 110
+const WORDS_PER_PAGE = 400
+
+function lengthGuide(transcript: string) {
+  const words = transcript.split(/\s+/).filter(Boolean).length
+  const minutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE))
+  if (minutes < 10) {
+    return { minutes, guide: 'Урок короткий: конспект на полстраницы–страницу, только суть.' }
+  }
+  const pages = Math.min(7, Math.max(1, Math.round(minutes / 18)))
+  const targetWords = pages * WORDS_PER_PAGE
+  return {
+    minutes,
+    guide: `Урок длился около ${minutes} мин. Конспект должен быть подробным: примерно ${pages} стр. (≈${targetWords} слов). Короткий конспект для такого урока — ошибка. Если материала в расшифровке меньше, не выдумывай, но раскрой всё, что есть.`,
+  }
+}
+
+function buildSystemPrompt(guide: string) {
+  return `Ты — опытный методист и помощник преподавателя. Тебе дают расшифровку онлайн-урока (распознанная речь, возможны ошибки распознавания — исправляй их по смыслу).
+Составь полноценный учебный конспект урока на русском языке, по которому ученик сможет повторить материал без записи.
+
+${guide}
+
+Формат (строго соблюдай разметку):
+- Заголовок раздела — отдельная строка, заканчивающаяся двоеточием, например «Ход урока:».
+- Пункт списка — строка, начинающаяся с «- ».
+- Обычный абзац — просто строка текста. Не начинай абзацы со слова с двоеточием, иначе он станет заголовком.
+- Никакого Markdown (#, **, таблиц).
+
+Структура:
 
 Тема урока: ...
 
-Что прошли:
-- ...
+Краткое резюме:
+Абзац из 3–5 предложений о том, чему был посвящён урок и к чему пришли.
+
+Затем для КАЖДОЙ темы или этапа урока — отдельный раздел с её названием, например «Часть 1. Сложение дробей:». В нём:
+- объяснение правила или идеи своими словами, как его давал преподаватель;
+- разобранные примеры и задачи с ходом решения и ответом;
+- важные замечания, исключения, типичные ловушки.
 
 Ключевые понятия, слова и формулы:
-- ...
+- термин или формула — пояснение
+
+Вопросы ученика и ответы:
+- ... (если вопросов не было — пропусти раздел)
 
 Где ученик ошибался / что повторить:
 - ...
@@ -26,7 +63,11 @@ const SYSTEM_PROMPT = `Ты — помощник преподавателя. Т�
 Домашнее задание:
 - ... (если не задавали — напиши «Не задано»)
 
-Пиши кратко и по делу, без воды. Не выдумывай того, чего нет в расшифровке.`
+Рекомендации к следующему уроку:
+- ...
+
+Пиши содержательно и конкретно, без воды и общих фраз. Не выдумывай того, чего нет в расшифровке.`
+}
 
 export async function POST(req: NextRequest) {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -53,8 +94,9 @@ export async function POST(req: NextRequest) {
     process.env.YANDEX_LLM_MODEL || 'deepseek-v4-flash',
     process.env.YANDEX_LLM_FALLBACK_MODEL || 'yandexgpt/latest',
   ]
+  const { guide } = lengthGuide(transcript)
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: buildSystemPrompt(guide) },
     { role: 'user', content: transcript.slice(0, MAX_TRANSCRIPT_CHARS) },
   ]
 
@@ -69,6 +111,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           model: `gpt://${folderId}/${model}`,
           temperature: 0.3,
+          max_tokens: MAX_OUTPUT_TOKENS,
           messages,
         }),
       })
@@ -96,4 +139,6 @@ export async function POST(req: NextRequest) {
 }
 
 const ATTEMPTS_PER_MODEL = 3
+// Без явного лимита модель обрезает ответ на ~2000 токенов — отсюда «маленькие» конспекты.
+const MAX_OUTPUT_TOKENS = 8000
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504])

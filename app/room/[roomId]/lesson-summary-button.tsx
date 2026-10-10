@@ -18,24 +18,77 @@ import { extractTopic } from "@/components/notes/note-document"
 import { ShareNoteDialog } from "@/components/notes/share-note-dialog"
 import type { RemotePeer } from "@/hooks/mediasoup/types"
 
-interface LessonSummaryButtonProps {
-  roomId: string
-  localStream: MediaStream | null
-  peers: Map<string, RemotePeer>
-}
+export type LessonSummaryRecorder = ReturnType<typeof useLessonRecorder>
 
 function defaultTitle() {
   return `Урок ${new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}`
 }
 
-export function LessonSummaryButton({ roomId, localStream, peers }: LessonSummaryButtonProps) {
+/**
+ * Запись для конспекта. Вызывается в RoomClient, который смонтирован всё время
+ * звонка: панель управления (а с ней и кнопка) исчезает в overlay-режиме
+ * Electron во время демонстрации экрана, и запись не должна от этого сбрасываться.
+ */
+export function useLessonSummary(localStream: MediaStream | null, peers: Map<string, RemotePeer>) {
   const audioKey = [localStream?.id, ...[...peers.values()].map((p) => p.audioStream?.id)].join("|")
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const streams = useMemo(
     () => [localStream, ...[...peers.values()].map((p) => p.audioStream)].filter((s): s is MediaStream => !!s),
     [audioKey],
   )
-  const { status, summary, error, start, stop } = useLessonRecorder(streams)
+  return useLessonRecorder(streams)
+}
+
+export function LessonSummaryButton({ recorder }: { recorder: LessonSummaryRecorder }) {
+  const { status, start, stop } = recorder
+  const recording = status === "recording"
+  const summarizing = status === "summarizing"
+
+  const handleClick = () => {
+    if (recording) void stop()
+    else if (!summarizing) void start()
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      onClick={handleClick}
+      disabled={summarizing}
+      aria-busy={summarizing}
+      className={cn(
+        "size-12 rounded-full",
+        recording && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
+      )}
+      aria-label={
+        summarizing
+          ? "Составляем конспект…"
+          : recording
+            ? "Закончить запись и составить конспект"
+            : "Начать запись для ИИ-конспекта"
+      }
+      title={recording ? "Идёт запись урока. Нажмите, чтобы получить конспект" : "ИИ-конспект урока"}
+    >
+      {summarizing ? (
+        <Loader2 className="size-5 animate-spin" />
+      ) : recording ? (
+        <Square className="size-4 animate-pulse fill-current" />
+      ) : (
+        <FileText className="size-5" />
+      )}
+    </Button>
+  )
+}
+
+interface LessonSummaryDialogsProps {
+  recorder: LessonSummaryRecorder
+  roomId: string
+  /** Скрыть окно (overlay-режим), не теряя черновик. */
+  hidden?: boolean
+}
+
+export function LessonSummaryDialogs({ recorder, roomId, hidden = false }: LessonSummaryDialogsProps) {
+  const { status, summary, error } = recorder
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
@@ -55,14 +108,6 @@ export function LessonSummaryButton({ roomId, localStream, peers }: LessonSummar
       setOpen(true)
     }
   }, [status, summary])
-
-  const recording = status === "recording"
-  const summarizing = status === "summarizing"
-
-  const handleClick = () => {
-    if (recording) void stop()
-    else if (!summarizing) void start()
-  }
 
   const save = async () => {
     setSaving(true)
@@ -85,35 +130,7 @@ export function LessonSummaryButton({ roomId, localStream, peers }: LessonSummar
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="icon"
-        onClick={handleClick}
-        disabled={summarizing}
-        aria-busy={summarizing}
-        className={cn(
-          "size-12 rounded-full",
-          recording && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
-        )}
-        aria-label={
-          summarizing
-            ? "Составляем конспект…"
-            : recording
-              ? "Закончить запись и составить конспект"
-              : "Начать запись для ИИ-конспекта"
-        }
-        title={recording ? "Идёт запись урока. Нажмите, чтобы получить конспект" : "ИИ-конспект урока"}
-      >
-        {summarizing ? (
-          <Loader2 className="size-5 animate-spin" />
-        ) : recording ? (
-          <Square className="size-4 animate-pulse fill-current" />
-        ) : (
-          <FileText className="size-5" />
-        )}
-      </Button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open && !hidden} onOpenChange={setOpen}>
         <DialogContent className="max-h-[calc(100dvh-3rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Конспект урока</DialogTitle>
@@ -167,7 +184,12 @@ export function LessonSummaryButton({ roomId, localStream, peers }: LessonSummar
         </DialogContent>
       </Dialog>
 
-      <ShareNoteDialog noteId={savedId} noteTitle={title} open={shareOpen} onOpenChange={setShareOpen} />
+      <ShareNoteDialog
+        noteId={savedId}
+        noteTitle={title}
+        open={shareOpen && !hidden}
+        onOpenChange={setShareOpen}
+      />
     </>
   )
 }
