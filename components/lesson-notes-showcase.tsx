@@ -56,7 +56,7 @@ export function LessonNotesShowcase() {
 
           <p className="text-sm text-muted-foreground">
             <Link
-              href="/examples"
+              href="/ai-notes#examples"
               className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-muted-foreground"
             >
               Примеры конспектов

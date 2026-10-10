@@ -25,7 +25,19 @@ export function ExampleNotesViewer() {
   }
 
   return (
-    <section aria-label="Примеры конспектов" className="border-t border-border px-6 py-14 sm:py-20">
+    <section
+      id="examples"
+      aria-labelledby="examples-title"
+      className="scroll-mt-24 border-t border-border px-6 py-14 sm:py-20"
+    >
+      <div className="mx-auto flex max-w-5xl flex-col gap-3 pb-10">
+        <h2 id="examples-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          Примеры конспектов
+        </h2>
+        <p className="max-w-2xl text-pretty leading-relaxed text-muted-foreground">
+          Алгебра, английский и физика. Откройте любой пример здесь или скачайте в PDF.
+        </p>
+      </div>
       <div className="mx-auto grid max-w-5xl grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
         <div className="flex flex-col gap-2 lg:sticky lg:top-8 lg:self-start" role="tablist" aria-label="Выберите урок">
           {EXAMPLE_NOTES.map((item) => {

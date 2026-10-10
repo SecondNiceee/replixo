@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { buttonVariants } from "@/components/ui/button"
 import { FactList, MarketingPage, MarketingSection } from "@/components/marketing/marketing-page"
+import { ExampleNotesViewer } from "@/components/marketing/example-notes-viewer"
 
 export const metadata: Metadata = {
   title: "ИИ-конспекты уроков — Replixo",
@@ -101,13 +102,15 @@ export default function AiNotesPage() {
             Зарегистрироваться
           </Link>
           <Link
-            href="/examples"
+            href="#examples"
             className={buttonVariants({ size: "lg", variant: "outline", className: "h-11 rounded-md px-5" })}
           >
             Посмотреть примеры
           </Link>
         </div>
       </MarketingSection>
+
+      <ExampleNotesViewer />
     </MarketingPage>
   )
 }

@@ -79,6 +79,12 @@ export function Hero() {
         , чтобы использовать ИИ-конспект урока для ученика
       </Link>
 
+      <p className="mt-3 text-sm text-muted-foreground">
+        Уже создаётся{" "}
+        <span className="font-semibold tabular-nums text-foreground">10+</span>{" "}
+        конспектов каждый день
+      </p>
+
       <StartCallDialog
         open={startOpen}
         onOpenChange={setStartOpen}
