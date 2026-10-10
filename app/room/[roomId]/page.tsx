@@ -29,6 +29,7 @@ export default async function RoomPage({
       create={create === "true"}
       serverDisplayName={session?.user.name?.trim() || null}
       isTeacher={session?.user.role === "teacher"}
+      isSignedIn={Boolean(session?.user)}
     />
   )
 }

@@ -11,7 +11,12 @@ import { setInCall } from "@/lib/chat/tab-status"
 import { RoomStatus } from "./room-status"
 import { RoomHeader } from "./room-header"
 import { RoomControls } from "./room-controls"
-import { LessonSummaryButton, LessonSummaryDialogs, useLessonSummary } from "./lesson-summary-button"
+import {
+  LessonSummaryButton,
+  LessonSummaryDialogs,
+  LessonSummaryLockedButton,
+  useLessonSummary,
+} from "./lesson-summary-button"
 import { RoomVideoGrid } from "./room-video-grid"
 import { RoomChat } from "./room-chat"
 import { FloatingChatButton } from "./floating-chat-button"
@@ -48,9 +53,10 @@ interface RoomClientProps {
   create: boolean
   serverDisplayName: string | null
   isTeacher: boolean
+  isSignedIn: boolean
 }
 
-export default function RoomClient({ roomId, create, serverDisplayName, isTeacher }: RoomClientProps) {
+export default function RoomClient({ roomId, create, serverDisplayName, isTeacher, isSignedIn }: RoomClientProps) {
   const [displayName, setResolvedDisplayName] = useState<string | null>(serverDisplayName)
   const [nameInput, setNameInput] = useState("")
   const [storageChecked, setStorageChecked] = useState(serverDisplayName !== null)
@@ -115,10 +121,10 @@ export default function RoomClient({ roomId, create, serverDisplayName, isTeache
     )
   }
 
-  return <ConnectedRoomClient roomId={roomId} create={create} displayName={displayName} isTeacher={isTeacher} />
+  return <ConnectedRoomClient roomId={roomId} create={create} displayName={displayName} isTeacher={isTeacher} isSignedIn={isSignedIn} />
 }
 
-function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<RoomClientProps, "serverDisplayName"> & { displayName: string }) {
+function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedIn }: Omit<RoomClientProps, "serverDisplayName"> & { displayName: string }) {
   const router = useRouter()
 
   const {
@@ -450,7 +456,13 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
             onSetScreenQuality={setScreenQuality}
             onSwitchMic={switchMic}
             onLeave={handleLeave}
-            lessonSummary={isTeacher ? <LessonSummaryButton recorder={lessonRecorder} /> : null}
+            lessonSummary={
+              isTeacher ? (
+                <LessonSummaryButton recorder={lessonRecorder} />
+              ) : !isSignedIn ? (
+                <LessonSummaryLockedButton />
+              ) : null
+            }
           />
         </div>
       )}

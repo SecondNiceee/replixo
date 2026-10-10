@@ -39,6 +39,37 @@ export function useLessonSummary(localStream: MediaStream | null, peers: Map<str
   return useLessonRecorder(streams)
 }
 
+const LOCKED_HINT = "Зарегистрируйтесь для того, чтобы создавать ИИ-конспекты ваших уроков"
+
+/** Неактивная кнопка для гостей: показывает, что функция есть, и зовёт зарегистрироваться. */
+export function LessonSummaryLockedButton() {
+  return (
+    <span
+      tabIndex={0}
+      aria-describedby="lesson-summary-locked-hint"
+      className="group relative inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Button
+        variant="outline"
+        size="icon"
+        disabled
+        tabIndex={-1}
+        aria-label="ИИ-конспект урока недоступен без регистрации"
+        className="pointer-events-none size-12 rounded-full"
+      >
+        <FileText className="size-5" />
+      </Button>
+      <span
+        id="lesson-summary-locked-hint"
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-3 w-60 -translate-x-1/2 rounded-lg border border-border bg-popover px-3 py-2 text-center text-xs leading-relaxed text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+      >
+        {LOCKED_HINT}
+      </span>
+    </span>
+  )
+}
+
 export function LessonSummaryButton({ recorder }: { recorder: LessonSummaryRecorder }) {
   const { status, start, stop } = recorder
   const recording = status === "recording"
