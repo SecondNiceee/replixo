@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { Video, ArrowRight, FileText } from "lucide-react"
+import { Video } from "lucide-react"
 import { StartCallDialog } from "@/components/start-call-dialog"
 import { JoinCallDialog } from "@/components/join-call-dialog"
 
@@ -31,61 +31,38 @@ export function Hero() {
         aria-hidden="true"
         className="hero-grid pointer-events-none absolute inset-0 -z-20"
       />
-      {/* точечный узор */}
-      <div
-        aria-hidden="true"
-        className="hero-dots pointer-events-none absolute inset-0 -z-20"
-      />
-      {/* диагональные штрихи сверху */}
-      <div
-        aria-hidden="true"
-        className="hero-stripes pointer-events-none absolute inset-x-0 top-0 -z-20 h-[55%]"
-      />
-      {/* центральное свечение */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-[38%] -z-10 h-[560px] w-[900px] max-w-[130vw] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,oklch(0.42_0.05_265/0.35)_0%,transparent_70%)] blur-3xl"
-      />
       {/* виньетка и переход к следующей секции */}
       <div
         aria-hidden="true"
         className="hero-vignette pointer-events-none absolute inset-0 -z-10"
       />
 
-      <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-secondary/50 px-4 py-1.5 text-xs font-medium text-muted-foreground">
-        <span className="relative flex size-2">
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-foreground opacity-60" />
-          <span className="relative inline-flex size-2 rounded-full bg-foreground" />
-        </span>
-        Для преподавателей — уроки прямо в браузере
-      </span>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Для репетиторов и преподавателей
+      </p>
 
-      <h1 className="max-w-6xl text-balance text-5xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-6xl md:text-7xl">
-        Видеоплатформа для онлайн-уроков.
+      <h1 className="max-w-5xl text-balance text-5xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-6xl md:text-7xl">
+        Видеоплатформа для онлайн-уроков
       </h1>
 
       <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Проводите занятия с учениками без таймеров и установки приложений.
-        Создайте комнату урока и отправьте код — ученик подключается в один клик.
+        Занятия без ограничения по времени и без установки программ. Создайте
+        комнату, отправьте ученику код, и он подключится из браузера.
       </p>
 
-      <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
+      <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
         <Button
           size="lg"
-          className="group h-14 gap-2.5 rounded-full px-8 text-base font-semibold"
+          className="h-12 gap-2 rounded-md px-6 text-base font-medium"
           onClick={() => setStartOpen(true)}
         >
-          <Video className="size-5" strokeWidth={2.25} aria-hidden="true" />
+          <Video className="size-5" aria-hidden="true" />
           Начать урок
-          <ArrowRight
-            className="size-4 transition-transform group-hover:translate-x-1"
-            aria-hidden="true"
-          />
         </Button>
         <Button
-          variant="ghost"
+          variant="outline"
           size="lg"
-          className="h-14 rounded-full px-6 text-base text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="h-12 rounded-md px-6 text-base"
           onClick={() => setJoinOpen(true)}
         >
           Войти по коду урока
@@ -94,17 +71,12 @@ export function Hero() {
 
       <Link
         href="/sign-up"
-        className="group mt-6 inline-flex max-w-md items-center gap-2.5 rounded-full border border-border bg-secondary/50 px-4 py-2 text-pretty text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+        className="mt-6 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
       >
-        <FileText className="size-4 shrink-0 text-foreground" aria-hidden="true" />
-        <span>
-          <span className="font-medium text-foreground">Зарегистрируйтесь</span>, чтобы
-          использовать ИИ-конспект урока для ученика
+        <span className="font-medium text-foreground underline underline-offset-4">
+          Зарегистрируйтесь
         </span>
-        <ArrowRight
-          className="size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5"
-          aria-hidden="true"
-        />
+        , чтобы использовать ИИ-конспект урока для ученика
       </Link>
 
       <StartCallDialog

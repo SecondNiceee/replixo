@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth"
 import { SiteHeader } from "@/components/site-header"
 import { Hero } from "@/components/hero"
 import { Features } from "@/components/features"
+import { LessonNotesShowcase } from "@/components/lesson-notes-showcase"
 import { QualityBanner } from "@/components/quality-banner"
 import { SiteFooter } from "@/components/site-footer"
 
@@ -30,6 +31,7 @@ export default async function Page({ searchParams }: PageProps) {
       <div className="relative z-10">
         <SiteHeader />
         <Hero />
+        <LessonNotesShowcase />
         <Features />
         <QualityBanner />
         <SiteFooter />
