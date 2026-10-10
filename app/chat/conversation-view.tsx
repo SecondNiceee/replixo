@@ -231,11 +231,11 @@ export function ConversationView({
         </Button>
         {/* Тот же плоский аватар, что в списке слева: это один и тот же человек,
             и разное оформление читалось бы как два разных компонента. */}
-        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border">
+        <span className="relative flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-foreground ring-1 ring-inset ring-border md:text-base">
           {/* Та же закладка, что в строке списка: открытый диалог обязан
               выглядеть продолжением строки, по которой в него вошли. */}
           {isSelfChat ? (
-            <Bookmark className="size-4.5" aria-hidden="true" />
+            <Bookmark className="size-4.5 md:size-5" aria-hidden="true" />
           ) : (
             <>
               {title.charAt(0).toUpperCase()}

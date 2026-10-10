@@ -166,7 +166,7 @@ export function ConversationList({
                           ровно одно: «здесь есть на что смотреть». */}
                       <span
                         className={cn(
-                          'relative flex size-10 shrink-0 items-center justify-center rounded-full font-mono text-sm',
+                          'relative flex size-10 shrink-0 items-center justify-center rounded-full font-mono text-sm md:text-base',
                           isActive
                             ? 'bg-primary-foreground/15 text-primary-foreground'
                             : 'bg-secondary text-foreground ring-1 ring-inset ring-border',
@@ -177,7 +177,7 @@ export function ConversationList({
                             закладка. Точки присутствия нет по той же причине —
                             статуса у собственных заметок не бывает. */}
                         {c.isSelf ? (
-                          <Bookmark className="size-4.5" aria-hidden="true" />
+                          <Bookmark className="size-4.5 md:size-5" aria-hidden="true" />
                         ) : (
                           <>
                             {title.charAt(0).toUpperCase()}
@@ -194,7 +194,7 @@ export function ConversationList({
                         <span className="flex items-baseline gap-2">
                           <span className="truncate text-sm font-medium">{title}</span>
                           {/* tabular-nums: пропорциональные цифры дают «09:05»
-                              и «12:34» разной ширины, и время в столбце справа
+                              �� «12:34» разной ширины, и время в столбце справа
                               переставало выстраиваться по правому краю. */}
                           <span
                             className={cn(
@@ -261,7 +261,7 @@ export function ConversationList({
                           onClick={() => onStartWithFriend(f.friendId)}
                           className="group flex w-full items-center gap-3 rounded-xl py-1.5 pl-2 pr-2 text-left transition-colors hover:bg-foreground/5"
                         >
-                          <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-xs text-muted-foreground ring-1 ring-inset ring-border">
+                          <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-sm text-muted-foreground ring-1 ring-inset ring-border md:text-base">
                             {name.charAt(0).toUpperCase()}
                             <FriendPresenceDot friendId={f.friendId} />
                           </span>
