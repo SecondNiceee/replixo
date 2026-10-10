@@ -63,7 +63,7 @@ export function ProfileTopbar({
       >
         {/* Знак тот же, что в components/logo.tsx. Его размер и задаёт высоту
             шапки: кнопки справа ниже, так что панель растёт за счёт логотипа. */}
-        <ReplixoMark className="size-10 shrink-0 text-primary md:size-11" />
+        <ReplixoMark className="size-8 shrink-0 text-primary" />
         {/* Подпись видна всегда: слово короткое, а без него шапка на узком
             экране начиналась пустотой. */}
         <span>Replixo</span>
