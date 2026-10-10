@@ -1,3 +1,5 @@
+import Link from "next/link"
+
 const features = [
   {
     title: "Доска и рисование поверх экрана",
@@ -19,16 +21,6 @@ const features = [
     description:
       "Достаточно кода урока. Ребёнок заходит из браузера, ничего не устанавливая.",
   },
-  {
-    title: "Работает без VPN",
-    description:
-      "Сервис доступен из России, урок можно начать сразу.",
-  },
-  {
-    title: "ИИ-конспект урока",
-    description:
-      "После занятия получите конспект в PDF и отправьте его ученику в чат. Нужна регистрация.",
-  },
 ]
 
 export function Features() {
@@ -45,7 +37,26 @@ export function Features() {
           </p>
         </div>
 
-        <dl className="mt-10 grid grid-cols-1 gap-x-10 gap-y-8 border-t border-border pt-10 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-10 flex flex-col gap-4 rounded-lg border border-foreground/25 bg-secondary/60 p-6 shadow-[0_0_40px_-12px_oklch(1_0_0/0.18)] sm:flex-row sm:items-end sm:justify-between sm:gap-10 sm:p-8">
+          <div className="flex max-w-2xl flex-col gap-2">
+            <h3 className="text-lg font-medium text-foreground sm:text-xl">
+              ИИ-конспект урока
+            </h3>
+            <p className="text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Включите запись во время занятия, а после урока получите подробный
+              конспект. Его можно отредактировать, скачать в PDF и отправить
+              ученику в чат.
+            </p>
+          </div>
+          <Link
+            href="/sign-up"
+            className="shrink-0 text-sm font-medium text-foreground underline underline-offset-4 transition-colors hover:text-muted-foreground"
+          >
+            Нужна регистрация
+          </Link>
+        </div>
+
+        <dl className="mt-10 grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-2">
           {features.map((feature) => (
             <div key={feature.title} className="flex flex-col gap-2">
               <dt className="text-base font-medium text-foreground">{feature.title}</dt>
