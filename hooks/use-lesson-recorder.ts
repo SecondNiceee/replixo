@@ -6,25 +6,71 @@ const TARGET_RATE = 16000
 // Синхронное распознавание SpeechKit принимает до 30 сек — берём с запасом.
 const CHUNK_SECONDS = 25
 const CHUNK_SAMPLES = TARGET_RATE * CHUNK_SECONDS
-// Тишину не отправляем, чтобы не платить за пустые минуты.
-const SILENCE_RMS = 0.01
+// Речь определяем по коротким окнам (100 мс), а не по среднему за весь кусок:
+// иначе тихий голос с паузами «размазывается» и весь кусок считается тишиной.
+const FRAME_SAMPLES = TARGET_RATE / 10
+const VOICE_FRAME_RMS = 0.006
+// Кусок отправляем, если в нём набралось хотя бы ~1 сек речи.
+const MIN_VOICED_FRAMES = 10
+const TRANSCRIBE_ATTEMPTS = 3
+const WATCHDOG_MS = 5000
 
 export type LessonRecorderStatus = "idle" | "recording" | "summarizing" | "done" | "error"
 
 interface Recorder {
   ctx: AudioContext
   processor: ScriptProcessorNode
-  sources: Map<MediaStream, MediaStreamAudioSourceNode>
+  sources: Map<string, MediaStreamAudioSourceNode>
   buffer: Int16Array
   length: number
-  sumSquares: number
+  frameSumSquares: number
+  frameLength: number
+  voicedFrames: number
   startedAt: number
   chunkStartedAt: number
+  lastAudioAt: number
+}
+
+interface Stats {
+  sent: number
+  recognized: number
+  failed: number
+  skippedSilent: number
 }
 
 function formatTime(ms: number) {
   const s = Math.floor(ms / 1000)
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
+  const h = Math.floor(s / 3600)
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0")
+  const ss = String(s % 60).padStart(2, "0")
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function transcribeChunk(samples: Int16Array): Promise<string> {
+  let lastError: Error = new Error("Ошибка распознавания речи")
+  for (let attempt = 0; attempt < TRANSCRIBE_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch("/api/lesson/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: samples.buffer as ArrayBuffer,
+      })
+      if (res.status === 401) throw Object.assign(new Error("Войдите в аккаунт, чтобы записывать конспект урока."), { fatal: true })
+      if (res.status === 403) throw Object.assign(new Error("Конспект доступен только преподавателям."), { fatal: true })
+      if (res.ok) {
+        const { text } = (await res.json()) as { text?: string }
+        return text ?? ""
+      }
+      lastError = new Error(`Ошибка распознавания речи (${res.status}). Проверьте логи сервера.`)
+    } catch (e) {
+      if (e instanceof Error && "fatal" in e) throw e
+      lastError = e instanceof Error ? e : lastError
+    }
+    if (attempt < TRANSCRIBE_ATTEMPTS - 1) await sleep(1000 * 2 ** attempt)
+  }
+  throw lastError
 }
 
 /**
@@ -38,55 +84,86 @@ export function useLessonRecorder(streams: MediaStream[]) {
   const [error, setError] = useState<string | null>(null)
   const recorderRef = useRef<Recorder | null>(null)
   const transcriptRef = useRef<{ at: number; text: string }[]>([])
-  const pendingRef = useRef<Promise<void>[]>([])
+  // Куски распознаём по очереди: на часовом уроке параллельные запросы упираются в лимиты SpeechKit.
+  const queueRef = useRef<Promise<void>>(Promise.resolve())
   const transcribeErrorRef = useRef<string | null>(null)
+  const statsRef = useRef<Stats>({ sent: 0, recognized: 0, failed: 0, skippedSilent: 0 })
 
   const flush = useCallback(() => {
     const rec = recorderRef.current
     if (!rec || rec.length === 0) return
     const samples = rec.buffer.slice(0, rec.length)
-    const rms = Math.sqrt(rec.sumSquares / rec.length)
+    const voiced = rec.voicedFrames
     const at = rec.chunkStartedAt - rec.startedAt
     rec.length = 0
-    rec.sumSquares = 0
+    rec.frameSumSquares = 0
+    rec.frameLength = 0
+    rec.voicedFrames = 0
     rec.chunkStartedAt = performance.now()
-    if (rms < SILENCE_RMS || samples.length < TARGET_RATE) return
+    if (voiced < MIN_VOICED_FRAMES || samples.length < TARGET_RATE) {
+      statsRef.current.skippedSilent++
+      return
+    }
 
-    const job = fetch("/api/lesson/transcribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: samples.buffer,
-    })
-      .then(async (res) => {
-        if (res.status === 401) throw new Error("Войдите в аккаунт, чтобы записывать конспект урока.")
-        if (!res.ok) throw new Error(`Ошибка распознавания речи (${res.status}). Проверьте логи сервера.`)
-        const { text } = (await res.json()) as { text?: string }
-        if (text) transcriptRef.current.push({ at, text })
-      })
-      .catch((e: unknown) => {
+    statsRef.current.sent++
+    queueRef.current = queueRef.current.then(async () => {
+      try {
+        const text = (await transcribeChunk(samples)).trim()
+        if (text) {
+          transcriptRef.current.push({ at, text })
+          statsRef.current.recognized++
+        }
+      } catch (e) {
+        statsRef.current.failed++
         transcribeErrorRef.current = e instanceof Error ? e.message : "Ошибка распознавания речи"
-      })
-    pendingRef.current.push(job)
+      }
+    })
   }, [])
 
-  // Подключаем/отключаем потоки участников, пока идёт запись.
+  // Подключаем/отключаем аудиодорожки участников, пока идёт запись. Ключ — id
+  // дорожки: при переподключении WebRTC дорожка внутри потока может смениться.
   useEffect(() => {
     const rec = recorderRef.current
     if (!rec || status !== "recording") return
-    const wanted = new Set(streams.filter((s) => s.getAudioTracks().length > 0))
-    for (const [stream, node] of rec.sources) {
-      if (!wanted.has(stream)) {
-        node.disconnect()
-        rec.sources.delete(stream)
+    const wanted = new Map<string, MediaStreamTrack>()
+    for (const stream of streams) {
+      for (const track of stream.getAudioTracks()) {
+        if (track.readyState === "live") wanted.set(track.id, track)
       }
     }
-    for (const stream of wanted) {
-      if (rec.sources.has(stream)) continue
-      const node = rec.ctx.createMediaStreamSource(stream)
+    for (const [id, node] of rec.sources) {
+      if (!wanted.has(id)) {
+        node.disconnect()
+        rec.sources.delete(id)
+      }
+    }
+    for (const [id, track] of wanted) {
+      if (rec.sources.has(id)) continue
+      const node = rec.ctx.createMediaStreamSource(new MediaStream([track]))
       node.connect(rec.processor)
-      rec.sources.set(stream, node)
+      rec.sources.set(id, node)
     }
   }, [streams, status])
+
+  // Браузер может приостановить AudioContext (сон, блокировка экрана, смена
+  // наушников, фоновая вкладка) — тогда звук перестаёт записываться молча.
+  useEffect(() => {
+    if (status !== "recording") return
+    const revive = () => {
+      const rec = recorderRef.current
+      if (rec && rec.ctx.state !== "running" && rec.ctx.state !== "closed") {
+        void rec.ctx.resume().catch(() => {})
+      }
+    }
+    const timer = window.setInterval(revive, WATCHDOG_MS)
+    document.addEventListener("visibilitychange", revive)
+    recorderRef.current?.ctx.addEventListener("statechange", revive)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", revive)
+      recorderRef.current?.ctx.removeEventListener("statechange", revive)
+    }
+  }, [status])
 
   const start = useCallback(async () => {
     if (recorderRef.current) return
@@ -101,12 +178,16 @@ export function useLessonRecorder(streams: MediaStream[]) {
       sources: new Map(),
       buffer: new Int16Array(CHUNK_SAMPLES),
       length: 0,
-      sumSquares: 0,
+      frameSumSquares: 0,
+      frameLength: 0,
+      voicedFrames: 0,
       startedAt: now,
       chunkStartedAt: now,
+      lastAudioAt: now,
     }
 
     processor.onaudioprocess = (event) => {
+      rec.lastAudioAt = performance.now()
       const input = event.inputBuffer.getChannelData(0)
       const outLength = Math.floor(input.length / ratio)
       for (let i = 0; i < outLength; i++) {
@@ -116,7 +197,12 @@ export function useLessonRecorder(streams: MediaStream[]) {
         for (let j = from; j < to; j++) sum += input[j]
         const sample = Math.max(-1, Math.min(1, sum / Math.max(1, to - from)))
         rec.buffer[rec.length++] = sample * 0x7fff
-        rec.sumSquares += sample * sample
+        rec.frameSumSquares += sample * sample
+        if (++rec.frameLength >= FRAME_SAMPLES) {
+          if (Math.sqrt(rec.frameSumSquares / rec.frameLength) >= VOICE_FRAME_RMS) rec.voicedFrames++
+          rec.frameSumSquares = 0
+          rec.frameLength = 0
+        }
         if (rec.length >= CHUNK_SAMPLES) flush()
       }
     }
@@ -126,8 +212,9 @@ export function useLessonRecorder(streams: MediaStream[]) {
 
     recorderRef.current = rec
     transcriptRef.current = []
-    pendingRef.current = []
+    queueRef.current = Promise.resolve()
     transcribeErrorRef.current = null
+    statsRef.current = { sent: 0, recognized: 0, failed: 0, skippedSilent: 0 }
     setSummary("")
     setError(null)
     setStatus("recording")
@@ -144,7 +231,7 @@ export function useLessonRecorder(streams: MediaStream[]) {
     recorderRef.current = null
 
     setStatus("summarizing")
-    await Promise.all(pendingRef.current)
+    await queueRef.current
 
     const transcript = transcriptRef.current
       .sort((a, b) => a.at - b.at)
@@ -152,10 +239,17 @@ export function useLessonRecorder(streams: MediaStream[]) {
       .join("\n")
 
     if (!transcript) {
-      setError(
-        transcribeErrorRef.current ??
-          "Не удалось распознать речь — возможно, на уроке было слишком тихо.",
-      )
+      const stats = statsRef.current
+      console.warn("[lesson-recorder] пустая расшифровка", stats)
+      let message = "Не удалось распознать речь — возможно, на уроке было слишком тихо."
+      if (stats.failed > 0 && transcribeErrorRef.current) {
+        message = transcribeErrorRef.current
+      } else if (stats.sent === 0 && stats.skippedSilent === 0) {
+        message = "Звук не записывался — браузер приостановил запись. Попробуйте ещё раз и не сворачивайте окно надолго."
+      } else if (stats.sent > 0) {
+        message = "Речь записана, но SpeechKit не вернул текст. Проверьте логи сервера."
+      }
+      setError(message)
       setStatus("error")
       return
     }
