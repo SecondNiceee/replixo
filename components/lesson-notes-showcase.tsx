@@ -49,8 +49,19 @@ export function LessonNotesShowcase() {
             ))}
           </ol>
 
+          <p className="border-t border-border pt-6 text-pretty text-lg text-foreground">
+            <span className="font-semibold">10+ конспектов</span>{" "}
+            <span className="text-muted-foreground">уроков уже создают каждый день.</span>
+          </p>
+
           <p className="text-sm text-muted-foreground">
-            Конспекты доступны после{" "}
+            <Link
+              href="/examples"
+              className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-muted-foreground"
+            >
+              Примеры конспектов
+            </Link>
+            {" "}можно посмотреть без аккаунта, свои конспекты доступны после{" "}
             <Link
               href="/sign-up"
               className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-muted-foreground"
