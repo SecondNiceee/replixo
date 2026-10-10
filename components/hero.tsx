@@ -37,7 +37,7 @@ export function Hero() {
         className="hero-vignette pointer-events-none absolute inset-0 -z-10"
       />
 
-      <p className="mb-6 text-sm text-muted-foreground">
+      <p className="sr-only">
         Для репетиторов и преподавателей
       </p>
 
