@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header"
 import { Hero } from "@/components/hero"
 import { Features } from "@/components/features"
 import { QualityBanner } from "@/components/quality-banner"
+import { SiteFooter } from "@/components/site-footer"
 
 interface PageProps {
   searchParams: Promise<{ landing?: string }>
@@ -31,6 +32,7 @@ export default async function Page({ searchParams }: PageProps) {
         <Hero />
         <Features />
         <QualityBanner />
+        <SiteFooter />
       </div>
     </main>
   )

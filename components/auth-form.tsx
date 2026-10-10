@@ -20,10 +20,13 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<'teacher' | 'student'>('student')
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [acceptedConsent, setAcceptedConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   const isSignUp = mode === 'sign-up'
+  const legalAccepted = !isSignUp || (acceptedTerms && acceptedConsent)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,6 +48,10 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
       }
       if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
         setError('Username может содержать только англ. буквы, цифры и _')
+        return
+      }
+      if (!acceptedTerms || !acceptedConsent) {
+        setError('Чтобы зарегистрироваться, примите соглашение и дайте согласие на обработку данных')
         return
       }
     }
@@ -195,13 +202,50 @@ export function AuthForm({ mode, onSwitchMode, onSuccess }: AuthFormProps) {
           />
         </div>
 
+        {isSignUp && (
+          <div className="flex flex-col gap-3">
+            <label className="flex items-start gap-2.5 text-xs leading-relaxed text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-primary"
+              />
+              <span>
+                Принимаю{' '}
+                <Link href="/terms" target="_blank" className="text-foreground underline underline-offset-4">
+                  Пользовательское соглашение
+                </Link>
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5 text-xs leading-relaxed text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={acceptedConsent}
+                onChange={(e) => setAcceptedConsent(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-primary"
+              />
+              <span>
+                Даю{' '}
+                <Link href="/consent" target="_blank" className="text-foreground underline underline-offset-4">
+                  согласие на обработку персональных данных
+                </Link>{' '}
+                в соответствии с{' '}
+                <Link href="/privacy" target="_blank" className="text-foreground underline underline-offset-4">
+                  Политикой
+                </Link>
+              </span>
+            </label>
+          </div>
+        )}
+
         {error && (
           <p className="text-sm text-destructive" role="alert">
             {error}
           </p>
         )}
 
-        <Button type="submit" disabled={loading} className="mt-1 w-full" size="lg">
+        <Button type="submit" disabled={loading || !legalAccepted} className="mt-1 w-full" size="lg">
           {loading ? 'Подождите...' : isSignUp ? 'Создать аккаунт' : 'Войти'}
         </Button>
       </form>

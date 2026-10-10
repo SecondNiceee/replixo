@@ -74,13 +74,38 @@ export function LessonSummaryButton({ recorder }: { recorder: LessonSummaryRecor
   const { status, start, stop } = recorder
   const recording = status === "recording"
   const summarizing = status === "summarizing"
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const handleClick = () => {
     if (recording) void stop()
-    else if (!summarizing) void start()
+    else if (!summarizing) setConfirmOpen(true)
+  }
+
+  const confirmStart = () => {
+    setConfirmOpen(false)
+    void start()
   }
 
   return (
+    <>
+    <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Начать запись урока?</DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            Звук урока будет передан на расшифровку для ИИ-конспекта. Предупредите всех участников, что урок
+            записывается. Если на уроке есть ученики младше 14 лет, нужно согласие их родителей. Аудио не
+            сохраняется, остаётся только текст конспекта.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+            Отмена
+          </Button>
+          <Button onClick={confirmStart}>Участники предупреждены</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Button
       variant="outline"
       size="icon"
@@ -108,6 +133,7 @@ export function LessonSummaryButton({ recorder }: { recorder: LessonSummaryRecor
         <FileText className="size-5" />
       )}
     </Button>
+    </>
   )
 }
 
