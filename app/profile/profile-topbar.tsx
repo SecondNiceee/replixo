@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Inbox, UserPlus, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ReplixoMark } from '@/components/replixo-mark'
 import {
   Dialog,
   DialogContent,
@@ -58,15 +59,11 @@ export function ProfileTopbar({
           лендинг остался бы недоступен изнутри приложения. */}
       <a
         href="/?landing=1"
-        className="mr-1 flex items-center gap-2 text-sm font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70"
+        className="mr-1 flex items-center gap-2.5 text-base font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70 md:text-lg"
       >
-        {/* Знак тот же, что в components/logo.tsx: сплошной акцент и камера.
-            Здесь был свой градиентный квадрат без иконки — на узком экране, где
-            подпись скрывалась, от логотипа оставался безымянный синий прямо-
-            угольник, не похожий ни на что в остальном приложении. */}
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Video className="size-3.5" strokeWidth={2.25} aria-hidden="true" />
-        </span>
+        {/* Знак тот же, что в components/logo.tsx. Его размер и задаёт высоту
+            шапки: кнопки справа ниже, так что панель растёт за счёт логотипа. */}
+        <ReplixoMark className="size-10 shrink-0 text-primary md:size-11" />
         {/* Подпись видна всегда: слово короткое, а без него шапка на узком
             экране начиналась пустотой. */}
         <span>Replixo</span>
