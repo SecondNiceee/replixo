@@ -558,6 +558,9 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher }: Omit<Ro
           onToggleCam={handleToggleCam}
           onStopScreenShare={stopScreenShare}
           captureRegion={captureRegion}
+          lessonRecording={isTeacher && lessonRecorder.status === "recording"}
+          lessonSummarizing={isTeacher && lessonRecorder.status === "summarizing"}
+          onStopLessonRecording={isTeacher ? () => void lessonRecorder.stop() : undefined}
         />
       )}
     </div>

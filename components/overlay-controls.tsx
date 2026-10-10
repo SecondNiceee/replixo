@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, Presentation, ChevronUp } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff, MonitorOff, Pencil, Presentation, ChevronUp, Square, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 
@@ -21,6 +21,11 @@ interface OverlayControlsProps {
   onToggleMic: () => void
   onToggleCam: () => void
   onStopScreenShare: () => void
+  /** Идёт запись для ИИ-конспекта (только у преподавателя). */
+  lessonRecording?: boolean
+  /** Запись остановлена, конспект составляется. */
+  lessonSummarizing?: boolean
+  onStopLessonRecording?: () => void
 }
 
 /**
@@ -44,6 +49,9 @@ export function OverlayControls({
   onToggleMic,
   onToggleCam,
   onStopScreenShare,
+  lessonRecording = false,
+  lessonSummarizing = false,
+  onStopLessonRecording,
 }: OverlayControlsProps) {
   const clickThrough = useOverlayClickThrough()
   const [collapsed, setCollapsed] = useState(false)
@@ -169,6 +177,31 @@ export function OverlayControls({
           >
             <Presentation className="size-5" />
           </button>
+
+          {/* Запись для ИИ-конспекта: индикатор + «Стоп». Окно с конспектом
+              откроется после выхода из overlay-режима. */}
+          {lessonRecording && onStopLessonRecording && (
+            <button
+              onClick={onStopLessonRecording}
+              aria-label="Остановить запись и составить конспект"
+              title="Идёт запись урока. Нажмите, чтобы остановить и составить конспект"
+              className="flex h-11 items-center gap-2 rounded-full border border-red-500/60 bg-red-500/20 px-3 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30"
+            >
+              <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden="true" />
+              <span>Запись</span>
+              <Square className="size-3.5 shrink-0 fill-current" aria-hidden="true" />
+            </button>
+          )}
+          {lessonSummarizing && (
+            <div
+              role="status"
+              title="Конспект откроется после остановки демонстрации"
+              className="flex h-11 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white/80"
+            >
+              <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden="true" />
+              <span>Конспект…</span>
+            </div>
+          )}
 
           {/* Divider */}
           <div className="h-8 w-px bg-white/10" aria-hidden="true" />

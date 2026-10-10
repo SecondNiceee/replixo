@@ -35,6 +35,9 @@ interface RoomOverlayLayerProps {
    * overlay-окна. null (браузер / регион ещё не известен) — канвас на весь экран.
    */
   captureRegion?: CaptureRegion | null
+  lessonRecording?: boolean
+  lessonSummarizing?: boolean
+  onStopLessonRecording?: () => void
 }
 
 /**
@@ -72,6 +75,9 @@ export function RoomOverlayLayer({
   onToggleCam,
   onStopScreenShare,
   captureRegion = null,
+  lessonRecording,
+  lessonSummarizing,
+  onStopLessonRecording,
 }: RoomOverlayLayerProps) {
   // Демонстрируется окно, занимающее часть экрана → канвас должен накрывать
   // ровно его, иначе нормализованные (0..1) координаты штрихов у зрителей
@@ -143,6 +149,9 @@ export function RoomOverlayLayer({
         onToggleMic={onToggleMic}
         onToggleCam={onToggleCam}
         onStopScreenShare={onStopScreenShare}
+        lessonRecording={lessonRecording}
+        lessonSummarizing={lessonSummarizing}
+        onStopLessonRecording={onStopLessonRecording}
       />
     </>
   )
