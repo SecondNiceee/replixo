@@ -11,7 +11,6 @@ export const SITE_LINKS = [
   { href: HOME_HREF, path: "/", label: "Главная" },
   { href: "/app-download", path: "/app-download", label: "Приложение" },
   { href: "/ai-notes", path: "/ai-notes", label: "ИИ-конспекты" },
-  { href: "/examples", path: "/examples", label: "Примеры конспектов" },
   { href: "/company", path: "/company", label: "Компания" },
 ]
 
