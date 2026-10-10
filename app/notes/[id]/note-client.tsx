@@ -97,7 +97,11 @@ export function NoteClient({ note: initial, isOwner }: { note: NoteDetail; isOwn
 
       {editing ? (
         <section className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-5 text-card-foreground">
-          <NoteEditor title={title} content={content} onTitleChange={setTitle} onContentChange={setContent} />
+          <NoteEditor title={title} content={content} onTitleChange={setTitle}
+            onContentChange={setContent}
+            author={note.ownerName}
+            date={note.createdAt}
+          />
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button variant="ghost" size="sm" className="text-destructive" onClick={remove}>
