@@ -7,6 +7,7 @@ import { Features } from "@/components/features"
 import { LessonNotesShowcase } from "@/components/lesson-notes-showcase"
 import { QualityBanner } from "@/components/quality-banner"
 import { SiteFooter } from "@/components/site-footer"
+import { Faq } from "@/components/faq"
 
 interface PageProps {
   searchParams: Promise<{ landing?: string }>
@@ -34,6 +35,7 @@ export default async function Page({ searchParams }: PageProps) {
         <LessonNotesShowcase />
         <Features />
         <QualityBanner />
+        <Faq />
         <SiteFooter />
       </div>
     </main>

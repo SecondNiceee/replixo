@@ -1,7 +1,9 @@
 import { headers } from 'next/headers'
+import Link from "next/link"
 import { auth } from '@/lib/auth'
 import { Logo } from "@/components/logo"
 import { AuthButtons } from "@/components/auth-buttons"
+import { HOME_HREF, SiteNav } from "@/components/site-nav"
 
 export async function SiteHeader() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -18,25 +20,11 @@ export async function SiteHeader() {
           nav. На мобильных nav скрыт, там хватает обычного flex + justify-between. */}
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-x-6">
         <div className="flex justify-start">
-          <Logo />
+          <Link href={HOME_HREF} aria-label="Replixo — на главную" className="rounded-md">
+            <Logo />
+          </Link>
         </div>
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground lg:flex lg:gap-8">
-          <a href="#" className="transition-colors hover:text-foreground">
-            Возможности
-          </a>
-          <a href="#" className="transition-colors hover:text-foreground">
-            Для преподавателей
-          </a>
-          <a href="#" className="transition-colors hover:text-foreground">
-            Тарифы
-          </a>
-          <a
-            href="/app-download"
-            className="transition-colors hover:text-foreground"
-          >
-            Приложение
-          </a>
-        </nav>
+        <SiteNav className="hidden lg:flex" />
         <div className="flex items-center justify-end gap-2">
           <AuthButtons user={user} />
         </div>
