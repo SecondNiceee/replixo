@@ -14,6 +14,7 @@ const VOICE_FRAME_RMS = 0.006
 const MIN_VOICED_FRAMES = 10
 const TRANSCRIBE_ATTEMPTS = 3
 const WATCHDOG_MS = 5000
+const TRACK_RESYNC_MS = 2000
 
 export type LessonRecorderStatus = "idle" | "recording" | "summarizing" | "done" | "error"
 
@@ -122,26 +123,45 @@ export function useLessonRecorder(streams: MediaStream[]) {
 
   // Подключаем/отключаем аудиодорожки участников, пока идёт запись. Ключ — id
   // дорожки: при переподключении WebRTC дорожка внутри потока может смениться.
+  // Звонок меняет дорожку микрофона внутри того же MediaStream (removeTrack/addTrack)
+  // при восстановлении связи, смене устройства или запуске демонстрации экрана —
+  // id потока не меняется, поэтому дополнительно слушаем события и периодически сверяемся.
   useEffect(() => {
-    const rec = recorderRef.current
-    if (!rec || status !== "recording") return
-    const wanted = new Map<string, MediaStreamTrack>()
+    if (status !== "recording") return
+    const sync = () => {
+      const rec = recorderRef.current
+      if (!rec) return
+      const wanted = new Map<string, MediaStreamTrack>()
+      for (const stream of streams) {
+        for (const track of stream.getAudioTracks()) {
+          if (track.readyState === "live") wanted.set(track.id, track)
+        }
+      }
+      for (const [id, node] of rec.sources) {
+        if (!wanted.has(id)) {
+          node.disconnect()
+          rec.sources.delete(id)
+        }
+      }
+      for (const [id, track] of wanted) {
+        if (rec.sources.has(id)) continue
+        const node = rec.ctx.createMediaStreamSource(new MediaStream([track]))
+        node.connect(rec.processor)
+        rec.sources.set(id, node)
+      }
+    }
+    sync()
     for (const stream of streams) {
-      for (const track of stream.getAudioTracks()) {
-        if (track.readyState === "live") wanted.set(track.id, track)
-      }
+      stream.addEventListener("addtrack", sync)
+      stream.addEventListener("removetrack", sync)
     }
-    for (const [id, node] of rec.sources) {
-      if (!wanted.has(id)) {
-        node.disconnect()
-        rec.sources.delete(id)
+    const timer = window.setInterval(sync, TRACK_RESYNC_MS)
+    return () => {
+      window.clearInterval(timer)
+      for (const stream of streams) {
+        stream.removeEventListener("addtrack", sync)
+        stream.removeEventListener("removetrack", sync)
       }
-    }
-    for (const [id, track] of wanted) {
-      if (rec.sources.has(id)) continue
-      const node = rec.ctx.createMediaStreamSource(new MediaStream([track]))
-      node.connect(rec.processor)
-      rec.sources.set(id, node)
     }
   }, [streams, status])
 
