@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { Video, ArrowRight, FileText } from "lucide-react"
+import { Video, ArrowRight } from "lucide-react"
 import { StartCallDialog } from "@/components/start-call-dialog"
 import { JoinCallDialog } from "@/components/join-call-dialog"
 
@@ -94,10 +94,9 @@ export function Hero() {
 
       <Link
         href="/sign-up"
-        className="group mt-6 inline-flex max-w-md items-center gap-2.5 rounded-full border border-border bg-secondary/50 px-4 py-2 text-pretty text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-      >
-        <FileText className="size-4 shrink-0 text-foreground" aria-hidden="true" />
-        <span>
+  className="group mt-6 inline-flex max-w-md items-center gap-3 rounded-md border border-border bg-secondary/40 px-4 py-2.5 text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-secondary/70 hover:text-foreground"
+  >
+  <span>
           <span className="font-medium text-foreground">Зарегистрируйтесь</span>, чтобы
           использовать ИИ-конспект урока для ученика
         </span>
