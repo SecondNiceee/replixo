@@ -7,8 +7,8 @@ const points = [
 
 export function QualityBanner() {
   return (
-    <section className="px-6 pb-16 sm:pb-20">
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 rounded-lg border border-border bg-card p-8 sm:p-12 md:flex-row md:items-end md:justify-between">
+    <section className="mx-auto max-w-6xl px-6 pb-16 sm:pb-20">
+      <div className="mx-auto flex max-w-6xl flex-col gap-8 rounded-lg border border-border bg-card p-8 sm:p-12 md:flex-row md:items-end md:justify-between">
         <div className="max-w-xl">
           <h2 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
             Качество видео без платных тарифов
