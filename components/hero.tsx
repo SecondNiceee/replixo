@@ -71,7 +71,7 @@ export function Hero() {
 
       <Link
         href="/sign-up"
-        className="mt-6 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
+        className="mt-9 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className="font-medium text-foreground underline underline-offset-4">
           Зарегистрируйтесь
