@@ -6,15 +6,17 @@ import { LEGAL_UPDATED_AT } from "@/lib/legal"
 export function LegalPage({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <header className="mx-auto flex w-full max-w-3xl items-center px-6 py-6">
+      <header className="mx-auto flex w-full max-w-6xl items-center px-6 py-6">
         <Link href="/?landing=1" aria-label="На главную">
           <Logo />
         </Link>
       </header>
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pb-16">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-6 pb-16">
+        <div className="max-w-3xl">
         <h1 className="text-balance text-3xl font-semibold tracking-tight text-foreground md:text-4xl">{title}</h1>
         <p className="mt-3 text-sm text-muted-foreground">Редакция от {LEGAL_UPDATED_AT}</p>
         <article className="mt-10 flex flex-col gap-10">{children}</article>
+        </div>
       </main>
       <SiteFooter />
     </div>
