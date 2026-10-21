@@ -375,7 +375,7 @@ html[data-overlay='1'] .desktop-titlebar {
      :hover проявлял бы полосу всё время, пока курсор над лентой, то есть
      практически всегда.
 
-     Ширину полосы резервируем всегда (8px, прозрачные), а не показываем по
+     Ширину полосы резервируем всегда (8px, прозрачные), а не показы��аем по
      требованию: иначе появление thumb сужало бы контент и вся лента дёргалась
      бы на каждый скролл. Прозрачный thumb места не занимает визуально, но
      гуттер уже учтён в раскладке.
@@ -582,9 +582,11 @@ html[data-overlay='1'] .desktop-titlebar {
   --paper-foreground: oklch(0.22 0.02 260);
   --paper-muted: oklch(0.5 0.02 260);
   --paper-rule: oklch(0.91 0.008 260);
+  --paper-accent: oklch(0.5 0.17 268);
 }
 
 @theme inline {
+  --color-paper-accent: var(--paper-accent);
   --color-paper: var(--paper);
   --color-paper-foreground: var(--paper-foreground);
   --color-paper-muted: var(--paper-muted);

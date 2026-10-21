@@ -47,6 +47,40 @@ export default function AppDownloadPage() {
             </p>
           </div>
 
+          <section
+            aria-labelledby="smartscreen-title"
+            className="flex w-full flex-col gap-4 rounded-lg border border-border bg-card p-6 text-left"
+          >
+            <h2
+              id="smartscreen-title"
+              className="text-base font-semibold text-card-foreground"
+            >
+              Почему Windows предупреждает при установке?
+            </h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Windows Defender SmartScreen проверяет, насколько часто программу
+              скачивают. Replixo — новое приложение, у него пока мало загрузок,
+              поэтому фильтр показывает окно «Система Windows защитила ваш
+              компьютер». Это не значит, что в файле есть вирус: так Windows
+              реагирует на любые новые программы, пока у них не наберётся
+              достаточно скачиваний.
+            </p>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium text-card-foreground">
+                Как установить:
+              </p>
+              <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm leading-relaxed text-muted-foreground">
+                <li>В окне предупреждения нажмите «Подробнее».</li>
+                <li>Нажмите появившуюся кнопку «Выполнить в любом случае».</li>
+                <li>Дальше установка пройдёт как обычно.</li>
+              </ol>
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Не хотите ничего устанавливать — пользуйтесь Replixo прямо в
+              браузере, все функции там тоже доступны.
+            </p>
+          </section>
+
           <div className="w-full border-t border-border pt-8">
             <p className="text-sm leading-relaxed text-muted-foreground">
               Приложение для других операционных систем находится в разработке.
