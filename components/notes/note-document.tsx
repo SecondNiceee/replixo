@@ -72,7 +72,7 @@ function toUnits(blocks: Block[]): Unit[] {
 function UnitView({ unit, first }: { unit: Unit; first: boolean }) {
   if (unit.kind === 'heading') {
     return (
-      <h2 className={cn('text-sm font-semibold uppercase tracking-[0.12em] text-primary', first ? 'pb-1' : 'pt-7 pb-1')}>
+      <h2 className={cn('text-sm font-semibold uppercase tracking-[0.12em] text-paper-accent', first ? 'pb-1' : 'pt-7 pb-1')}>
         {unit.text}
       </h2>
     )
@@ -80,7 +80,7 @@ function UnitView({ unit, first }: { unit: Unit; first: boolean }) {
   if (unit.kind === 'bullet') {
     return (
       <div className="flex gap-3 pt-2 text-pretty text-base leading-relaxed">
-        <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+        <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-paper-accent" aria-hidden="true" />
         <span>{unit.text}</span>
       </div>
     )
@@ -91,7 +91,7 @@ function UnitView({ unit, first }: { unit: Unit; first: boolean }) {
 function DocHeader({ title, author, date }: { title: string; author: string; date: string }) {
   return (
     <header className="flex flex-col gap-4 border-b border-paper-rule pb-8 mb-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Конспект урока</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-paper-accent">Конспект урока</p>
       <h1 className="text-balance text-4xl font-semibold leading-tight tracking-tight">{title}</h1>
       <p className="text-sm text-paper-muted">
         {author ? `${author} · ` : ''}
