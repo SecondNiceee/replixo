@@ -8,6 +8,41 @@ import { LessonNotesShowcase } from "@/components/lesson-notes-showcase"
 import { QualityBanner } from "@/components/quality-banner"
 import { SiteFooter } from "@/components/site-footer"
 import { Faq } from "@/components/faq"
+import type { Metadata } from "next"
+import { SITE_NAME, SITE_URL } from "@/lib/seo"
+import { OPERATOR } from "@/lib/legal"
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+}
+
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: `${SITE_URL}/icon.svg`,
+      email: OPERATOR.email,
+    },
+    {
+      "@type": "WebSite",
+      name: SITE_NAME,
+      url: SITE_URL,
+      inLanguage: "ru-RU",
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: SITE_NAME,
+      url: SITE_URL,
+      applicationCategory: "EducationalApplication",
+      operatingSystem: "Web, Windows",
+      inLanguage: "ru-RU",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "RUB" },
+    },
+  ],
+}
 
 interface PageProps {
   searchParams: Promise<{ landing?: string }>
@@ -29,6 +64,10 @@ export default async function Page({ searchParams }: PageProps) {
 
   return (
     <main className="home-pattern relative min-h-screen overflow-hidden bg-background">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+      />
       <div className="relative z-10">
         <SiteHeader />
         <Hero />

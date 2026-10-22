@@ -3,6 +3,13 @@ import { notFound, redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { canonicalRoomCode } from "@/lib/room-code"
 import RoomClient from "./room-client"
+import type { Metadata } from "next"
+import { NO_INDEX } from "@/lib/seo"
+
+export const metadata: Metadata = {
+  title: "Урок",
+  robots: NO_INDEX,
+}
 
 export default async function RoomPage({
   params,

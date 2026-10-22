@@ -1,11 +1,13 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from "next"
 import { LegalLink, LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page"
 import { OPERATOR } from "@/lib/legal"
 
-export const metadata: Metadata = {
-  title: "Пользовательское соглашение — Replixo",
+export const metadata: Metadata = pageMetadata({
+  title: "Пользовательское соглашение",
   description: "Правила использования сервиса видеоуроков Replixo.",
-}
+  path: "/terms",
+})
 
 export default function TermsPage() {
   return (

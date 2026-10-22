@@ -1,3 +1,4 @@
+import { NO_INDEX } from "@/lib/seo"
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
@@ -10,8 +11,9 @@ import { ProfileClient } from './profile-client'
 import { ProfileBoot } from './profile-boot'
 
 export const metadata: Metadata = {
-  title: 'Кабинет — Replixo',
+  title: 'Кабинет',
   description: 'Личные сообщения и друзья в Replixo.',
+  robots: NO_INDEX,
 }
 
 export default async function ProfilePage() {

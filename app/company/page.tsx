@@ -1,11 +1,13 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from "next"
 import { FactList, MarketingPage, MarketingSection } from "@/components/marketing/marketing-page"
 import { OPERATOR } from "@/lib/legal"
 
-export const metadata: Metadata = {
-  title: "О компании — Replixo",
+export const metadata: Metadata = pageMetadata({
+  title: "О компании",
   description: "Replixo — российская видеоплатформа для онлайн-уроков с ИИ-конспектами. Кто мы и как с нами связаться.",
-}
+  path: "/company",
+})
 
 const principles = [
   {
