@@ -119,24 +119,53 @@ function paginate(units: Unit[], headerH: number, heights: number[]): number[][]
   return pages
 }
 
-function Page({ scale, number, total, children }: { scale: number; number: number; total: number; children: ReactNode }) {
+function Page({
+  scale,
+  number,
+  total,
+  fit,
+  children,
+}: {
+  scale: number
+  number: number
+  total: number
+  fit: boolean
+  children: ReactNode
+}) {
+  const sectionRef = useRef<HTMLElement>(null)
+  const [fitH, setFitH] = useState<number | null>(null)
+
+  // Последняя страница обрезается по содержимому, чтобы подпись не уезжала вниз пустого листа.
+  useLayoutEffect(() => {
+    const el = sectionRef.current
+    if (!fit || !el) return
+    const update = () => setFitH(Math.min(PAGE_H, el.offsetHeight))
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fit])
+
+  const height = fit ? (fitH ?? PAGE_H) : PAGE_H
+
   return (
     <div
       className="relative shrink-0 overflow-hidden rounded-lg shadow-2xl"
-      style={{ width: PAGE_W * scale, height: PAGE_H * scale }}
+      style={{ width: PAGE_W * scale, height: height * scale }}
     >
       <section
+        ref={sectionRef}
         aria-label={`Страница ${number} из ${total}`}
         className="absolute left-0 top-0 flex flex-col bg-paper text-paper-foreground"
         style={{
           width: PAGE_W,
-          height: PAGE_H,
+          height: fit ? undefined : PAGE_H,
           padding: `${PAD_Y}px ${PAD_X}px`,
           transform: `scale(${scale})`,
           transformOrigin: 'top left',
         }}
       >
-        <div className="flex-1">{children}</div>
+        <div className={fit ? 'pb-12' : 'flex-1'}>{children}</div>
         <footer
           className="flex items-end justify-between border-t border-paper-rule text-xs text-paper-muted"
           style={{ height: FOOTER_H }}
@@ -220,7 +249,7 @@ export function NoteDocument({
       </div>
 
       {pageList.map((indexes, p) => (
-        <Page key={p} scale={scale} number={p + 1} total={pageList.length}>
+        <Page key={p} scale={scale} number={p + 1} total={pageList.length} fit={p === pageList.length - 1}>
           {p === 0 && <DocHeader title={title} author={author} date={formatted} />}
           {indexes.map((i, k) => (
             <UnitView key={i} unit={units[i]} first={k === 0 && p > 0} />
