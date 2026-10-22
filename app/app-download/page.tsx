@@ -1,12 +1,14 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from 'next'
 import { Download, Laptop, ShieldCheck } from 'lucide-react'
 import { SiteHeader } from '@/components/site-header'
 
-export const metadata: Metadata = {
-  title: 'Приложение Replixo для Windows',
+export const metadata: Metadata = pageMetadata({
+  title: 'Приложение для Windows',
   description:
-    'Скачайте приложение Replixo для Windows и начинайте видеозвонки прямо с рабочего стола.',
-}
+    'Скачайте бесплатное приложение Replixo для Windows и проводите онлайн-уроки прямо с рабочего стола. Браузерная версия работает без установки.',
+  path: '/app-download',
+})
 
 export default function AppDownloadPage() {
   return (

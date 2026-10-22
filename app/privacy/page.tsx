@@ -1,11 +1,13 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from "next"
 import { LegalLink, LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page"
 import { OPERATOR } from "@/lib/legal"
 
-export const metadata: Metadata = {
-  title: "Политика обработки персональных данных — Replixo",
+export const metadata: Metadata = pageMetadata({
+  title: "Политика обработки персональных данных",
   description: "Как Replixo собирает, использует и защищает персональные данные пользователей.",
-}
+  path: "/privacy",
+})
 
 export default function PrivacyPage() {
   return (
@@ -104,7 +106,7 @@ export default function PrivacyPage() {
         <p>Пользователь вправе:</p>
         <LegalList
           items={[
-            "получить сведения об обработке своих персональных данных;",
+            "получить сведения об обработке ��воих персональных данных;",
             "потребовать уточнения, блокирования или уничтожения данных;",
             "отозвать согласие на обработку;",
             "удалить аккаунт;",

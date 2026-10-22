@@ -1,11 +1,13 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from "next"
 import { LegalLink, LegalList, LegalPage, LegalSection } from "@/components/legal/legal-page"
 import { OPERATOR } from "@/lib/legal"
 
-export const metadata: Metadata = {
-  title: "Согласие на обработку персональных данных — Replixo",
+export const metadata: Metadata = pageMetadata({
+  title: "Согласие на обработку персональных данных",
   description: "Текст согласия на обработку персональных данных пользователей Replixo.",
-}
+  path: "/consent",
+})
 
 export default function ConsentPage() {
   return (

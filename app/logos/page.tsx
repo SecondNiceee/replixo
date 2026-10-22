@@ -1,9 +1,11 @@
+import { NO_INDEX } from "@/lib/seo"
 import type { Metadata } from 'next'
 import { logoConcepts } from './logo-marks'
 
 export const metadata: Metadata = {
-  title: 'Логотипы — Replixo',
+  title: 'Логотипы',
   description: 'Девять вариантов знака Replixo для выбора.',
+  robots: NO_INDEX,
 }
 
 /**

@@ -1,3 +1,4 @@
+import { NO_INDEX } from "@/lib/seo"
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
@@ -6,8 +7,9 @@ import { getNoteForViewer } from '@/lib/notes'
 import { NoteClient } from './note-client'
 
 export const metadata: Metadata = {
-  title: 'Конспект урока — Replixo',
+  title: 'Конспект урока',
   description: 'Конспект урока, составленный в Replixo.',
+  robots: NO_INDEX,
 }
 
 export default async function NotePage({ params }: { params: Promise<{ id: string }> }) {

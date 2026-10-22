@@ -6,6 +6,7 @@ import { auth } from '@/lib/auth'
 import { ElectronPatches } from '@/components/electron-patches'
 import { DesktopTitlebar } from '@/components/desktop-titlebar'
 import { DmNotifier } from '@/components/dm-notifier'
+import { SITE_NAME, SITE_URL } from '@/lib/seo'
 import './globals.css'
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin', 'cyrillic'] })
@@ -15,7 +16,14 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://replixo.app'),
+  metadataBase: new URL(SITE_URL),
+  applicationName: SITE_NAME,
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, 'max-image-preview': 'large' },
+  },
+  formatDetection: { telephone: false, email: false, address: false },
   title: {
     default: 'Replixo — Видеоплатформа для преподавателей и онлайн-уроков',
     template: '%s — Replixo',
@@ -36,7 +44,6 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: 'Replixo' }],
   category: 'education',
-  generator: 'v0.app',
   openGraph: {
     type: 'website',
     locale: 'ru_RU',

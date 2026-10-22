@@ -1,14 +1,16 @@
+import { pageMetadata } from "@/lib/seo"
 import type { Metadata } from "next"
 import Link from "next/link"
 import { buttonVariants } from "@/components/ui/button"
 import { FactList, MarketingPage, MarketingSection } from "@/components/marketing/marketing-page"
 import { ExampleNotesViewer } from "@/components/marketing/example-notes-viewer"
 
-export const metadata: Metadata = {
-  title: "ИИ-конспекты уроков — Replixo",
+export const metadata: Metadata = pageMetadata({
+  title: "ИИ-конспекты уроков",
   description:
-    "Replixo записывает звук урока и с помощью Yandex Cloud составляет полный конспект: темы, правила, примеры и домашнее задание. Сейчас бесплатно.",
-}
+    "Replixo записывает звук урока и с помощью Yandex Cloud составляет полный конспект: темы, правила, примеры и домашнее задание. Скачивание в PDF, сейчас бесплатно.",
+  path: "/ai-notes",
+})
 
 const pipeline = [
   {
