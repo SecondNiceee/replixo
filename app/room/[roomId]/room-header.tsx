@@ -97,13 +97,13 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             onClick={() => setEditNameOpen(true)}
             className="group flex items-center gap-1.5 rounded-lg bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             aria-label="Изменить имя"
           >
-            <span className="max-w-[120px] truncate font-medium">{displayName}</span>
+            <span className="max-w-20 truncate font-medium sm:max-w-[120px]">{displayName}</span>
             <Pencil className="size-3 opacity-60 transition-opacity group-hover:opacity-100" />
           </button>
           <span className="h-4 w-px bg-border" />
@@ -115,7 +115,8 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
               )}
             />
             <span className="text-xs text-muted-foreground">
-              {participantCount} участник{participantCount !== 1 ? "а" : ""}
+              {participantCount}
+              <span className="hidden sm:inline"> участник{participantCount !== 1 ? "а" : ""}</span>
             </span>
           </div>
           <span className="h-4 w-px bg-border" />

@@ -1,7 +1,6 @@
 import type { ReactNode } from "react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { SiteNav } from "@/components/site-nav"
 
 export function MarketingPage({
   eyebrow,
@@ -18,7 +17,6 @@ export function MarketingPage({
     <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader />
       <main className="flex-1 pt-24">
-        <SiteNav className="flex overflow-x-auto px-6 pb-2 lg:hidden" />
         <header className="mx-auto flex max-w-6xl flex-col gap-5 px-6 pb-16 pt-12 sm:pt-20">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">{eyebrow}</p>
           <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl">

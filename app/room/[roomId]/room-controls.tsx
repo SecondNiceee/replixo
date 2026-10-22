@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff,
   Check, ChevronDown, MonitorUp, MonitorOff,
@@ -35,6 +35,8 @@ const SCREEN_QUALITY_OPTIONS: { value: ScreenQuality; label: string }[] = [
   { value: "720p", label: "720p" },
   { value: "1080p", label: "1080p (Full HD)" },
 ]
+
+const subscribeNoop = () => () => {}
 
 interface RoomControlsProps {
   isMicMuted: boolean
@@ -97,6 +99,11 @@ export function RoomControls({
   lessonSummary,
 }: RoomControlsProps) {
   const [micSettingsOpen, setMicSettingsOpen] = useState(false)
+  const canShareScreen = useSyncExternalStore(
+    subscribeNoop,
+    () => typeof navigator.mediaDevices?.getDisplayMedia === "function",
+    () => true,
+  )
   // Recreate the meter stream after a device switch. The call stream itself is
   // mutated in place, so depending on it alone would leave the analyser attached
   // to the stopped track from the previous microphone.
@@ -135,13 +142,13 @@ export function RoomControls({
         )}
       >
         <div className={cn(collapsed ? "overflow-hidden" : "overflow-visible")}>
-    <footer className="flex items-center justify-center gap-3 border-t border-border px-5 py-4">
+    <footer className="flex items-center justify-center gap-2 border-t border-border px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-3 sm:px-5 sm:py-4">
       {/* Mic + device settings */}
       <Dialog open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
         <div className="group relative flex items-center">
           <div
             className={cn(
-              "pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100",
+              "pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100",
               micSettingsOpen && "pointer-events-auto opacity-100",
             )}
           >
@@ -204,7 +211,7 @@ export function RoomControls({
               />
             </div>
             <p className="text-sm text-muted-foreground">
-              Скажите что-нибудь, чтобы проверить микрофон.
+              Ска��ите что-нибудь, чтобы проверить микрофон.
             </p>
           </section>
 
@@ -282,7 +289,9 @@ export function RoomControls({
         )}
       </Button>
 
-      {/* Screen share + quality picker */}
+      {/* Screen share + quality picker. Mobile browsers have no getDisplayMedia,
+          so the button is hidden there instead of failing on tap. */}
+      {canShareScreen && (
       <div className="flex items-center">
         <Button
           variant="outline"
@@ -322,6 +331,7 @@ export function RoomControls({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      )}
 
       {/* Annotation — рисование поверх демонстрации экрана. Показывается только
           когда идёт демонстрация (своя или чужая). */}
