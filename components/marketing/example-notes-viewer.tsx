@@ -101,7 +101,7 @@ export function ExampleNotesViewer() {
               PDF
             </Button>
           </div>
-          <NoteDocument key={note.id} title={note.title} content={note.content} author={note.author} date={note.date} />
+          <NoteDocument key={note.id} title={note.title} content={note.content} author={note.author} date={note.date} headingLevel={3} />
         </div>
       </div>
     </section>
