@@ -4,7 +4,7 @@ export const OPERATOR = {
   status: "Плательщик налога на профессиональный доход (самозанятый)",
   inn: "774350458937",
   // TODO: проверьте, что ящик существует и вы его читаете.
-  email: "support@replixo.ru",
+  email: "replixo@yandex.com",
   site: "https://replixo.ru",
 } as const
 
