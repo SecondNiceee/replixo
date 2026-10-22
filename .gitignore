@@ -38,3 +38,9 @@ uploads/
 server/downloads/
 downloads/
 *.exe
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
