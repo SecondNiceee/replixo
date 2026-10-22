@@ -49,7 +49,8 @@ export function LessonNotesShowcase() {
             ))}
           </ol>
 
-          <p className="border-t border-border pt-6 text-pretty text-lg text-foreground">
+          <div className="flex flex-col gap-6 border-t border-border pt-6">
+          <p className="text-pretty text-lg text-foreground">
             <span className="font-semibold">10+ конспектов</span>{" "}
             <span className="text-muted-foreground">уроков уже создают каждый день.</span>
           </p>
@@ -70,6 +71,7 @@ export function LessonNotesShowcase() {
             </Link>
             .
           </p>
+          </div>
         </div>
 
         <NoteTypewriter />
