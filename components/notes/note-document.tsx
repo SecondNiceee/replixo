@@ -69,12 +69,19 @@ function toUnits(blocks: Block[]): Unit[] {
   )
 }
 
-function UnitView({ unit, first }: { unit: Unit; first: boolean }) {
+type HeadingTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'div'
+
+function headingTag(level: number | null): HeadingTag {
+  return level === null ? 'div' : (`h${Math.min(6, level)}` as HeadingTag)
+}
+
+function UnitView({ unit, first, level }: { unit: Unit; first: boolean; level: number | null }) {
   if (unit.kind === 'heading') {
+    const Tag = headingTag(level)
     return (
-      <h2 className={cn('text-sm font-semibold uppercase tracking-[0.12em] text-paper-accent', first ? 'pb-1' : 'pt-7 pb-1')}>
+      <Tag className={cn('text-sm font-semibold uppercase tracking-[0.12em] text-paper-accent', first ? 'pb-1' : 'pt-7 pb-1')}>
         {unit.text}
-      </h2>
+      </Tag>
     )
   }
   if (unit.kind === 'bullet') {
@@ -88,11 +95,22 @@ function UnitView({ unit, first }: { unit: Unit; first: boolean }) {
   return <p className="pt-3 text-pretty text-base leading-relaxed">{unit.text}</p>
 }
 
-function DocHeader({ title, author, date }: { title: string; author: string; date: string }) {
+function DocHeader({
+  title,
+  author,
+  date,
+  level,
+}: {
+  title: string
+  author: string
+  date: string
+  level: number | null
+}) {
+  const Tag = headingTag(level)
   return (
     <header className="flex flex-col gap-4 border-b border-paper-rule pb-8 mb-6">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-paper-accent">Конспект урока</p>
-      <h1 className="text-balance text-4xl font-semibold leading-tight tracking-tight">{title}</h1>
+      <Tag className="text-balance text-4xl font-semibold leading-tight tracking-tight">{title}</Tag>
       <p className="text-sm text-paper-muted">
         {author ? `${author} · ` : ''}
         {date}
@@ -186,12 +204,15 @@ export function NoteDocument({
   author = '',
   date,
   className,
+  headingLevel = 1,
 }: {
   title: string
   content: string
   author?: string
   date: number
   className?: string
+  /** Уровень заголовка конспекта; разделы получают уровень ниже. На странице с собственным h1 передавайте 3. */
+  headingLevel?: number
 }) {
   const units = toUnits(parseNote(content))
   const formatted = new Date(date).toLocaleDateString('ru-RU', {
@@ -239,10 +260,10 @@ export function NoteDocument({
     <div ref={wrapRef} className={cn('note-paper relative flex w-full flex-col items-center gap-6', className)}>
       <div aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 size-0 overflow-hidden">
         <div ref={measureRef} className="flex flex-col" style={{ width: PAGE_W - PAD_X * 2 }}>
-          <DocHeader title={title} author={author} date={formatted} />
+          <DocHeader title={title} author={author} date={formatted} level={null} />
           {units.map((unit, i) => (
             <div key={i}>
-              <UnitView unit={unit} first={false} />
+              <UnitView unit={unit} first={false} level={null} />
             </div>
           ))}
         </div>
@@ -250,9 +271,9 @@ export function NoteDocument({
 
       {pageList.map((indexes, p) => (
         <Page key={p} scale={scale} number={p + 1} total={pageList.length} fit={p === pageList.length - 1}>
-          {p === 0 && <DocHeader title={title} author={author} date={formatted} />}
+          {p === 0 && <DocHeader title={title} author={author} date={formatted} level={headingLevel} />}
           {indexes.map((i, k) => (
-            <UnitView key={i} unit={units[i]} first={k === 0 && p > 0} />
+            <UnitView key={i} unit={units[i]} first={k === 0 && p > 0} level={headingLevel + 1} />
           ))}
         </Page>
       ))}
