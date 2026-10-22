@@ -41,7 +41,7 @@ export function Hero() {
         Для репетиторов и преподавателей
       </p>
 
-      <h1 className="max-w-5xl text-balance text-5xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-6xl md:text-7xl">
+      <h1 className="max-w-5xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground min-[400px]:text-5xl sm:text-6xl md:text-7xl">
         Видеоплатформа для онлайн-уроков
       </h1>
 

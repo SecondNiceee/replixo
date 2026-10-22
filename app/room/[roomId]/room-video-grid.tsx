@@ -154,10 +154,10 @@ export function RoomVideoGrid({
     totalTiles === 1
       ? "grid-cols-1"
       : totalTiles === 2
-        ? "grid-cols-2"
+        ? "grid-cols-1 sm:grid-cols-2"
         : totalTiles <= 4
           ? "grid-cols-2"
-          : "grid-cols-3"
+          : "grid-cols-2 sm:grid-cols-3"
 
   const allParticipants: Array<
     | { key: string; isLocal: true }

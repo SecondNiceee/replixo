@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth'
 import { Logo } from "@/components/logo"
 import { AuthButtons } from "@/components/auth-buttons"
 import { HOME_HREF, SiteNav } from "@/components/site-nav"
+import { MobileNav } from "@/components/mobile-nav"
 
 export async function SiteHeader() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -25,8 +26,9 @@ export async function SiteHeader() {
           </Link>
         </div>
         <SiteNav className="hidden lg:flex" />
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex min-w-0 items-center justify-end gap-2">
           <AuthButtons user={user} />
+          <MobileNav className="lg:hidden" />
         </div>
       </div>
     </header>

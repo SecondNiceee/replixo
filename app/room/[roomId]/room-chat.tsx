@@ -151,7 +151,7 @@ export const RoomChat = memo(function RoomChat({
         if (dragDepth.current <= 0) setDragging(false)
       }}
       onDrop={handleDrop}
-      className="relative flex h-full w-[360px] flex-col border-l border-border bg-card"
+      className="relative flex h-full w-screen max-w-[360px] flex-col border-l border-border bg-card"
     >
       {/* Drag overlay */}
       {dragging && (
