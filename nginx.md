@@ -58,8 +58,22 @@ server {
     }
 }
 
+# ── www → без www (единый адрес сайта для Яндекса, без дублей) ───────
+# Сертификат certbot уже выписан на оба имени (replixo.ru и www.replixo.ru).
 server {
-    server_name replixo.ru www.replixo.ru;
+    listen 443 ssl http2;
+    server_name www.replixo.ru;
+
+    ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    return 301 https://replixo.ru$request_uri;
+}
+
+server {
+    server_name replixo.ru;
 
     # ── Next.js фронтенд ──────────────────────────────────────────────
     location / {
@@ -108,6 +122,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Установщик Windows (/download/windows) отдаёт сервер на 3001.
+    # Маршрут app/download/windows в Next.js — запасной: он срабатывает только
+    # если этого блока нет (например, локально без nginx).
     location /download/ {
         proxy_pass         http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -138,27 +155,34 @@ server {
         proxy_read_timeout 86400;
     }
 
-    listen 443 ssl; # managed by Certbot
+    # http2 ускоряет загрузку (особенно на телефонах).
+    listen 443 ssl http2; # managed by Certbot
     ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem; # managed by Certbot
     include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
 }
 
+# ── HTTP → HTTPS, сразу на адрес без www (один редирект, а не два) ──
 server {
-    if ($host = www.replixo.ru) {
-        return 301 https://$host$request_uri;
-    } # managed by Certbot
-
-    if ($host = replixo.ru) {
-        return 301 https://$host$request_uri;
-    } # managed by Certbot
-
     listen 80;
     server_name replixo.ru www.replixo.ru;
-    return 404; # managed by Certbot
+    return 301 https://replixo.ru$request_uri;
 }
 ```
+
+### Почему без gzip в nginx
+
+Next.js (`next start`) сам сжимает ответы, а nginx не сжимает повторно то, что уже
+пришло с `Content-Encoding`. Если включить `gzip on` в `location /`, nginx начнёт
+буферизовать стрим для сжатия и снова появится риск «полуответов». Поэтому gzip
+здесь сознательно не включён.
+
+### Если nginx ругается на `http2`
+
+В nginx 1.25.1+ запись `listen ... http2` устарела (это предупреждение, а не ошибка).
+Можно заменить на `listen 443 ssl;` и отдельную строку `http2 on;` внутри `server`.
+Версию смотрите командой `nginx -v`.
 
 ---
 
@@ -179,6 +203,19 @@ for i in $(seq 20); do curl -s -o /dev/null -w "%{size_download}\n" https://repl
 ```
 
 Если хотя бы одно значение меньше остальных — стрим всё ещё обрывается.
+
+Проверка редиректов — оба должны вернуть `301` на `https://replixo.ru/`:
+
+```bash
+curl -sI https://www.replixo.ru/ | grep -i -E "^(HTTP|location)"
+curl -sI http://replixo.ru/      | grep -i -E "^(HTTP|location)"
+```
+
+Проверка HTTP/2 — должно быть `HTTP/2 200`:
+
+```bash
+curl -sI --http2 https://replixo.ru/ | head -1
+```
 
 ---
 
