@@ -4,6 +4,7 @@ import type {
   DtlsParameters,
   DtlsState,
   WebRtcTransport,
+  WebRtcServer,
 } from 'mediasoup/types'
 import * as mediasoup from 'mediasoup'
 import { mediaCodecs, webRtcTransportOptions, MAX_PEERS_PER_ROOM, iceServers } from './config'
@@ -19,6 +20,7 @@ import type {
 export class Room {
   id: string
   private router!: Router
+  private webRtcServer?: WebRtcServer
   private peers: Map<string, Peer> = new Map()
 
   // The presenter's current slide state. Null when no presentation is active.
@@ -47,6 +49,7 @@ export class Room {
   static async create(id: string, worker: Worker): Promise<Room> {
     const room = new Room(id)
     room.router = await worker.createRouter({ mediaCodecs })
+    room.webRtcServer = worker.appData.webRtcServer as WebRtcServer | undefined
     return room
   }
 
@@ -125,10 +128,12 @@ export class Room {
       console.warn(`[media] Replaced stale transport room=${this.id} peer=${peerId} transport=${existing.id} direction=${direction}`)
     }
 
-    const transport = await this.router.createWebRtcTransport({
-      ...webRtcTransportOptions,
-      appData: { direction },
-    })
+    const { listenIps, ...sharedOptions } = webRtcTransportOptions
+    const transport = await this.router.createWebRtcTransport(
+      this.webRtcServer
+        ? { ...sharedOptions, webRtcServer: this.webRtcServer, appData: { direction } }
+        : { ...sharedOptions, listenIps, appData: { direction } },
+    )
 
     // Raise the bandwidth-estimation ceiling so a high-bitrate screen share is
     // not artificially throttled. Without this the transport's estimated

@@ -13,6 +13,7 @@ import {
   PORT,
   CLIENT_ORIGIN,
   workerSettings,
+  webRtcServerOptions,
   UPLOAD_DIR,
   MAX_FILE_SIZE,
   UPLOAD_TTL_MS,
@@ -289,6 +290,11 @@ async function main(): Promise<void> {
   })
 
   console.log(`[mediasoup] Worker created (pid: ${worker.pid})`)
+
+  if (webRtcServerOptions) {
+    worker.appData.webRtcServer = await worker.createWebRtcServer(webRtcServerOptions)
+    console.log(`[mediasoup] WebRtcServer listening on port ${webRtcServerOptions.listenInfos[0].port} (udp+tcp)`)
+  }
 
   // ---------------------------------------------------------------------------
   // Socket.io
