@@ -113,8 +113,11 @@ export const iceServers = [
 // ---------------------------------------------------------------------------
 
 export const workerSettings = {
-  rtcMinPort: 40000,
-  rtcMaxPort: 49999,
+  // Behind the load balancer every media port has to be forwarded through its
+  // nginx stream block, so production narrows this via RTC_MIN_PORT/RTC_MAX_PORT
+  // to the exact range listed in balancer-nginx/nginx-18u101-stream.conf.
+  rtcMinPort: parseInt(process.env.RTC_MIN_PORT ?? '40000', 10),
+  rtcMaxPort: parseInt(process.env.RTC_MAX_PORT ?? '49999', 10),
   logLevel: 'warn' as const,
   logTags: ['info', 'ice', 'dtls', 'rtp', 'srtp', 'rtcp'] as WorkerLogTag[],
 }
