@@ -79,6 +79,22 @@ export const listenIps: TransportListenIp[] = [
   },
 ]
 
+// Behind the load balancer all call media goes through ONE fixed port
+// (UDP + TCP) served by a mediasoup WebRtcServer. That port is forwarded 1:1 in
+// balancer-nginx/nginx-18u101-stream.conf, so no port ranges or variables are
+// needed there. Without RTC_PORT (local dev) every transport opens its own port
+// from rtcMinPort..rtcMaxPort as before.
+const rtcPort = process.env.RTC_PORT ? parseInt(process.env.RTC_PORT, 10) : null
+
+export const webRtcServerOptions = rtcPort
+  ? {
+      listenInfos: [
+        { protocol: 'udp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port: rtcPort },
+        { protocol: 'tcp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port: rtcPort },
+      ],
+    }
+  : null
+
 // ICE servers sent to every WebRTC client.
 //
 // STUN alone is NOT enough for phone <-> PC calls: mobile carriers put phones
