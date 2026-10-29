@@ -20,7 +20,7 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 text-center">
+    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 pb-16 pt-32 text-center sm:pt-40">
       {/* базовая светлая подложка */}
       <div
         aria-hidden="true"
