@@ -2,6 +2,7 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
 import { SiteHeader } from "@/components/site-header"
+import { Reveal } from "@/components/reveal"
 import { Hero } from "@/components/hero"
 import { Features } from "@/components/features"
 import { LessonNotesShowcase } from "@/components/lesson-notes-showcase"
@@ -70,11 +71,19 @@ export default async function Page({ searchParams }: PageProps) {
       />
       <div className="relative z-10">
         <SiteHeader />
-        <Hero />
-        <LessonNotesShowcase />
+        <Reveal>
+          <Hero />
+        </Reveal>
+        <Reveal>
+          <LessonNotesShowcase />
+        </Reveal>
         <Features />
-        <QualityBanner />
-        <Faq />
+        <Reveal>
+          <QualityBanner />
+        </Reveal>
+        <Reveal>
+          <Faq />
+        </Reveal>
         <SiteFooter />
       </div>
     </main>
