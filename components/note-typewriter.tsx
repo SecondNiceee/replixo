@@ -65,7 +65,7 @@ export function NoteTypewriter() {
     <div ref={rootRef} className="relative">
       <figure
         aria-label="Пример конспекта урока: квадратные уравнения"
-        className="rounded-md border border-border bg-card shadow-[0_24px_60px_-30px_oklch(0_0_0/0.8)]"
+        className="rounded-lg border border-border bg-card shadow-[0_1px_2px_oklch(0.2_0.02_265/0.06),0_8px_20px_-6px_oklch(0.2_0.02_265/0.1),0_32px_64px_-24px_oklch(0.2_0.02_265/0.22)]"
       >
         <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-3">
           <span className="font-mono text-xs text-muted-foreground">Алгебра · 8 класс · 1 ч 24 мин</span>
