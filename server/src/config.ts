@@ -8,7 +8,7 @@ import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'medias
 
 export const PORT = parseInt(process.env.PORT ?? '3001', 10)
 export const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:3000'
-export const MAX_PEERS_PER_ROOM = 5
+export const MAX_PEERS_PER_ROOM = 7
 
 // Общий секрет для запросов «Next-сервер → этот сервер» (маршруты /internal/*).
 // У них нет пользовательской сессии: их дёргает Next-роут после успешной записи
