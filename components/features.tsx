@@ -25,7 +25,7 @@ const features = [
 
 export function Features() {
   return (
-    <section className="pattern-dots border-t border-border bg-background py-16 sm:py-20">
+    <section className="pattern-crosses border-t border-border bg-background py-16 sm:py-20">
       <div className="mx-auto max-w-6xl px-6">
         <div className="max-w-2xl">
           <h2 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
