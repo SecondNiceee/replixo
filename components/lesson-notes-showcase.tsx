@@ -19,7 +19,7 @@ export function LessonNotesShowcase() {
   return (
     <section
       aria-labelledby="lesson-notes-title"
-      className="border-t border-border py-16 sm:py-24"
+      className="border-t border-border pb-16 pt-12 sm:pb-24 sm:pt-14"
     >
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-12 px-6 text-center">
         <div className="flex max-w-2xl flex-col items-center gap-4">
