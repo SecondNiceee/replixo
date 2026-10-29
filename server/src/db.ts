@@ -343,3 +343,54 @@ export async function deletePresentationDrawings(roomId: string): Promise<void> 
     console.error('[db] deletePresentationDrawings failed:', (e as Error).message)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Статистика конференций (для /adminuw102). SQL: drizzle/add_call_session.sql.
+// ---------------------------------------------------------------------------
+
+export interface CallSessionStats {
+  roomId: string
+  startedAt: number
+  endedAt: number
+  maxParticipants: number
+  usedScreenShare: boolean
+}
+
+let callSessionTableReady: Promise<void> | null = null
+
+function ensureCallSessionTable(p: Pool): Promise<void> {
+  callSessionTableReady ??= p
+    .query(
+      `CREATE TABLE IF NOT EXISTS "call_session" (
+         "id" bigserial PRIMARY KEY,
+         "roomId" text NOT NULL,
+         "startedAt" timestamp NOT NULL,
+         "endedAt" timestamp NOT NULL,
+         "durationSec" integer NOT NULL,
+         "maxParticipants" integer NOT NULL,
+         "usedScreenShare" boolean NOT NULL DEFAULT false
+       );
+       CREATE INDEX IF NOT EXISTS "call_session_startedAt_idx" ON "call_session" ("startedAt");`,
+    )
+    .then(() => undefined)
+    .catch((e) => {
+      callSessionTableReady = null
+      throw e
+    })
+  return callSessionTableReady
+}
+
+export async function saveCallSession(stats: CallSessionStats): Promise<void> {
+  if (!pool) return
+  try {
+    await ensureCallSessionTable(pool)
+    const durationSec = Math.max(0, Math.round((stats.endedAt - stats.startedAt) / 1000))
+    await pool.query(
+      `INSERT INTO "call_session" ("roomId", "startedAt", "endedAt", "durationSec", "maxParticipants", "usedScreenShare")
+       VALUES ($1, to_timestamp($2 / 1000.0), to_timestamp($3 / 1000.0), $4, $5, $6)`,
+      [stats.roomId, stats.startedAt, stats.endedAt, durationSec, stats.maxParticipants, stats.usedScreenShare],
+    )
+  } catch (e) {
+    console.error('[db] saveCallSession failed:', (e as Error).message)
+  }
+}

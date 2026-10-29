@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey, integer, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, unique, index, real, primaryKey, integer, jsonb, bigserial } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
 // Column names are camelCase to match Better Auth's defaults. Do not rename.
@@ -353,4 +353,22 @@ export const lessonNoteShare = pgTable(
     primaryKey({ columns: [t.noteId, t.userId] }),
     index('lesson_note_share_user_idx').on(t.userId, t.sharedAt),
   ],
+)
+
+// --- Статистика конференций ------------------------------------------------
+// Пишет mediasoup-сервер, когда из комнаты выходит последний участник.
+// Читает /api/adminuw102. SQL: drizzle/add_call_session.sql.
+
+export const callSession = pgTable(
+  'call_session',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    roomId: text('roomId').notNull(),
+    startedAt: timestamp('startedAt').notNull(),
+    endedAt: timestamp('endedAt').notNull(),
+    durationSec: integer('durationSec').notNull(),
+    maxParticipants: integer('maxParticipants').notNull(),
+    usedScreenShare: boolean('usedScreenShare').notNull().default(false),
+  },
+  (t) => [index('call_session_startedAt_idx').on(t.startedAt)],
 )
