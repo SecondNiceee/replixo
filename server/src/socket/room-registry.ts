@@ -1,7 +1,7 @@
 import type { Worker } from 'mediasoup/types'
 import type { Server } from 'socket.io'
 import { Room } from '../Room'
-import { deleteRoomMessages, getWhiteboard, getPresentationDrawings } from '../db'
+import { deleteRoomMessages, getWhiteboard, getPresentationDrawings, saveCallSession } from '../db'
 import { deleteRoomUploads } from '../uploads'
 
 // ---------------------------------------------------------------------------
@@ -211,6 +211,13 @@ export function cleanupRoomIfEmpty(roomId: string): void {
     // диска. Fire-and-forget: удаление не должно блокировать поток сокета.
     void deleteRoomMessages(roomId)
     void deleteRoomUploads(roomId)
+    void saveCallSession({
+      roomId,
+      startedAt: room.startedAt,
+      endedAt: Date.now(),
+      maxParticipants: room.maxParticipants,
+      usedScreenShare: room.usedScreenShare,
+    })
   }
 }
 

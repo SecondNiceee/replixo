@@ -23,6 +23,10 @@ export class Room {
   private webRtcServer?: WebRtcServer
   private peers: Map<string, Peer> = new Map()
 
+  readonly startedAt: number = Date.now()
+  maxParticipants = 0
+  usedScreenShare = false
+
   // The presenter's current slide state. Null when no presentation is active.
   currentSlide: SlideState | null = null
 
@@ -75,6 +79,7 @@ export class Room {
 
   addPeer(peer: Peer): void {
     this.peers.set(peer.peerId, peer)
+    this.maxParticipants = Math.max(this.maxParticipants, this.peers.size)
   }
 
   removePeer(peerId: string): void {
@@ -251,6 +256,7 @@ export class Room {
     })
 
     peer.addProducer(producer)
+    if (appData.source === 'screen') this.usedScreenShare = true
 
     return { producerId: producer.id }
   }
