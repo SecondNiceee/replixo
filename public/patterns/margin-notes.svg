@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="900" viewBox="0 0 64 900">
+  <g fill="none" stroke="#d6453a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 92 l8 10 l18 -24"/>
+    <ellipse cx="32" cy="300" rx="20" ry="16" transform="rotate(-8 32 300)"/>
+    <path d="M14 520 q18 8 36 -2"/>
+    <path d="M20 700 l8 10 l18 -24"/>
+  </g>
+  <g fill="#d6453a" font-family="'Segoe Print','Bradley Hand','Comic Sans MS',cursive" text-anchor="middle">
+    <text x="32" y="308" font-size="22">!</text>
+    <text x="32" y="510" font-size="18" transform="rotate(-6 32 510)">NB</text>
+    <text x="32" y="210" font-size="20" transform="rotate(5 32 210)">5+</text>
+    <text x="32" y="850" font-size="22" transform="rotate(-4 32 850)">?</text>
+  </g>
+</svg>

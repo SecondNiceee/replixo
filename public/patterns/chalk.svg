@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="560" viewBox="0 0 720 560">
+  <defs>
+    <filter id="chalk" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.2" xChannelSelector="R" yChannelSelector="G" result="rough"/>
+      <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -1.6 1.25" result="holes"/>
+      <feComposite in="rough" in2="holes" operator="in"/>
+    </filter>
+  </defs>
+  <g fill="#10121a" stroke="none" font-family="'Segoe Print','Bradley Hand','Comic Sans MS',cursive" filter="url(#chalk)">
+    <text x="40" y="70" font-size="30" transform="rotate(-4 40 70)">a² + b² = c²</text>
+    <text x="420" y="110" font-size="26" transform="rotate(3 420 110)">x = (−b ± √D) / 2a</text>
+    <text x="120" y="230" font-size="24" transform="rotate(2 120 230)">sin²α + cos²α = 1</text>
+    <text x="500" y="270" font-size="34" transform="rotate(-6 500 270)">π ≈ 3,14</text>
+    <text x="60" y="390" font-size="28" transform="rotate(-2 60 390)">∫ f(x) dx</text>
+    <text x="330" y="420" font-size="24" transform="rotate(4 330 420)">Present Perfect: have + V3</text>
+    <text x="560" y="510" font-size="28" transform="rotate(-3 560 510)">E = mc²</text>
+    <text x="200" y="520" font-size="22" transform="rotate(1 200 520)">D = b² − 4ac</text>
+  </g>
+  <g fill="none" stroke="#10121a" stroke-width="2" stroke-linecap="round" filter="url(#chalk)">
+    <path d="M300 170 q40 -18 80 0 t80 0"/>
+    <path d="M40 300 l60 -40 l40 60 z"/>
+    <circle cx="640" cy="380" r="34"/>
+    <path d="M606 380 h68 M640 346 v68" stroke-width="1.4"/>
+  </g>
+</svg>
