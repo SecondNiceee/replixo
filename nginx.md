@@ -85,6 +85,20 @@ server {
 }
 
 server {
+    listen 80;
+    server_name turn.replixo.ru;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+server {
     listen 443 ssl;
     http2 on;
     server_name www.replixo.ru;
@@ -187,6 +201,26 @@ sudo certbot renew --dry-run
 
 Последняя команда проверяет автопродление: оно идёт через тот же
 `/.well-known/acme-challenge/` на 80-м порту, поэтому этот блок не удаляйте.
+
+---
+
+## Сертификат для `turn.replixo.ru` (coturn)
+
+Нужна A-запись `turn` на IP этого сервера. Сертификат выпускается через тот же
+nginx на 80-м порту (блок `server_name turn.replixo.ru` из шага 2):
+
+```bash
+sudo certbot certonly --webroot -w /var/www/html -d turn.replixo.ru
+sudo chmod -R o+rx /etc/letsencrypt/live /etc/letsencrypt/archive
+sudo systemctl restart coturn
+```
+
+Чтобы coturn подхватывал продлённый сертификат автоматически:
+
+```bash
+echo 'systemctl restart coturn' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/coturn.sh
+```
 
 ---
 
