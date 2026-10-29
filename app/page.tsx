@@ -63,7 +63,7 @@ export default async function Page({ searchParams }: PageProps) {
   }
 
   return (
-    <main className="home-pattern relative min-h-screen overflow-hidden bg-background">
+    <main className="relative min-h-screen overflow-hidden bg-background">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}

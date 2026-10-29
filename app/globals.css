@@ -333,7 +333,7 @@ html[data-overlay='1'] .desktop-titlebar {
       100% 100%;
   }
 
-  /* Свои сообщения — синий акцент из палитры лендинга, чужие — тёмная карточка.
+  /* Свои сообщения — синий акцент из палитры лендинга, чужие — ��ёмная карточка.
      Держим отдельными классами, а не набором утилит в разметке: те же пары
      цветов нужны и бабблу, и «хвостику», и вложению внутри него. */
   .bubble-self {
@@ -354,6 +354,41 @@ html[data-overlay='1'] .desktop-titlebar {
       oklch(0.21 0.027 265 / 85%) 0%,
       oklch(0.16 0.023 265 / 72%) 100%
     );
+  }
+
+  /* Узоры секций лендинга. Цвет берётся из --foreground текущей темы, поэтому
+     один и тот же класс одинаково аккуратно ложится и на белые, и на тёмные
+     секции. Секции — isolate, поэтому z-index: -1 кладёт узор между фоном
+     секции и её содержимым, не трогая разметку внутри. */
+  .pattern-grid,
+  .pattern-dots {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .pattern-grid::before,
+  .pattern-dots::before {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    content: '';
+    pointer-events: none;
+  }
+
+  .pattern-grid::before {
+    background-image:
+      linear-gradient(to right, color-mix(in oklch, var(--foreground) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 7%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    -webkit-mask-image: radial-gradient(75% 70% at 50% 40%, black 0%, transparent 100%);
+    mask-image: radial-gradient(75% 70% at 50% 40%, black 0%, transparent 100%);
+  }
+
+  .pattern-dots::before {
+    background-image: radial-gradient(color-mix(in oklch, var(--foreground) 14%, transparent) 1px, transparent 1.4px);
+    background-size: 20px 20px;
+    -webkit-mask-image: radial-gradient(80% 75% at 50% 50%, black 0%, transparent 100%);
+    mask-image: radial-gradient(80% 75% at 50% 50%, black 0%, transparent 100%);
   }
 
   .home-pattern::before {
