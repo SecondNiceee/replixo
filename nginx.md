@@ -61,13 +61,16 @@ server {
 # ── www → без www (единый адрес сайта для Яндекса, без дублей) ───────
 # Сертификат certbot уже выписан на оба имени (replixo.ru и www.replixo.ru).
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name www.replixo.ru;
 
     ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 
     return 301 https://replixo.ru$request_uri;
 }
@@ -156,11 +159,14 @@ server {
     }
 
     # http2 ускоряет загрузку (особенно на телефонах).
-    listen 443 ssl http2; # managed by Certbot
-    ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem; # managed by Certbot
-    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+    listen 443 ssl;
+    http2 on;
+    ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
 }
 
 # ── HTTP → HTTPS, сразу на адрес без www (один редирект, а не два) ──
@@ -178,11 +184,13 @@ Next.js (`next start`) сам сжимает ответы, а nginx не сжи�
 буферизовать стрим для сжатия и снова появится риск «полуответов». Поэтому gzip
 здесь сознательно не включён.
 
-### Если nginx ругается на `http2`
+### Про `http2` и файлы certbot
 
-В nginx 1.25.1+ запись `listen ... http2` устарела (это предупреждение, а не ошибка).
-Можно заменить на `listen 443 ssl;` и отдельную строку `http2 on;` внутри `server`.
-Версию смотрите командой `nginx -v`.
+Конфиг использует `http2 on;` (nginx 1.25.1+). На более старом nginx уберите
+`http2 on;` и пишите `listen 443 ssl http2;`. Версию смотрите командой `nginx -v`.
+
+Файлы `/etc/letsencrypt/options-ssl-nginx.conf` и `ssl-dhparams.pem` создаёт
+только плагин `certbot --nginx`, поэтому настройки TLS прописаны прямо в конфиге.
 
 ---
 
