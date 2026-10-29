@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 type RevealProps = {
@@ -9,36 +9,52 @@ type RevealProps = {
   delay?: number
 }
 
+// Один IntersectionObserver на всю страницу вместо отдельного на каждый блок.
+let sharedObserver: IntersectionObserver | null = null
+
+function getObserver() {
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const node = entry.target as HTMLElement
+          node.dataset.reveal = "shown"
+          sharedObserver?.unobserve(node)
+        }
+      },
+      { threshold: 0, rootMargin: "0px 0px -10% 0px" },
+    )
+  }
+  return sharedObserver
+}
+
+/**
+ * Серверный HTML всегда полностью видим (для поисковиков и без JS).
+ * Прячем блок только на клиенте и только если он ниже экрана, поэтому
+ * видимые сразу блоки не мигают. Состояние меняется через data-атрибут,
+ * без ре-рендеров React; анимируются только opacity и transform.
+ */
 export function Reveal({ children, className, delay = 0 }: RevealProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(false)
 
   useEffect(() => {
     const node = ref.current
     if (!node) return
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    if (node.getBoundingClientRect().top < window.innerHeight) return
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          observer.disconnect()
-        }
-      },
-      { threshold: 0.12, rootMargin: "0px 0px -40px 0px" },
-    )
+    node.dataset.reveal = "hidden"
+    const observer = getObserver()
     observer.observe(node)
-    return () => observer.disconnect()
+    return () => observer.unobserve(node)
   }, [])
 
   return (
     <div
       ref={ref}
-      style={{ transitionDelay: `${delay}ms` }}
-      className={cn(
-        "transition-[opacity,transform] duration-700 ease-out motion-reduce:transform-none motion-reduce:transition-none",
-        visible ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0 motion-reduce:opacity-100",
-        className,
-      )}
+      className={cn("reveal", className)}
+      style={delay ? { transitionDelay: `${delay}ms` } : undefined}
     >
       {children}
     </div>
