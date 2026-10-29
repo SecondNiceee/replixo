@@ -21,7 +21,7 @@ export function Hero() {
   }
 
   return (
-    <section className="landing-light relative flex min-h-screen items-center overflow-hidden bg-background px-6 pb-16 pt-32 sm:pt-40">
+    <section className="landing-light relative flex min-h-screen items-center overflow-hidden bg-background px-6 pb-20 pt-24 sm:pt-28">
 
       <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
