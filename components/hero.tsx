@@ -21,7 +21,7 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-screen items-center overflow-hidden px-6 pb-20 pt-24 sm:pt-28">
+    <section className="relative flex min-h-screen items-center overflow-hidden px-6 pb-20 pt-28 sm:pt-32">
 
       <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">

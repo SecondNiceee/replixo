@@ -425,7 +425,7 @@ html[data-overlay='1'] .desktop-titlebar {
   .pattern-chalk::before {
     background-image: url('/patterns/chalk.svg');
     background-size: 720px 560px;
-    opacity: 0.06;
+    opacity: 0.075;
   }
 
   @media (min-width: 768px) {
@@ -436,8 +436,8 @@ html[data-overlay='1'] .desktop-titlebar {
       top: 120px;
       background-image: url('/patterns/margin-notes.svg');
       background-repeat: repeat-y;
-      background-size: 64px 900px;
-      opacity: 0.4;
+      background-size: 64px 1100px;
+      opacity: 0.48;
     }
   }
 
