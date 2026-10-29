@@ -21,28 +21,13 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-screen items-center overflow-hidden px-6 pb-16 pt-32 sm:pt-40">
-      {/* базовая светлая подложка */}
-      <div
-        aria-hidden="true"
-        className="hero-surface pointer-events-none absolute inset-0 -z-30"
-      />
-      {/* крупная сетка */}
-      <div
-        aria-hidden="true"
-        className="hero-grid pointer-events-none absolute inset-0 -z-20"
-      />
-      {/* виньетка и переход к следующей секции */}
-      <div
-        aria-hidden="true"
-        className="hero-vignette pointer-events-none absolute inset-0 -z-10"
-      />
+    <section className="landing-light relative flex min-h-screen items-center overflow-hidden bg-background px-6 pb-16 pt-32 sm:pt-40">
 
       <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <p className="sr-only">Для репетиторов и преподавателей</p>
 
-          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-5xl xl:text-6xl">
+          <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl xl:text-5xl">
             Видеоплатформа для онлайн-уроков с автоматическими конспектами
           </h1>
 

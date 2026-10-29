@@ -13,7 +13,7 @@ export async function SiteHeader() {
     : null
 
   return (
-    <header className="absolute inset-x-0 top-0 z-20">
+    <header className="landing-light absolute inset-x-0 top-0 z-20">
       {/* minmax(0,1fr) / auto / minmax(0,1fr): крайние колонки делят свободное
           место строго поровну, поэтому nav стоит по центру страницы даже когда
           справа контента больше, чем слева. Голый 1fr не может стать уже своего
