@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Video } from "lucide-react"
 import { StartCallDialog } from "@/components/start-call-dialog"
 import { JoinCallDialog } from "@/components/join-call-dialog"
+import { NoteTypewriter } from "@/components/note-typewriter"
 
 export function Hero() {
   const [startOpen, setStartOpen] = useState(false)
@@ -20,7 +21,7 @@ export function Hero() {
   }
 
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 text-center">
+    <section className="relative flex min-h-screen items-center overflow-hidden px-6 pb-16 pt-32 sm:pt-40">
       {/* базовая светлая подложка */}
       <div
         aria-hidden="true"
@@ -37,48 +38,51 @@ export function Hero() {
         className="hero-vignette pointer-events-none absolute inset-0 -z-10"
       />
 
-      <p className="sr-only">
-        Для репетиторов и преподавателей
-      </p>
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
+        <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
+          <p className="sr-only">Для репетиторов и преподавателей</p>
 
-      <h1 className="max-w-5xl text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground min-[400px]:text-5xl sm:text-6xl md:text-7xl">
-        Видеоплатформа для онлайн-уроков
-      </h1>
+          <h1 className="text-balance text-4xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-5xl xl:text-6xl">
+            Видеоплатформа для онлайн-уроков с автоматическими конспектами
+          </h1>
 
-      <p className="mt-6 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Занятия без ограничения по времени и без установки программ. Создайте
-        комнату, отправьте ученику код, и он подключится из браузера.
-      </p>
+          <h2 className="mt-6 max-w-xl text-pretty text-base font-normal leading-relaxed text-muted-foreground sm:text-lg">
+            Создайте комнату, отправьте ученику код, и он подключится из
+            браузера.
+          </h2>
 
-      <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
-        <Button
-          size="lg"
-          className="h-12 gap-2 rounded-md px-6 text-base font-medium"
-          onClick={() => setStartOpen(true)}
-        >
-          <Video className="size-5" aria-hidden="true" />
-          Начать урок
-        </Button>
-        <Button
-          variant="outline"
-          size="lg"
-          className="h-12 rounded-md px-6 text-base"
-          onClick={() => setJoinOpen(true)}
-        >
-          Войти по коду урока
-        </Button>
+          <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
+            <Button
+              size="lg"
+              className="h-12 gap-2 rounded-md px-6 text-base font-medium"
+              onClick={() => setStartOpen(true)}
+            >
+              <Video className="size-5" aria-hidden="true" />
+              Начать урок
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-12 rounded-md px-6 text-base"
+              onClick={() => setJoinOpen(true)}
+            >
+              Войти по коду урока
+            </Button>
+          </div>
+
+          <Link
+            href="/sign-up"
+            className="mt-9 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span className="font-medium text-foreground underline underline-offset-4">
+              Зарегистрируйтесь
+            </span>
+            , чтобы использовать ИИ-конспект урока для ученика
+          </Link>
+        </div>
+
+        <NoteTypewriter />
       </div>
-
-      <Link
-        href="/sign-up"
-        className="mt-9 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span className="font-medium text-foreground underline underline-offset-4">
-          Зарегистрируйтесь
-        </span>
-        , чтобы использовать ИИ-конспект урока для ученика
-      </Link>
-
 
       <StartCallDialog
         open={startOpen}
