@@ -47,7 +47,7 @@ export function Faq() {
   return (
     <section
       aria-labelledby="faq-title"
-      className="pattern-notebook border-t border-border bg-background py-16 sm:py-24"
+      className="border-t border-border py-16 sm:py-24"
     >
       <div className="mx-auto grid max-w-6xl px-6 grid-cols-1 gap-10 lg:grid-cols-[1fr_2fr] lg:gap-16">
         <div className="flex flex-col gap-3">

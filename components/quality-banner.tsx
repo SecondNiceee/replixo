@@ -7,7 +7,7 @@ const points = [
 
 export function QualityBanner() {
   return (
-    <section className="pattern-hatch border-t border-border bg-background px-6 py-16 sm:py-20">
+    <section className="border-t border-border px-6 py-16 sm:py-20">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 rounded-lg border border-border bg-card p-8 shadow-[0_24px_60px_-24px_oklch(0.2_0.02_265/0.25)] sm:p-12 md:flex-row md:items-end md:justify-between">
         <div className="max-w-xl">
           <h2 className="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">

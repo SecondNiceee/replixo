@@ -380,32 +380,29 @@ html[data-overlay='1'] .desktop-titlebar {
   }
 
   /* Разлинованная тетрадь: строки + красная-«полевая» линия, только в цвете бренда. */
+  .pattern-notebook {
+    --notebook-margin: 12px;
+  }
+
   .pattern-notebook::before {
-    background-image: repeating-linear-gradient(
-      to bottom,
-      transparent 0 35px,
-      color-mix(in oklch, var(--primary) 13%, transparent) 35px 36px
-    );
-    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 100%);
-    mask-image: linear-gradient(to bottom, black 0%, black 55%, transparent 100%);
+    background-image:
+      linear-gradient(
+        to right,
+        transparent var(--notebook-margin),
+        color-mix(in oklch, oklch(0.63 0.2 25) 30%, transparent) var(--notebook-margin)
+          calc(var(--notebook-margin) + 1px),
+        transparent calc(var(--notebook-margin) + 1px)
+      ),
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0 31px,
+        color-mix(in oklch, var(--primary) 7%, transparent) 31px 32px
+      );
   }
 
   @media (min-width: 768px) {
-    .pattern-notebook::before {
-      background-image:
-        linear-gradient(
-          to right,
-          transparent 72px,
-          color-mix(in oklch, var(--primary) 32%, transparent) 72px 73px,
-          transparent 73px 77px,
-          color-mix(in oklch, var(--primary) 18%, transparent) 77px 78px,
-          transparent 78px
-        ),
-        repeating-linear-gradient(
-          to bottom,
-          transparent 0 35px,
-          color-mix(in oklch, var(--primary) 13%, transparent) 35px 36px
-        );
+    .pattern-notebook {
+      --notebook-margin: 72px;
     }
   }
 
