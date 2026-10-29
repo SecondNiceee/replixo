@@ -15,6 +15,7 @@ import type {
 } from '../types'
 import { ack, err, type Callback, type HandlerContext } from './helpers'
 import { canonicalRoomCode } from '../room-code'
+import { MAX_PEERS_PER_ROOM } from '../config'
 import {
   rooms,
   clearPendingDisconnect,
@@ -137,7 +138,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         const room = await withTimeout(getOrCreateRoom(roomId, worker), 15_000, 'getOrCreateRoom')
         const repeatedJoin = room.hasPeer(peerId) && getPeerSocket(roomId, peerId) === socket.id
 
-        if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, 'Room is full (max 5 participants)')
+        if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, `Room is full (max ${MAX_PEERS_PER_ROOM} participants)`)
 
         if (repeatedJoin) {
           const peer = room.getPeer(peerId)!
