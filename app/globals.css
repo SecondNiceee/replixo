@@ -406,7 +406,42 @@ html[data-overlay='1'] .desktop-titlebar {
     }
   }
 
-  /* Расходящиеся круги — как сигнал видеосвязи из угла секции. */
+  /* Стёртая меловая доска: полупрозрачные формулы и правила, как следы
+     прошлых уроков, плюс красные пометки учителя на полях (md+). */
+  .pattern-chalk {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .pattern-chalk::before,
+  .pattern-chalk::after {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    content: '';
+    pointer-events: none;
+  }
+
+  .pattern-chalk::before {
+    background-image: url('/patterns/chalk.svg');
+    background-size: 720px 560px;
+    opacity: 0.06;
+  }
+
+  @media (min-width: 768px) {
+    .pattern-chalk::after {
+      right: auto;
+      width: 64px;
+      left: 12px;
+      top: 120px;
+      background-image: url('/patterns/margin-notes.svg');
+      background-repeat: repeat-y;
+      background-size: 64px 900px;
+      opacity: 0.4;
+    }
+  }
+
+  /* Расходящиеся круги — как сигнал видеосв��зи из угла секции. */
   .pattern-waves::before {
     background-image: repeating-radial-gradient(
       circle at 100% 0%,
