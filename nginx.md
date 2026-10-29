@@ -1,4 +1,4 @@
-# Nginx конфиг для Replixo
+# Nginx конфиг для Replixo (обычный сервер, без балансера)
 
 ## Структура
 
@@ -8,58 +8,82 @@
 Nginx выступает reverse proxy: принимает HTTPS на 443, отдаёт на нужный порт.
 
 Файл на сервере: `/etc/nginx/sites-available/default`
+(`/etc/nginx/sites-enabled/default` — ссылка на него).
+
+Ставится в два шага, потому что nginx не запустится, если в конфиге указан
+сертификат, которого ещё нет:
+
+1. **Шаг 1** — временный конфиг только на 80-м порту, выпускаем сертификат.
+2. **Шаг 2** — полный конфиг с HTTPS.
+
+Если сертификат уже выпущен (`ls /etc/letsencrypt/live/replixo.ru/` показывает
+`fullchain.pem` и `privkey.pem`), сразу переходите к шагу 2.
 
 ---
 
-## Баг, который здесь был исправлен
+## Шаг 1. Временный конфиг и выпуск сертификата
 
-В `location /` стояло `proxy_set_header Connection 'upgrade';` — хардкодом, для
-**всех** запросов. Для обычных запросов страниц `$http_upgrade` пустой, поэтому
-Node получал `Connection: upgrade` **без** заголовка `Upgrade`. Это невалидная
-комбинация: keep-alive соединение к upstream ломается, и streaming-ответ Next.js
-обрывается посередине — chunked-ответ приходит без терминирующего чанка.
-
-Симптомы были асимметричные и потому запутывающие:
-
-- **В браузере** сайт «работает»: Chrome прощает обрыв и рисует полученный
-  частичный HTML (страница при этом может не гидратироваться).
-- **В Electron** главный фрейм считается проваленным
-  (`ERR_INCOMPLETE_CHUNKED_ENCODING`) и Chromium показывает свою заглушку
-  **«This page couldn't load — A server error occurred»**.
-- Ломалось не всегда, а примерно каждый третий запрос — отсюда «то работает, то нет».
-
-Правильный способ — `map`: `upgrade` только когда клиент реально просит upgrade,
-иначе `close`.
-
----
-
-## Конфиг
+Перед этим DNS `replixo.ru` и `www.replixo.ru` должны указывать на IP этого
+сервера, а порт 80 должен быть открыт (`sudo ufw allow 80/tcp`).
 
 ```nginx
-# Блок map обязан быть на уровне http {}, а не внутри server {}.
-# sites-enabled/* подключается внутрь http {}, поэтому верх этого файла подходит.
+server {
+    listen 80 default_server;
+    server_name replixo.ru www.replixo.ru;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+```
+
+```bash
+sudo nano /etc/nginx/sites-available/default
+sudo mkdir -p /var/www/html
+sudo nginx -t && sudo systemctl reload nginx
+
+sudo apt install -y certbot
+sudo certbot certonly --webroot -w /var/www/html -d replixo.ru -d www.replixo.ru
+```
+
+Если `www.replixo.ru` пока не ведёт на этот сервер, выпустите только на
+`-d replixo.ru`, а потом повторите команду с обоими именами.
+
+После успеха должны появиться файлы:
+
+```bash
+sudo ls /etc/letsencrypt/live/replixo.ru/
+```
+
+---
+
+## Шаг 2. Полный конфиг
+
+```nginx
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
 
-# ── TURN сервер (только для ACME challenge) ─────────────────────────
 server {
-    listen 80;
-    server_name turn.replixo.ru;
+    listen 80 default_server;
+    server_name replixo.ru www.replixo.ru;
 
-    location /.well-known/acme-challenge/ {
+    location ^~ /.well-known/acme-challenge/ {
         root /var/www/html;
+        default_type text/plain;
     }
 
     location / {
-        # Редирект на HTTPS убран, так как SSL временно отключен
-        return 404;
+        return 301 https://replixo.ru$request_uri;
     }
 }
 
-# ── www → без www (единый адрес сайта для Яндекса, без дублей) ───────
-# Сертификат certbot уже выписан на оба имени (replixo.ru и www.replixo.ru).
 server {
     listen 443 ssl;
     http2 on;
@@ -76,32 +100,34 @@ server {
 }
 
 server {
+    listen 443 ssl;
+    http2 on;
     server_name replixo.ru;
 
-    # ── Next.js фронтенд ──────────────────────────────────────────────
+    ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
     location / {
         client_max_body_size 30m;
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade $http_upgrade;
-        # Было 'upgrade' хардкодом — это и рвало стрим Next.js.
         proxy_set_header   Connection $connection_upgrade;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
-
-        # Next.js стримит HTML и RSC-пейлоад. С буферизацией nginx копит ответ в
-        # 4/8 КБ буферах и при переполнении уходит в temp-файл — это добавляет
-        # свои "полуответы" на медленном диске. Отдаём стрим как есть.
         proxy_buffering         off;
         proxy_request_buffering off;
         proxy_read_timeout      300s;
         proxy_send_timeout      300s;
     }
 
-    # Загрузка файлов и room HTTP endpoints
     location /rooms/ {
         client_max_body_size 30m;
         proxy_pass http://127.0.0.1:3001;
@@ -115,7 +141,6 @@ server {
         proxy_send_timeout 300;
     }
 
-    # Выдача загруженных вложений
     location /uploads/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -125,9 +150,6 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Установщик Windows (/download/windows) отдаёт сервер на 3001.
-    # Маршрут app/download/windows в Next.js — запасной: он срабатывает только
-    # если этого блока нет (например, локально без nginx).
     location /download/ {
         proxy_pass         http://127.0.0.1:3001;
         proxy_http_version 1.1;
@@ -142,14 +164,10 @@ server {
         proxy_max_temp_file_size 0;
     }
 
-    # ── Mediasoup / Socket.io (WebSocket) ─────────────────────────────
     location /socket.io/ {
         proxy_pass         http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade $http_upgrade;
-        # Здесь тоже был хардкод. Socket.io начинает с HTTP-polling
-        # (GET /socket.io/?transport=polling) без Upgrade, и только потом
-        # переключается на WebSocket — polling-запросы ломались так же.
         proxy_set_header   Connection $connection_upgrade;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
@@ -157,32 +175,39 @@ server {
         proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400;
     }
-
-    # http2 ускоряет загрузку (особенно на телефонах).
-    listen 443 ssl;
-    http2 on;
-    ssl_certificate /etc/letsencrypt/live/replixo.ru/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/replixo.ru/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-}
-
-# ── HTTP → HTTPS, сразу на адрес без www (один редирект, а не два) ──
-server {
-    listen 80;
-    server_name replixo.ru www.replixo.ru;
-    return 301 https://replixo.ru$request_uri;
 }
 ```
 
+```bash
+sudo nano /etc/nginx/sites-available/default
+sudo ufw allow 443/tcp
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot renew --dry-run
+```
+
+Последняя команда проверяет автопродление: оно идёт через тот же
+`/.well-known/acme-challenge/` на 80-м порту, поэтому этот блок не удаляйте.
+
+---
+
+## Пояснения к конфигу
+
+### Почему `map $http_upgrade $connection_upgrade`
+
+Раньше в `location /` стояло `proxy_set_header Connection 'upgrade';` хардкодом.
+Для обычных запросов Node получал `Connection: upgrade` без заголовка `Upgrade`,
+keep-alive соединение ломалось, и streaming-ответ Next.js обрывался посередине.
+В браузере это выглядело как «иногда не гидратируется», в Electron — как
+`ERR_INCOMPLETE_CHUNKED_ENCODING` и заглушка «This page couldn't load».
+`map` ставит `upgrade` только когда клиент реально просит upgrade, иначе `close`.
+
+`map` обязан быть на уровне `http {}`. Файлы из `sites-enabled/` подключаются
+внутрь `http {}`, поэтому верх этого файла подходит.
+
 ### Почему без gzip в nginx
 
-Next.js (`next start`) сам сжимает ответы, а nginx не сжимает повторно то, что уже
-пришло с `Content-Encoding`. Если включить `gzip on` в `location /`, nginx начнёт
-буферизовать стрим для сжатия и снова появится риск «полуответов». Поэтому gzip
-здесь сознательно не включён.
+Next.js (`next start`) сам сжимает ответы. Если включить `gzip on` в `location /`,
+nginx начнёт буферизовать стрим и снова появится риск «полуответов».
 
 ### Про `http2` и файлы certbot
 
@@ -194,32 +219,33 @@ Next.js (`next start`) сам сжимает ответы, а nginx не сжи�
 
 ---
 
-## Применение
+## Частые ошибки `nginx -t`
 
-```bash
-sudo nano /etc/nginx/sites-available/default
-# вставить конфиг выше, сохранить
+- `cannot load certificate ".../fullchain.pem"` — сертификата ещё нет. Поставьте
+  конфиг из шага 1 и выпустите сертификат.
+- `open() "/etc/letsencrypt/options-ssl-nginx.conf" failed` — в конфиге остались
+  строки `include ...options-ssl-nginx.conf` / `ssl_dhparam`. Удалите их.
+- `the "listen ... http2" directive is deprecated` — предупреждение, не ошибка.
+  Замените `listen 443 ssl http2;` на `listen 443 ssl;` + `http2 on;`.
 
-sudo nginx -t                  # проверить синтаксис
-sudo systemctl reload nginx
-```
+---
 
-Проверка, что стрим больше не рвётся — все 20 значений должны быть одинаковыми:
+## Проверка
+
+Стрим не рвётся — все 20 значений должны быть одинаковыми:
 
 ```bash
 for i in $(seq 20); do curl -s -o /dev/null -w "%{size_download}\n" https://replixo.ru/; done
 ```
 
-Если хотя бы одно значение меньше остальных — стрим всё ещё обрывается.
-
-Проверка редиректов — оба должны вернуть `301` на `https://replixo.ru/`:
+Редиректы — оба должны вернуть `301` на `https://replixo.ru/`:
 
 ```bash
 curl -sI https://www.replixo.ru/ | grep -i -E "^(HTTP|location)"
 curl -sI http://replixo.ru/      | grep -i -E "^(HTTP|location)"
 ```
 
-Проверка HTTP/2 — должно быть `HTTP/2 200`:
+HTTP/2 — должно быть `HTTP/2 200`:
 
 ```bash
 curl -sI --http2 https://replixo.ru/ | head -1
@@ -230,22 +256,16 @@ curl -sI --http2 https://replixo.ru/ | head -1
 ## Важно
 
 - **Socket.io URL резолвится автоматически.** Клиент (`hooks/mediasoup/types.ts`,
-  функция `resolveServerUrl`) в проде по умолчанию коннектится на **тот же origin**,
-  что и приложение (`https://replixo.ru`), а nginx проксирует `/socket.io/` на
-  mediasoup. Поэтому отдельная переменная в проде **не обязательна** — достаточно,
-  чтобы nginx проксировал `/socket.io/` (см. конфиг выше).
-- Если хочешь задать URL сокет-сервера явно (например, mediasoup на другом домене),
-  выстави `NEXT_PUBLIC_MEDIASOUP_URL=https://replixo.ru`.
-  ⚠️ Это переменная `NEXT_PUBLIC_*` — она **вшивается в бандл на этапе `next build`**.
-  После её изменения нужно **пересобрать фронтенд** (`pnpm build`) и перезапустить,
-  иначе в браузере останется старое значение (частая причина `ws://localhost:3001`
-  на проде).
-- Единственное каноничное имя переменной для URL сокет/mediasoup сервера —
-  `NEXT_PUBLIC_MEDIASOUP_URL`. Старое `NEXT_PUBLIC_MEDIASOUP_SERVER_URL` из кода
-  удалено — если оно осталось в `.env`, его можно удалить.
-- Убедись, что в `server/.env` переменная `CLIENT_ORIGIN` указывает на `https://replixo.ru`.
+  функция `resolveServerUrl`) в проде коннектится на тот же origin, что и
+  приложение (`https://replixo.ru`), а nginx проксирует `/socket.io/` на mediasoup.
+- Если хочешь задать URL сокет-сервера явно, выстави
+  `NEXT_PUBLIC_MEDIASOUP_URL=https://replixo.ru`. Это переменная `NEXT_PUBLIC_*` —
+  она вшивается в бандл на этапе `next build`, после изменения нужно пересобрать
+  фронтенд (`pnpm build`) и перезапустить.
+- Единственное каноничное имя переменной — `NEXT_PUBLIC_MEDIASOUP_URL`. Старое
+  `NEXT_PUBLIC_MEDIASOUP_SERVER_URL` удалено.
+- В `server/.env` переменная `CLIENT_ORIGIN` должна указывать на `https://replixo.ru`.
 - UDP-порты Mediasoup (по умолчанию `10000-10100`) должны быть открыты в firewall:
   ```bash
   sudo ufw allow 10000:10100/udp
-  sudo ufw allow 3001/tcp   # только если доступ к Mediasoup нужен напрямую
   ```
