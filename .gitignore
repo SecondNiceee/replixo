@@ -26,6 +26,11 @@ node_modules
 # Electron build output
 release/
 
+# Сборка сервера (собирается `npm run build` в server/) и локальные логи Electron
+server/dist/
+logs/
+*.log
+
 # CMake артефакты нативного helper'а (сам .exe уже покрыт правилом *.exe ниже)
 electron/native/process-loopback/build/
 electron/native/process-loopback/bin/

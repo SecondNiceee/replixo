@@ -2,7 +2,6 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { pool } from '@/lib/db'
 
-const ADMIN_PASSWORD = '11559966332211kkKK'
 const NOTE_GRACE_MINUTES = 120
 
 function digest(value: string) {
@@ -10,8 +9,11 @@ function digest(value: string) {
 }
 
 function isValidPassword(input: unknown): boolean {
+  const adminPassword = process.env.ADMIN_PASSWORD
+  // Without a configured password the admin panel stays locked for everyone.
+  if (!adminPassword || adminPassword.length < 8) return false
   if (typeof input !== 'string' || input.length > 200) return false
-  return timingSafeEqual(digest(input), digest(ADMIN_PASSWORD))
+  return timingSafeEqual(digest(input), digest(adminPassword))
 }
 
 export interface CallSessionRow {
