@@ -706,7 +706,12 @@ html[data-overlay='1'] .desktop-titlebar {
     @apply bg-background text-foreground;
   }
   html {
-    @apply font-sans;
+  @apply font-sans;
+  }
+  /* Лендинг на больших мониторах: плавно увеличиваем базовый rem (как Ctrl+),
+     чтобы контент не терялся среди огромных полей. До 1440px — без изменений. */
+  html:has(main.landing-light) {
+  font-size: clamp(16px, calc(16px + (100vw - 1440px) * 0.0073), 23px);
   }
   button, a, [role="button"] {
     cursor: pointer;
