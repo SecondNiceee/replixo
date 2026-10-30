@@ -27,7 +27,7 @@ export function Hero() {
         <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <p className="sr-only">Для репетиторов и преподавателей</p>
 
-          <h1 className="text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl xl:text-5xl">
+          <h1 className="text-balance text-3xl font-medium leading-snug text-foreground sm:text-4xl">
             Видеоплатформа для онлайн-уроков с автоматическими конспектами
           </h1>
 
