@@ -16,7 +16,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const INSTALLER_NAME =
-  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-3.exe'
+  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe'
 
 const INSTALLER_PATH =
   process.env.WINDOWS_INSTALLER_PATH ??
