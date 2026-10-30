@@ -108,6 +108,32 @@ export function registerChatHandlers(ctx: HandlerContext): void {
   })
 
   // -----------------------------------------------------------------------
+  // chatTyping  (a peer started/stopped typing in the room chat)
+  //
+  // Ephemeral: not persisted, just relayed to the other peers. Clients send
+  // typing:true at most every few seconds while typing, so a loose limit
+  // is enough to stop abuse.
+  // -----------------------------------------------------------------------
+  const allowTypingEvent = createRateLimiter(10, 5000)
+
+  socket.on('chatTyping', (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return
+    const { roomId: rid, peerId: pid, typing } = payload as Record<string, unknown>
+    if (typeof rid !== 'string' || !rid) return
+    if (typeof pid !== 'string' || !pid) return
+    if (typeof typing !== 'boolean') return
+
+    const room = rooms.get(rid)
+    if (!room) return
+    const peer = room.getPeer(pid)
+    if (!peer) return
+    if (getPeerSocket(rid, pid) !== socket.id) return
+    if (!allowTypingEvent()) return
+
+    socket.to(rid).emit('chatTyping', { peerId: pid, displayName: peer.displayName, typing })
+  })
+
+  // -----------------------------------------------------------------------
   // chatRead  (a peer has read the chat up to a given timestamp)
   //
   // Emitted when the recipient has the chat panel open AND the tab visible.

@@ -158,6 +158,8 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
     mediaBaseUrl,
     readMarkers,
     markChatRead,
+    sendChatTyping,
+    typingPeers,
     whiteboardOpen,
     whiteboardSnapshot,
     openWhiteboard,
@@ -525,6 +527,8 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
           unreadFromIndex={unreadFromIndex}
           readMarkers={readMarkers}
           peerIds={peerIds}
+          typingPeers={typingPeers}
+          onTyping={sendChatTyping}
         />
       </div>
 

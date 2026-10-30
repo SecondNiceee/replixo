@@ -131,6 +131,29 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
     dispatch({ type: "ADD_MESSAGE", message: { ...msg, self: false, attachment: msg.attachment ?? null } })
   })
 
+  // typing:false can be lost (tab closed, network drop), so every "typing"
+  // indicator also expires on its own a few seconds after the last ping.
+  const typingTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  socket.on("chatTyping", (payload: { peerId: string; displayName: string; typing: boolean }) => {
+    if (!payload || typeof payload.peerId !== "string" || typeof payload.typing !== "boolean") return
+    const { peerId, typing } = payload
+    const displayName = typeof payload.displayName === "string" ? payload.displayName : ""
+    const prevTimer = typingTimers.get(peerId)
+    if (prevTimer) clearTimeout(prevTimer)
+    typingTimers.delete(peerId)
+    dispatch({ type: "SET_PEER_TYPING", peerId, displayName, typing })
+    if (typing) {
+      typingTimers.set(peerId, setTimeout(() => {
+        typingTimers.delete(peerId)
+        dispatch({ type: "SET_PEER_TYPING", peerId, displayName, typing: false })
+      }, 6000))
+    }
+  })
+  socket.on("disconnect", () => {
+    typingTimers.forEach(clearTimeout)
+    typingTimers.clear()
+  })
+
   socket.on("chatRead", (payload: { peerId: string; ts: number }) => {
     if (!payload || typeof payload.peerId !== "string" || typeof payload.ts !== "number") return
     dispatch({ type: "SET_READ_MARKER", peerId: payload.peerId, ts: payload.ts })
