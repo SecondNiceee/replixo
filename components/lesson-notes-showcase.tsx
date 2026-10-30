@@ -38,9 +38,15 @@ export function LessonNotesShowcase() {
           </p>
         </div>
 
-        <ol className="grid w-full grid-cols-1 gap-8 sm:grid-cols-3">
-          {steps.map((step) => (
-            <li key={step.title} className="flex flex-col gap-2 border-t border-border pt-5">
+        <ol className="grid w-full grid-cols-1 gap-5 text-left sm:grid-cols-3">
+          {steps.map((step, index) => (
+            <li
+              key={step.title}
+              className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-[0_1px_2px_oklch(0.2_0.02_265/0.05),0_14px_36px_-18px_oklch(0.2_0.02_265/0.28)] transition-[transform,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-[0_1px_2px_oklch(0.2_0.02_265/0.07),0_22px_44px_-18px_oklch(0.2_0.02_265/0.34)]"
+            >
+              <span className="flex size-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
+                {index + 1}
+              </span>
               <h3 className="text-base font-medium text-foreground">{step.title}</h3>
               <p className="text-pretty text-sm leading-relaxed text-muted-foreground">{step.text}</p>
             </li>
