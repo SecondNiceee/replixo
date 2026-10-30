@@ -43,7 +43,7 @@ Forwarding Unit) на базе **mediasoup** и обменивается сиг�
 - вложения чата: `UPLOAD_DIR` (по умолчанию `<cwd>/uploads`),
   `MAX_FILE_SIZE` (25 МБ), `UPLOAD_TTL_MS` (48 ч — TTL осиротевших папок);
 - установщик: `WINDOWS_INSTALLER_PATH` (по умолчанию
-  `<cwd>/downloads/Replixo-Setup-version-3.exe`), `WINDOWS_INSTALLER_NAME`;
+  `<cwd>/downloads/Replixo-Setup-version-4.exe`), `WINDOWS_INSTALLER_NAME`;
 - `workerSettings` — диапазон RTC-портов `40000–49999`, уровни логирования;
 - `mediaCodecs` — поддерживаемые кодеки: Opus с FEC и DTX (аудио), VP8 и H264
   (видео);

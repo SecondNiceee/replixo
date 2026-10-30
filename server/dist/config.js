@@ -40,11 +40,11 @@ exports.DM_UPLOAD_SUBDIR = 'dm';
 // ---------------------------------------------------------------------------
 // Абсолютный путь к .exe-установщику для Windows. Файл кладётся на диск сервера
 // вручную (через scp/rsync) и НЕ коммитится в репозиторий. Маршрут /download/windows
-// отдаёт именно этот файл. По умолчанию ищем в <cwd>/downloads/Replixo-Setup-version-3.exe.
+// отдаёт именно этот файл. По умолчанию ищем в <cwd>/downloads/Replixo-Setup-version-4.exe.
 exports.WINDOWS_INSTALLER_PATH = process.env.WINDOWS_INSTALLER_PATH ??
-    path_1.default.join(process.cwd(), 'downloads', 'Replixo-Setup-version-3.exe');
+    path_1.default.join(process.cwd(), 'downloads', 'Replixo-Setup-version-4.exe');
 // Имя файла, под которым установщик будет сохранён у пользователя.
-exports.WINDOWS_INSTALLER_NAME = process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-3.exe';
+exports.WINDOWS_INSTALLER_NAME = process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe';
 // Подстраховка от "осиротевших" файлов после жёсткого падения сервера (когда
 // штатная очистка при уничтожении комнаты не успела отработать). Папки комнат,
 // не изменявшиеся дольше этого срока, удаляются фоновым сборщиком. По умолчанию
