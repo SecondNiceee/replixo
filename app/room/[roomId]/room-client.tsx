@@ -505,7 +505,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
         <button
           onClick={toggleChat}
           aria-label={chatOpen ? "Скрыть чат" : "Открыть чат"}
-          className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-l-xl border border-r-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
+          className="absolute -left-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-l-xl border border-r-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
         >
           <ChevronRight
             className={cn(
