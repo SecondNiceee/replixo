@@ -52,7 +52,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     hasCam: false,
     messages: [],
     readMarkers: {},
-    typingPeers: {},
     whiteboardOpen: false,
     whiteboardSnapshot: null,
   })
@@ -878,7 +877,6 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     uploadChatFile: chat.uploadChatFile,
     markChatRead: chat.markChatRead,
     sendChatTyping: chat.sendChatTyping,
-    typingPeers: state.typingPeers,
     readMarkers: state.readMarkers,
     mediaBaseUrl: SERVER_URL,
     // Whiteboard

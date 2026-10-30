@@ -3,6 +3,9 @@ import { playJoinSound, playLeaveSound } from "@/lib/sounds"
 import { normalizeSource } from "./types"
 import type { Consumer, MediaSource, Transport, ChatAttachment } from "./types"
 import type { Action } from "./reducer"
+import { useRoomTypingStore } from "@/stores/room-typing-store"
+
+const typingStore = () => useRoomTypingStore.getState()
 
 type Ref<T> = React.MutableRefObject<T>
 
@@ -141,17 +144,18 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
     const prevTimer = typingTimers.get(peerId)
     if (prevTimer) clearTimeout(prevTimer)
     typingTimers.delete(peerId)
-    dispatch({ type: "SET_PEER_TYPING", peerId, displayName, typing })
+    typingStore().setTyping(peerId, displayName, typing)
     if (typing) {
       typingTimers.set(peerId, setTimeout(() => {
         typingTimers.delete(peerId)
-        dispatch({ type: "SET_PEER_TYPING", peerId, displayName, typing: false })
+        typingStore().clearPeer(peerId)
       }, 6000))
     }
   })
   socket.on("disconnect", () => {
     typingTimers.forEach(clearTimeout)
     typingTimers.clear()
+    typingStore().reset()
   })
 
   socket.on("chatRead", (payload: { peerId: string; ts: number }) => {

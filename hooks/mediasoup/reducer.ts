@@ -17,8 +17,6 @@ export interface State {
   hasCam: boolean
   messages: ChatMessage[]
   readMarkers: Record<string, number>
-  // peerId -> displayName of remote peers currently typing in the room chat.
-  typingPeers: Record<string, string>
   whiteboardOpen: boolean
   whiteboardSnapshot: string | null
 }
@@ -43,19 +41,12 @@ export type Action =
   | { type: "SET_SCREEN_SHARING"; isSharing: boolean }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "SET_READ_MARKER"; peerId: string; ts: number }
-  | { type: "SET_PEER_TYPING"; peerId: string; displayName: string; typing: boolean }
   | { type: "SET_WHITEBOARD"; open: boolean; snapshot?: string | null }
 
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
 
-function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  if (!(key in record)) return record
-  const next = { ...record }
-  delete next[key]
-  return next
-}
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -90,7 +81,7 @@ export function reducer(state: State, action: Action): State {
     case "PEER_LEFT": {
       const peers = new Map(state.peers)
       peers.delete(action.peerId)
-      return { ...state, peers, typingPeers: withoutKey(state.typingPeers, action.peerId) }
+      return { ...state, peers }
     }
 
     case "PEER_AUDIO_MUTED": {
@@ -139,17 +130,7 @@ export function reducer(state: State, action: Action): State {
     case "ADD_MESSAGE": {
       if (state.messages.some((m) => m.id === action.message.id)) return state
       const next = [...state.messages, action.message]
-      const typingPeers = withoutKey(state.typingPeers, action.message.peerId)
-      return { ...state, typingPeers, messages: next.length > 500 ? next.slice(next.length - 500) : next }
-    }
-
-    case "SET_PEER_TYPING": {
-      if (action.typing) {
-        if (state.typingPeers[action.peerId] === action.displayName) return state
-        return { ...state, typingPeers: { ...state.typingPeers, [action.peerId]: action.displayName } }
-      }
-      const typingPeers = withoutKey(state.typingPeers, action.peerId)
-      return typingPeers === state.typingPeers ? state : { ...state, typingPeers }
+      return { ...state, messages: next.length > 500 ? next.slice(next.length - 500) : next }
     }
 
     case "SET_READ_MARKER": {
