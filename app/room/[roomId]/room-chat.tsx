@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import type { ChatMessage, ChatAttachment } from "@/hooks/use-mediasoup"
 import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 import { ChatMessageList } from "./chat-message-list"
+import { useRoomTypingStore } from "@/stores/room-typing-store"
 import { formatFileSize, isImageAttachment } from "@/lib/chat-format"
 
 interface RoomChatProps {
@@ -33,8 +34,6 @@ interface RoomChatProps {
   // Currently connected remote peer ids, used to decide when a message has
   // been read by everyone else in the room.
   peerIds: string[]
-  // peerId -> displayName of remote peers currently typing.
-  typingPeers: Record<string, string>
   onTyping: (typing: boolean) => void
 }
 
@@ -48,6 +47,26 @@ function formatTypingLabel(names: string[]): string {
   return `${names[0]} и ещё ${names.length - 1} печатают…`
 }
 
+function TypingIndicator() {
+  const typingPeers = useRoomTypingStore((s) => s.typingPeers)
+  const typingNames = Object.values(typingPeers).map((name) => name || "Участник")
+
+  return (
+    <div aria-live="polite" className="flex h-6 shrink-0 items-center gap-2 px-4 text-xs text-muted-foreground">
+      {typingNames.length > 0 && (
+        <>
+          <span className="flex items-center gap-0.5" aria-hidden="true">
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground" />
+          </span>
+          <span className="truncate">{formatTypingLabel(typingNames)}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
 export const RoomChat = memo(function RoomChat({
   open,
   onClose,
@@ -58,11 +77,9 @@ export const RoomChat = memo(function RoomChat({
   unreadFromIndex,
   readMarkers,
   peerIds,
-  typingPeers,
   onTyping,
 }: RoomChatProps) {
   const [text, setText] = useState("")
-  const typingNames = Object.values(typingPeers).map((name) => name || "Участник")
 
   // typing:true goes out once and is refreshed every TYPING_PING_MS while the
   // user keeps typing; typing:false after TYPING_IDLE_MS of silence or on send.
@@ -274,18 +291,7 @@ export const RoomChat = memo(function RoomChat({
         />
       </div>
 
-      <div aria-live="polite" className="flex h-6 shrink-0 items-center gap-2 px-4 text-xs text-muted-foreground">
-        {typingNames.length > 0 && (
-          <>
-            <span className="flex items-center gap-0.5" aria-hidden="true">
-              <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-              <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-              <span className="size-1 animate-bounce rounded-full bg-muted-foreground" />
-            </span>
-            <span className="truncate">{formatTypingLabel(typingNames)}</span>
-          </>
-        )}
-      </div>
+      <TypingIndicator />
 
       {/* Pending attachment / upload status */}
       {(pendingAttachment || uploading || uploadError) && (
