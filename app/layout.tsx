@@ -6,6 +6,7 @@ import { auth } from '@/lib/auth'
 import { ElectronPatches } from '@/components/electron-patches'
 import { DesktopTitlebar } from '@/components/desktop-titlebar'
 import { DmNotifier } from '@/components/dm-notifier'
+import { CallFeedbackPrompt } from '@/components/call-feedback-prompt'
 import { SITE_NAME, SITE_URL } from '@/lib/seo'
 import './globals.css'
 
@@ -97,6 +98,7 @@ export default async function RootLayout({
         <DesktopTitlebar />
         {session?.user && <DmNotifier selfId={session.user.id} />}
         {children}
+        <CallFeedbackPrompt />
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

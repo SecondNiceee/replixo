@@ -288,7 +288,7 @@ export const annotationSettings = pgTable('annotation_settings', {
 // --- Shared whiteboard -----------------------------------------------------
 // Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
 // снапшот документа целиком (JSON-строка от tldraw getSnapshot). Снапшот
-// периодически перезаписывается, пока участники рисуют, и стирается вместе с
+// периодически перезаписывается, пока участники рисуют, и стирает��я вместе с
 // комнатой, когда она опустела. open — открыта ли доска у всех сейчас.
 
 export const whiteboard = pgTable('whiteboard', {
@@ -371,4 +371,23 @@ export const callSession = pgTable(
     usedScreenShare: boolean('usedScreenShare').notNull().default(false),
   },
   (t) => [index('call_session_startedAt_idx').on(t.startedAt)],
+)
+
+// --- Отзывы о звонках -------------------------------------------------------
+// Пишет /api/call-feedback, читает /api/adminuw102. SQL: drizzle/add_call_feedback.sql.
+// rating: 1 — плохо, 2 — нормально, 3 — отлично.
+
+export const callFeedback = pgTable(
+  'call_feedback',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    roomId: text('roomId').notNull(),
+    userId: text('userId').references(() => user.id, { onDelete: 'set null' }),
+    userName: text('userName'),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    durationSec: integer('durationSec').notNull().default(0),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => [index('call_feedback_createdAt_idx').on(t.createdAt)],
 )
