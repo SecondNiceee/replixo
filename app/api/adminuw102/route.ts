@@ -25,6 +25,34 @@ export interface CallSessionRow {
   usedNotes: boolean
 }
 
+export interface CallFeedbackRow {
+  id: string
+  roomId: string
+  userName: string | null
+  userEmail: string | null
+  rating: 1 | 2 | 3
+  comment: string | null
+  durationSec: number
+  createdAt: string
+}
+
+async function loadFeedback(): Promise<CallFeedbackRow[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT f."id"::text AS "id", f."roomId", COALESCE(u."name", f."userName") AS "userName",
+              u."email" AS "userEmail", f."rating", f."comment", f."durationSec", f."createdAt"
+       FROM "call_feedback" f
+       LEFT JOIN "user" u ON u."id" = f."userId"
+       ORDER BY f."createdAt" DESC
+       LIMIT 1000`,
+    )
+    return rows as CallFeedbackRow[]
+  } catch (e) {
+    if ((e as { code?: string }).code === '42P01') return []
+    throw e
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
 
@@ -48,7 +76,8 @@ export async function POST(req: NextRequest) {
        LIMIT 1000`,
       [NOTE_GRACE_MINUTES],
     )
-    return NextResponse.json({ sessions: rows as CallSessionRow[] })
+    const feedback = await loadFeedback()
+    return NextResponse.json({ sessions: rows as CallSessionRow[], feedback })
   } catch (e) {
     if ((e as { code?: string }).code === '42P01') {
       return NextResponse.json({ sessions: [] })

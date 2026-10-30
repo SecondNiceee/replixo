@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import type { CallSessionRow } from "@/app/api/adminuw102/route"
+import type { CallFeedbackRow, CallSessionRow } from "@/app/api/adminuw102/route"
 import { CallStats } from "./call-stats"
 
 const SECRET = "SecondNiceee"
@@ -21,6 +21,7 @@ export function AdminGate() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [sessions, setSessions] = useState<CallSessionRow[] | null>(null)
+  const [feedback, setFeedback] = useState<CallFeedbackRow[]>([])
 
   useEffect(() => {
     if (sessions) return
@@ -54,6 +55,7 @@ export function AdminGate() {
         return false
       }
       setSessions(data.sessions ?? [])
+      setFeedback(data.feedback ?? [])
       return true
     } catch {
       setError("Сеть недоступна")
@@ -72,6 +74,7 @@ export function AdminGate() {
     return (
       <CallStats
         sessions={sessions}
+        feedback={feedback}
         refreshing={loading}
         onRefresh={() => void load(password)}
       />

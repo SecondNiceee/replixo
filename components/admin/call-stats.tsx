@@ -1,7 +1,8 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import type { CallSessionRow } from "@/app/api/adminuw102/route"
+import type { CallFeedbackRow, CallSessionRow } from "@/app/api/adminuw102/route"
+import { CallFeedbackList } from "./call-feedback-list"
 
 function formatDuration(totalSec: number) {
   const h = Math.floor(totalSec / 3600)
@@ -34,10 +35,12 @@ function YesNo({ value }: { value: boolean }) {
 
 export function CallStats({
   sessions,
+  feedback,
   refreshing,
   onRefresh,
 }: {
   sessions: CallSessionRow[]
+  feedback: CallFeedbackRow[]
   refreshing: boolean
   onRefresh: () => void
 }) {
@@ -111,6 +114,8 @@ export function CallStats({
             </table>
           </div>
         )}
+
+        <CallFeedbackList feedback={feedback} />
       </main>
     </div>
   )

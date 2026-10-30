@@ -1,7 +1,8 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useState, useCallback, useEffect, useMemo } from "react"
+import { useState, useCallback, useEffect, useMemo, useRef } from "react"
+import { FEEDBACK_MIN_CALL_MS, queueCallFeedback } from "@/lib/call-feedback"
 import { EnableSoundBanner } from "@/components/enable-sound-banner"
 import { NetworkBanner } from "@/components/network-banner"
 import { useMediasoup } from "@/hooks/use-mediasoup"
@@ -268,10 +269,24 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
     void toggleCam()
   }, [uplinkVideoSuppressed, isCamOff, noteUserWantsVideo, toggleCam])
 
+  const joinedAtRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (status === "connected" && joinedAtRef.current === null) {
+      joinedAtRef.current = Date.now()
+    }
+  }, [status])
+
   const handleLeave = useCallback(() => {
+    const joinedAt = joinedAtRef.current
+    if (joinedAt !== null) {
+      const elapsedMs = Date.now() - joinedAt
+      if (elapsedMs >= FEEDBACK_MIN_CALL_MS) {
+        queueCallFeedback({ roomId, durationSec: Math.round(elapsedMs / 1000) })
+      }
+    }
     leave()
     router.push("/")
-  }, [leave, router])
+  }, [leave, router, roomId])
 
   // Non-connected states
   if (status !== "connected") {
