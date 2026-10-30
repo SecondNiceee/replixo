@@ -33,6 +33,19 @@ interface RoomChatProps {
   // Currently connected remote peer ids, used to decide when a message has
   // been read by everyone else in the room.
   peerIds: string[]
+  // peerId -> displayName of remote peers currently typing.
+  typingPeers: Record<string, string>
+  onTyping: (typing: boolean) => void
+}
+
+const TYPING_PING_MS = 3000
+const TYPING_IDLE_MS = 3000
+const MAX_COMPOSER_HEIGHT = 140
+
+function formatTypingLabel(names: string[]): string {
+  if (names.length === 1) return `${names[0]} печатает…`
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`
+  return `${names[0]} и ещё ${names.length - 1} печатают…`
 }
 
 export const RoomChat = memo(function RoomChat({
@@ -45,8 +58,38 @@ export const RoomChat = memo(function RoomChat({
   unreadFromIndex,
   readMarkers,
   peerIds,
+  typingPeers,
+  onTyping,
 }: RoomChatProps) {
   const [text, setText] = useState("")
+  const typingNames = Object.values(typingPeers).map((name) => name || "Участник")
+
+  // typing:true goes out once and is refreshed every TYPING_PING_MS while the
+  // user keeps typing; typing:false after TYPING_IDLE_MS of silence or on send.
+  const lastTypingPingRef = useRef(0)
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onTypingRef = useRef(onTyping)
+  onTypingRef.current = onTyping
+
+  const stopTyping = useCallback(() => {
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current)
+    typingIdleTimerRef.current = null
+    if (lastTypingPingRef.current === 0) return
+    lastTypingPingRef.current = 0
+    onTypingRef.current(false)
+  }, [])
+
+  const noteTyping = useCallback(() => {
+    const now = Date.now()
+    if (now - lastTypingPingRef.current > TYPING_PING_MS) {
+      lastTypingPingRef.current = now
+      onTypingRef.current(true)
+    }
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current)
+    typingIdleTimerRef.current = setTimeout(stopTyping, TYPING_IDLE_MS)
+  }, [stopTyping])
+
+  useEffect(() => stopTyping, [stopTyping])
   // Attachment that has finished uploading and is staged to send with the next
   // message. Cleared after send or when the user removes it.
   const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null)
@@ -55,7 +98,7 @@ export const RoomChat = memo(function RoomChat({
   const [dragging, setDragging] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepth = useRef(0)
 
@@ -106,19 +149,63 @@ export const RoomChat = memo(function RoomChat({
     [uploadFile],
   )
 
+  const submit = useCallback(() => {
+    const trimmed = text.trim()
+    if (!trimmed && !pendingAttachment) return
+    if (uploading) return
+    onSend(trimmed, pendingAttachment)
+    stopTyping()
+    setText("")
+    setPendingAttachment(null)
+    setUploadError(null)
+  }, [text, pendingAttachment, uploading, onSend, stopTyping])
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault()
-      const trimmed = text.trim()
-      if (!trimmed && !pendingAttachment) return
-      if (uploading) return
-      onSend(trimmed, pendingAttachment)
-      setText("")
-      setPendingAttachment(null)
-      setUploadError(null)
+      submit()
     },
-    [text, pendingAttachment, uploading, onSend],
+    [submit],
   )
+
+  // Enter sends, Shift+Enter inserts a newline. Enter that confirms a CJK IME
+  // composition must not send.
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== "Enter" || e.shiftKey) return
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return
+      e.preventDefault()
+      submit()
+    },
+    [submit],
+  )
+
+  // Ctrl+V with a copied image/file: clipboard files arrive as items of
+  // kind "file". Only intercept when one exists, so plain text paste still works.
+  // The room chat holds a single attachment, so the first file wins.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (uploading) return
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.kind === "file")
+      const file = item?.getAsFile()
+      if (!file) return
+      e.preventDefault()
+      const named =
+        file.name && file.name !== "image.png"
+          ? file
+          : new File([file], `pasted-${Date.now()}.${file.type.split("/")[1] || "png"}`, { type: file.type })
+      void uploadFile(named)
+    },
+    [uploading, uploadFile],
+  )
+
+  // Grow the textarea with its content up to MAX_COMPOSER_HEIGHT.
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT)}px`
+  }, [text])
 
   // Drag & drop a file anywhere over the panel.
   const handleDrop = useCallback(
@@ -187,6 +274,19 @@ export const RoomChat = memo(function RoomChat({
         />
       </div>
 
+      <div aria-live="polite" className="flex h-6 shrink-0 items-center gap-2 px-4 text-xs text-muted-foreground">
+        {typingNames.length > 0 && (
+          <>
+            <span className="flex items-center gap-0.5" aria-hidden="true">
+              <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+              <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+              <span className="size-1 animate-bounce rounded-full bg-muted-foreground" />
+            </span>
+            <span className="truncate">{formatTypingLabel(typingNames)}</span>
+          </>
+        )}
+      </div>
+
       {/* Pending attachment / upload status */}
       {(pendingAttachment || uploading || uploadError) && (
         <div className="shrink-0 border-t border-border px-3 pt-3">
@@ -247,7 +347,7 @@ export const RoomChat = memo(function RoomChat({
       {/* Composer */}
       <form
         onSubmit={handleSubmit}
-        className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-3"
+        className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-3"
       >
         <input
           ref={fileInputRef}
@@ -268,14 +368,21 @@ export const RoomChat = memo(function RoomChat({
         >
           <Paperclip className="size-4" />
         </Button>
-        <input
+        <textarea
           ref={inputRef}
+          rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            if (e.target.value) noteTyping()
+            else stopTyping()
+          }}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           maxLength={2000}
           placeholder="Напишите сообщение…"
           aria-label="Текст сообщения"
-          className="h-10 flex-1 select-text rounded-full border border-input bg-background px-4 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
+          className="min-h-10 flex-1 resize-none select-text overflow-y-auto rounded-2xl border border-input bg-background px-4 py-2.5 text-sm leading-5 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
         />
         <Button
           type="submit"

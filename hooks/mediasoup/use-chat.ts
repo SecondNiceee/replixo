@@ -75,5 +75,9 @@ export function useChat({
     dispatch({ type: "SET_READ_MARKER", peerId: peerIdRef.current, ts })
   }, [roomId, peerIdRef, socketRef, dispatch])
 
-  return { sendChatMessage, uploadChatFile, markChatRead }
+  const sendChatTyping = useCallback((typing: boolean) => {
+    socketRef.current?.emit("chatTyping", { roomId, peerId: peerIdRef.current, typing })
+  }, [roomId, peerIdRef, socketRef])
+
+  return { sendChatMessage, uploadChatFile, markChatRead, sendChatTyping }
 }

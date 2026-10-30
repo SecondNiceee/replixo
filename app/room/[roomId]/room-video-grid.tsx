@@ -84,7 +84,7 @@ export function RoomVideoGrid({
           onClick={() => onParticipantsHiddenChange?.(!participantsHidden)}
           aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
           className={cn(
-            "pointer-events-auto absolute -right-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 items-center justify-center rounded-r-xl border border-l-0 border-white/15 bg-black/60 backdrop-blur-md transition-colors hover:bg-black/80",
+            "pointer-events-auto absolute -right-7 top-1/2 z-10 flex h-14 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-r-xl border border-l-0 border-white/15 bg-black/60 backdrop-blur-md transition-colors hover:bg-black/80",
           )}
         >
           <ChevronRight
@@ -225,8 +225,8 @@ export function RoomVideoGrid({
         onClick={() => setParticipantsHidden((v) => !v)}
         aria-label={participantsHidden ? "Показать участников" : "Скрыть участников"}
         className={cn(
-          "absolute left-1/2 -bottom-7 z-10 flex h-7 w-14 -translate-x-1/2 items-center justify-center rounded-b-xl border border-t-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
-          "lg:left-auto lg:-right-7 lg:top-1/2 lg:h-14 lg:w-7 lg:-translate-x-0 lg:-translate-y-1/2 lg:rounded-b-none lg:rounded-r-xl lg:border-t lg:border-l-0",
+          "absolute left-1/2 -bottom-7 z-20 flex h-7 w-14 -translate-x-1/2 cursor-pointer items-center justify-center rounded-b-xl border border-t-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent",
+          "lg:left-auto lg:-right-7 lg:top-1/2 lg:h-14 lg:w-7 lg:translate-x-0 lg:-translate-y-1/2 lg:rounded-bl-none lg:rounded-tr-xl lg:border-t lg:border-l-0",
         )}
       >
         <ChevronRight
