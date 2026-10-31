@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { StartCallDialog } from '@/components/start-call-dialog'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { cn } from '@/lib/utils'
 import { AddFriendDialog } from './add-friend-dialog'
 import { PendingRequests } from './pending-requests'
@@ -70,6 +71,8 @@ export function ProfileTopbar({
       </a>
 
       <div className="ml-auto flex items-center gap-2">
+        <ThemeToggle className="size-8" />
+
         {/* «Начать звонок» — главное действие приложения, поэтому стоит первым
             и единственный из трёх кнопок имеет фон. Но не полный primary, как
             на лендинге: там это единственная цель экрана, а здесь рядом список

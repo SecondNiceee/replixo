@@ -257,6 +257,79 @@ html[data-theme='dark']:has(main.landing-light) {
   background-color: oklch(0.12 0.02 265);
 }
 
+/* ---------------------------------------------------------------------------
+   Светлая тема всего сайта
+   ---------------------------------------------------------------------------
+   Тема одна на весь сайт: next-themes ставит data-theme на <html>, и все
+   страницы читают одни и те же токены. Тёмная палитра — это :root и .app-dark
+   выше, здесь только переопределения под светлую. Комната звонка в светлую
+   тему не переходит: для /room провайдер принудительно ставит dark. */
+html[data-theme='light'] {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.2 0.02 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 265);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 265);
+  --primary: oklch(0.2 0.02 265);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0.005 265);
+  --secondary-foreground: oklch(0.2 0.02 265);
+  --muted: oklch(0.96 0.005 265);
+  --muted-foreground: oklch(0.48 0.02 265);
+  --accent: oklch(0.96 0.005 265);
+  --accent-foreground: oklch(0.2 0.02 265);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.2 0.02 265 / 10%);
+  --input: oklch(0.2 0.02 265 / 14%);
+  --ring: oklch(0.2 0.02 265 / 40%);
+  --sidebar: oklch(0.985 0.003 265);
+  --sidebar-foreground: oklch(0.2 0.02 265);
+  --sidebar-primary: oklch(0.2 0.02 265);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.96 0.005 265);
+  --sidebar-accent-foreground: oklch(0.2 0.02 265);
+  --sidebar-border: oklch(0.2 0.02 265 / 10%);
+  --sidebar-ring: oklch(0.2 0.02 265 / 40%);
+
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* Кабинет в светлой теме: тот же синий акцент для своих сообщений и бейджей,
+   но панели белые поверх едва голубоватой сцены. */
+[data-theme='light'] .app-dark {
+  --background: oklch(0.975 0.006 265);
+  --foreground: oklch(0.2 0.02 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 265);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 265);
+  --primary: oklch(0.52 0.17 268);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.945 0.01 265);
+  --secondary-foreground: oklch(0.2 0.02 265);
+  --muted: oklch(0.95 0.008 265);
+  --muted-foreground: oklch(0.48 0.02 265);
+  --accent: oklch(0.93 0.014 265);
+  --accent-foreground: oklch(0.2 0.02 265);
+  --destructive: oklch(0.577 0.22 25);
+  --border: oklch(0.2 0.02 265 / 11%);
+  --input: oklch(0.2 0.02 265 / 15%);
+  --ring: oklch(0.52 0.17 268);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.2 0.02 265);
+  --sidebar-primary: oklch(0.52 0.17 268);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.93 0.014 265);
+  --sidebar-accent-foreground: oklch(0.2 0.02 265);
+  --sidebar-border: oklch(0.2 0.02 265 / 11%);
+  --sidebar-ring: oklch(0.52 0.17 268);
+}
+
 /* Иконки переключателя темы: видимость задаёт CSS, а не React-состояние —
    на сервере тема неизвестна, и рендер по состоянию мигал бы при гидрации. */
 .theme-icon-dark {
@@ -569,7 +642,7 @@ html[data-theme='dark']:has(main.landing-light) {
      нативная «thin» полоса Chromium рисуется вместе с кнопками-стрелками на
      концах, убрать которые можно только через ::-webkit-scrollbar-button.
      Раньше эти свойства стояли безусловно, поэтому все правила ниже в Chrome
-     игнорировались и стрелки оставались на месте. */
+     игнориро��ались и стрелки оставались на месте. */
   @supports not selector(::-webkit-scrollbar) {
     .scroll-slim {
       scrollbar-width: thin;
@@ -716,7 +789,7 @@ html[data-theme='dark']:has(main.landing-light) {
 
   /* Кнопки-стрелки на концах — по той же причине, что и в .scroll-slim:
      Chrome/Edge на Windows рисуют их по умолчанию, и в полосе такой ширины они
-     превращаются в две неопрятные засечки. */
+     превращаются в две неопря��ные засечки. */
   .scroll-hairline::-webkit-scrollbar-button,
   .scroll-hairline::-webkit-scrollbar-button:single-button,
   .scroll-hairline::-webkit-scrollbar-button:vertical:start,
@@ -741,6 +814,65 @@ html[data-theme='dark']:has(main.landing-light) {
 
   .scroll-hairline::-webkit-scrollbar-corner {
     background: transparent;
+  }
+
+  /* --- Светлая тема: подложки кабинета и чата --- */
+  [data-theme='light'] .app-shell-surface {
+    background:
+      repeating-linear-gradient(to right, oklch(0.2 0.02 265 / 3.5%) 0 1px, transparent 1px 64px),
+      repeating-linear-gradient(to bottom, oklch(0.2 0.02 265 / 3.5%) 0 1px, transparent 1px 64px),
+      radial-gradient(90% 70% at 6% -12%, oklch(0.88 0.05 266 / 55%) 0%, transparent 62%),
+      radial-gradient(80% 65% at 102% -2%, oklch(0.9 0.04 285 / 45%) 0%, transparent 64%),
+      linear-gradient(168deg, oklch(0.985 0.004 265) 0%, oklch(0.965 0.008 265) 100%);
+  }
+
+  [data-theme='light'] .panel-surface,
+  [data-theme='light'] .topbar-surface {
+    background: linear-gradient(180deg, oklch(1 0 0 / 92%) 0%, oklch(0.99 0.003 265 / 82%) 100%);
+    box-shadow: 0 1px 2px oklch(0.2 0.02 265 / 5%);
+  }
+
+  [data-theme='light'] .chat-surface {
+    background: linear-gradient(180deg, oklch(1 0 0 / 90%) 0%, oklch(0.985 0.004 265 / 80%) 100%);
+  }
+
+  [data-theme='light'] .chat-canvas {
+    background-image:
+      radial-gradient(oklch(0.2 0.02 265 / 7%) 1px, transparent 1.4px),
+      radial-gradient(120% 60% at 50% 0%, oklch(0.85 0.06 270 / 25%) 0%, transparent 70%);
+  }
+
+  [data-theme='light'] .bubble-self {
+    box-shadow: 0 1px 2px oklch(0.3 0.1 268 / 25%);
+  }
+
+  [data-theme='light'] .bubble-peer {
+    background: oklch(1 0 0);
+    box-shadow:
+      0 0 0 1px oklch(0.2 0.02 265 / 7%),
+      0 1px 2px oklch(0.2 0.02 265 / 10%);
+  }
+
+  /* Белый thumb на светлом фоне не виден — в светлой теме он тёмный. */
+  [data-theme='light'] .scroll-slim[data-scrolling]::-webkit-scrollbar-thumb {
+    background-color: oklch(0.2 0.02 265 / 22%);
+  }
+  [data-theme='light'] .scroll-slim[data-scrolling]::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.2 0.02 265 / 34%);
+  }
+  [data-theme='light'] .scroll-hairline::-webkit-scrollbar-thumb {
+    background-color: oklch(0.2 0.02 265 / 20%);
+  }
+  [data-theme='light'] .scroll-hairline::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.2 0.02 265 / 32%);
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    [data-theme='light'] .scroll-slim[data-scrolling] {
+      scrollbar-color: oklch(0.2 0.02 265 / 22%) transparent;
+    }
+    [data-theme='light'] .scroll-hairline {
+      scrollbar-color: oklch(0.2 0.02 265 / 20%) transparent;
+    }
   }
 }
 
