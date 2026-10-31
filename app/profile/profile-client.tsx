@@ -261,11 +261,9 @@ export function ProfileClient({ user }: { user: User }) {
             <AccountDialog displayName={displayName} email={user.email} />
           </div>
 
-          {/* Подчёркивание вместо «плашки в плашке»: панель уже лежит на
-              градиентной сцене, и третий слой фона (серая подложка + белая
-              карточка активного таба) читался бы как рамка внутри рамки. */}
-          <div className="shrink-0 border-b border-border/60 px-3">
-            <div role="tablist" aria-label="Разделы кабинета" className="-mb-px flex gap-6">
+          {/* Выбранный раздел оформлен как кнопка «Начать звонок». */}
+          <div className="shrink-0 border-b border-border/60 px-3 py-2">
+            <div role="tablist" aria-label="Разделы кабинета" className="flex gap-2">
               {panes.map(({ id, label, dot }) => {
                 const selected = pane === id
                 return (
@@ -278,19 +276,16 @@ export function ProfileClient({ user }: { user: User }) {
                     aria-controls={`pane-panel-${id}`}
                     onClick={() => setPane(id)}
                     className={cn(
-                      // Начертание одно на оба состояния: с��еной на semibold
-                      // активный таб менял бы ширину и сдвигал соседний.
-                      'border-b-2 pb-2.5 pt-2 text-[13px] font-medium tracking-tight transition-colors',
+                      'inline-flex h-8 items-center justify-center rounded-lg border px-2.5 text-sm font-medium tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                       selected
-                        ? 'border-primary text-foreground'
+                        ? 'border-border/70 bg-secondary/70 text-foreground hover:bg-secondary'
                         : 'border-transparent text-muted-foreground hover:text-foreground',
                     )}
                   >
                     {/* Точка непрочитанных вынесена в надстрочный индекс и лежит
                         в потоке отдельным слоем (absolute). В строке она
                         добавляла табу ширину: стоило прийти сообщению — и
-                        «Друзья» уезжали правее сами по себе. Подчёркивание при
-                        этом обнимает ровно слово, без «хвоста» под индикатор. */}
+                        «Друзья» уезжали правее сами по себе. */}
                     <span className="relative">
                       {label}
                       {dot && (

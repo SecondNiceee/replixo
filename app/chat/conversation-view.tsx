@@ -245,10 +245,10 @@ export function ConversationView({
           )}
         </span>
         <div className="flex min-w-0 flex-col">
-          <h2 className="truncate text-sm font-semibold text-foreground">{title}</h2>
+          <h2 className="truncate text-base font-semibold text-foreground">{title}</h2>
           <span
             className={cn(
-              'truncate text-[11px]',
+              'truncate text-xs',
               !isSelfChat && peerStatus === 'online'
                 ? 'text-emerald-400'
                 : 'text-muted-foreground',

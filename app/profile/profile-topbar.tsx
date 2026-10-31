@@ -54,7 +54,7 @@ export function ProfileTopbar({
   ]
 
   return (
-    <header className="topbar-surface flex shrink-0 items-center gap-2 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4">
+    <header className="topbar-surface flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4">
       {/* ?landing=1 — иначе / отправит авторизованного обратно в кабинет и
           лендинг остался бы недоступен изнутри приложения. */}
       <a
@@ -81,7 +81,7 @@ export function ProfileTopbar({
           size="sm"
           variant="secondary"
           onClick={() => setCallOpen(true)}
-          className="gap-1.5 border border-border/70 bg-secondary/70 text-foreground hover:bg-secondary"
+          className="h-8 gap-1.5 border border-border/70 bg-secondary/70 text-sm text-foreground hover:bg-secondary"
         >
           <Video className="size-4" strokeWidth={2.25} aria-hidden="true" />
           <span className="hidden sm:inline">Начать звонок</span>
@@ -90,7 +90,7 @@ export function ProfileTopbar({
         {/* Добавить в друзья */}
         <AddFriendDialog
           trigger={
-            <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground" />
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-sm text-muted-foreground hover:text-foreground" />
           }
         >
           <UserPlus className="size-4" aria-hidden="true" />
@@ -101,7 +101,7 @@ export function ProfileTopbar({
         <Dialog>
           <DialogTrigger
             render={
-              <Button variant="ghost" size="sm" className="relative gap-1.5 text-muted-foreground hover:text-foreground" />
+              <Button variant="ghost" size="sm" className="relative h-8 gap-1.5 text-sm text-muted-foreground hover:text-foreground" />
             }
           >
             <Inbox className="size-4" aria-hidden="true" />
@@ -181,7 +181,7 @@ export function ProfileTopbar({
         {(unavailable || !connected) && (
           <span
             className={cn(
-              'ml-1 flex items-center gap-1.5 text-xs',
+              'ml-1 flex items-center gap-1.5 text-sm',
               unavailable ? 'text-destructive' : 'text-muted-foreground',
             )}
             role="status"

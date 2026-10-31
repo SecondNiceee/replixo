@@ -86,21 +86,21 @@ export function AccountDialog({ displayName, email }: AccountDialogProps) {
   return (
     <Dialog>
       <DialogTrigger
-        className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-foreground/5"
+        className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left"
         aria-label="Открыть настройки"
       >
         {/* Аватар плоский, с моноширинной буквой и тонким кольцом: градиент
             остался только у логотипа, чтобы акцент в панели был один. */}
         <UserAvatar name={displayName} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium leading-tight text-foreground">
+          <span className="truncate text-base font-medium leading-tight text-foreground">
             {displayName}
           </span>
-          <span className="truncate text-[11px] leading-tight text-muted-foreground">{email}</span>
+          <span className="truncate text-xs leading-tight text-muted-foreground">{email}</span>
         </span>
         {/* Шестерёнка, а не карандаш: строка открывает настройки целиком —
             и переименование, и выход, — а карандаш обещал бы только правку имени. */}
-        <Settings className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Settings className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DialogTrigger>
 
       {/* app-dark обязателен: портал у <body> лежит вне <main class="app-dark">. */}
