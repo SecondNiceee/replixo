@@ -12,7 +12,7 @@ interface SiteHeaderProps {
   showThemeToggle?: boolean
 }
 
-export async function SiteHeader({ showThemeToggle = false }: SiteHeaderProps = {}) {
+export async function SiteHeader({ showThemeToggle = true }: SiteHeaderProps = {}) {
   const session = await auth.api.getSession({ headers: await headers() })
   const user = session?.user
     ? { name: session.user.name, email: session.user.email }
