@@ -70,7 +70,7 @@ export default async function Page({ searchParams }: PageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
       />
       <div className="relative z-10">
-        <SiteHeader />
+        <SiteHeader showThemeToggle />
         <Hero />
         <Reveal>
           <LessonNotesShowcase />

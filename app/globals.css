@@ -221,6 +221,52 @@ html[data-overlay='1'] .desktop-titlebar {
   --ring: oklch(0.2 0.02 265 / 40%);
 
   color: var(--foreground);
+  color-scheme: light;
+}
+
+/* Тёмная тема лендинга. Переключатель (next-themes) ставит data-theme на
+   <html>, а токены переопределяются только внутри .landing-light, поэтому
+   остальные страницы пока не затронуты. Чтобы подключить тему к другой
+   странице, достаточно повесить на её корень такой же scope. */
+[data-theme='dark'] .landing-light {
+  --background: oklch(0.12 0.02 265);
+  --foreground: oklch(0.96 0.005 265);
+  --card: oklch(0.165 0.022 265);
+  --card-foreground: oklch(0.96 0.005 265);
+  --primary: oklch(0.96 0.005 265);
+  --primary-foreground: oklch(0.14 0.02 265);
+  --secondary: oklch(0.21 0.025 265);
+  --secondary-foreground: oklch(0.96 0.005 265);
+  --muted: oklch(0.21 0.025 265);
+  --muted-foreground: oklch(0.66 0.02 265);
+  --accent: oklch(0.22 0.026 265);
+  --accent-foreground: oklch(0.96 0.005 265);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.96 0.005 265 / 40%);
+
+  color-scheme: dark;
+}
+
+/* Фон документа под лендингом (видно при overscroll и под шапкой) — в тон
+   выбранной теме, а не глобального тёмного :root. */
+html:has(main.landing-light) {
+  background-color: oklch(1 0 0);
+}
+html[data-theme='dark']:has(main.landing-light) {
+  background-color: oklch(0.12 0.02 265);
+}
+
+/* Иконки переключателя темы: видимость задаёт CSS, а не React-состояние —
+   на сервере тема неизвестна, и рендер по состоянию мигал бы при гидрации. */
+.theme-icon-dark {
+  display: none;
+}
+[data-theme='dark'] .theme-icon-dark {
+  display: block;
+}
+[data-theme='dark'] .theme-icon-light {
+  display: none;
 }
 
 @layer components {
@@ -517,7 +563,7 @@ html[data-overlay='1'] .desktop-titlebar {
      бы на каждый скролл. Прозрачный thumb места не занимает визуально, но
      гуттер уже учтён в раскладке.
      --------------------------------------------------------------------------- */
-  /* Стандартные scrollbar-width / scrollbar-color отдаём ТОЛЬКО браузерам без
+  /* Стандартны�� scrollbar-width / scrollbar-color отдаём ТОЛЬКО браузерам без
      ::-webkit-scrollbar (то есть Firefox). Причина: с Chrome 121 стандартные
      свойства имеют приоритет и полностью отключают легаси-псевдоэлементы — а
      нативная «thin» полоса Chromium рисуется вместе с кнопками-стрелками на

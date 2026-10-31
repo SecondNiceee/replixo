@@ -5,8 +5,14 @@ import { Logo } from "@/components/logo"
 import { AuthButtons } from "@/components/auth-buttons"
 import { HOME_HREF, SiteNav } from "@/components/site-nav"
 import { MobileNav } from "@/components/mobile-nav"
+import { ThemeToggle } from "@/components/theme-toggle"
 
-export async function SiteHeader() {
+interface SiteHeaderProps {
+  /** Пока тема подключена только на главной — на остальных страницах кнопку не показываем. */
+  showThemeToggle?: boolean
+}
+
+export async function SiteHeader({ showThemeToggle = false }: SiteHeaderProps = {}) {
   const session = await auth.api.getSession({ headers: await headers() })
   const user = session?.user
     ? { name: session.user.name, email: session.user.email }
@@ -27,6 +33,7 @@ export async function SiteHeader() {
         </div>
         <SiteNav className="hidden lg:flex" />
         <div className="flex min-w-0 items-center justify-end gap-2">
+          {showThemeToggle && <ThemeToggle />}
           <AuthButtons user={user} />
           <MobileNav className="lg:hidden" />
         </div>
