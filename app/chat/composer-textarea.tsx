@@ -103,6 +103,8 @@ interface ComposerTextareaProps {
   onSubmit: () => void
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void
   disabled: boolean
+  /** Чат комнаты режет сообщения на сервере до 2000 символов. */
+  maxLength?: number
 }
 
 /**
@@ -116,6 +118,7 @@ export function ComposerTextarea({
   onSubmit,
   onPaste,
   disabled,
+  maxLength = MAX_LENGTH,
 }: ComposerTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const rulerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -212,7 +215,7 @@ export function ComposerTextarea({
         onKeyDown={handleKeyDown}
         onPaste={onPaste}
         rows={1}
-        maxLength={MAX_LENGTH}
+        maxLength={maxLength}
         placeholder={disabled ? 'Подключение к чату…' : 'Напишите сообщение…'}
         aria-label="Текст сообщения"
         // Потолок роста задан в MAX_LINES и считается от line-height, поэтому
