@@ -3,6 +3,10 @@ import type { ChatMessagePayload, ChatReadPayload } from '../types'
 import { createRateLimiter, type HandlerContext } from './helpers'
 import { rooms, getPeerSocket } from './room-registry'
 
+// Должно совпадать с lib/chat/note-attachment.ts в Next-приложении.
+const NOTE_ATTACHMENT_MIME = 'application/x-replixo-note'
+const NOTE_URL_RE = /^\/notes\/[0-9a-f-]{36}\?room=[A-Za-z0-9_-]{1,64}&sig=[0-9a-f]{64}$/i
+
 // ---------------------------------------------------------------------------
 // Room text chat: chatMessage, chatRead
 // ---------------------------------------------------------------------------
@@ -41,9 +45,16 @@ export function registerChatHandlers(ctx: HandlerContext): void {
       if (typeof attachment !== 'object') return
       const { url, name, size, mime } = attachment
       const expectedPrefix = `/uploads/${rid}/`
+      // Конспект — ссылка на страницу приложения, подписанная для ЭТОЙ комнаты
+      // (подпись проверяет сама страница /notes/<id>).
+      const isNote =
+        mime === NOTE_ATTACHMENT_MIME &&
+        typeof url === 'string' &&
+        NOTE_URL_RE.test(url) &&
+        url.includes(`?room=${rid}&`)
       if (
         typeof url !== 'string' ||
-        !url.startsWith(expectedPrefix) ||
+        (!isNote && !url.startsWith(expectedPrefix)) ||
         url.includes('..') ||
         typeof name !== 'string' ||
         typeof size !== 'number' ||

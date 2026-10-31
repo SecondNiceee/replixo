@@ -519,6 +519,8 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
         <RoomChat
           open={chatOpen}
           onClose={closeChat}
+          roomId={roomId}
+          canSendNotes={isTeacher && isSignedIn}
           messages={messages}
           onSend={sendChatMessage}
           onUploadFile={uploadChatFile}
