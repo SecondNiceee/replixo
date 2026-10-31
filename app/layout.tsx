@@ -7,6 +7,7 @@ import { ElectronPatches } from '@/components/electron-patches'
 import { DesktopTitlebar } from '@/components/desktop-titlebar'
 import { DmNotifier } from '@/components/dm-notifier'
 import { CallFeedbackPrompt } from '@/components/call-feedback-prompt'
+import { ThemeProvider } from '@/components/theme-provider'
 import { SITE_NAME, SITE_URL } from '@/lib/seo'
 import './globals.css'
 
@@ -92,13 +93,22 @@ export default async function RootLayout({
     <html
       lang="ru"
       className={`${inter.variable} ${jetbrainsMono.variable} bg-background`}
+      suppressHydrationWarning
     >
       <body className="font-sans antialiased">
-        <ElectronPatches />
-        <DesktopTitlebar />
-        {session?.user && <DmNotifier selfId={session.user.id} />}
-        {children}
-        <CallFeedbackPrompt />
+        <ThemeProvider
+          attribute="data-theme"
+          defaultTheme="light"
+          enableSystem={false}
+          storageKey="replixo-theme"
+          disableTransitionOnChange
+        >
+          <ElectronPatches />
+          <DesktopTitlebar />
+          {session?.user && <DmNotifier selfId={session.user.id} />}
+          {children}
+          <CallFeedbackPrompt />
+        </ThemeProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
