@@ -122,7 +122,7 @@ export function RoomControls({
         <button
           onClick={onToggleCollapsed}
           aria-label={collapsed ? "Показать панель управления" : "Скрыть панель управления"}
-          className="flex h-7 w-14 items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
+          className="flex h-7 w-14 cursor-pointer items-center justify-center rounded-t-xl border border-b-0 border-border bg-background/90 backdrop-blur-sm transition-colors hover:bg-accent"
         >
           <ChevronUp
             className={cn(
@@ -268,7 +268,7 @@ export function RoomControls({
           isCamStarting
             ? "Включение камеры…"
             : cameraSuppressed && !isCamOff
-              ? "Камера отключена из-за слабой сети. Включить принудительно"
+              ? "Камера отключена из-за слабой сети. Включить прин��дительно"
               : isCamOff
                 ? "Включить камеру"
                 : "Выключить камеру"

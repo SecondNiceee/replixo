@@ -216,7 +216,9 @@ export function VideoTile({
     <div
       ref={containerRef}
       className={cn(
-        "group relative flex items-center justify-center overflow-hidden rounded-2xl bg-black transition-all",
+        // isolate: z-20/z-30 inside the tile (annotation canvas, volume) must not
+        // compete with sibling UI such as the participants panel handle.
+        "group relative isolate flex items-center justify-center overflow-hidden rounded-2xl bg-black transition-all",
         // Subtle frame so participants are clearly separated on the dark
         // background. Slightly brighter on hover; the speaking outline (below)
         // sits on top via `outline` and is unaffected.
