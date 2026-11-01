@@ -160,7 +160,7 @@ export function allowRoomCreation(roomId: string, ttlMs: number = ROOM_CREATE_GR
   const existing = creatableRooms.get(roomId)
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => creatableRooms.delete(roomId), ttlMs)
-  // Разрешени�� не должно держать процесс живым.
+  // Разрешени���� не должно держать процесс живым.
   timer.unref?.()
   creatableRooms.set(roomId, timer)
 }
@@ -183,10 +183,13 @@ export function revokeRoomCreation(roomId: string): void {
 const pendingRooms = new Map<string, Promise<Room>>()
 
 export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
-  const existing = rooms.get(roomId)
-  if (existing) return Promise.resolve(existing)
+  // pendingRooms проверяем первым: пока комната готовится (router + загрузка
+  // доски/рисунков из БД), все входящие ждут один и тот же промис и получают
+  // уже полностью загруженное состояние.
   const pending = pendingRooms.get(roomId)
   if (pending) return pending
+  const existing = rooms.get(roomId)
+  if (existing) return Promise.resolve(existing)
 
   const creation = createRoom(roomId, worker).finally(() => {
     pendingRooms.delete(roomId)
@@ -197,8 +200,6 @@ export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
 
 function createRoom(roomId: string, worker: Worker): Promise<Room> {
   return Room.create(roomId, worker).then(async (room) => {
-    rooms.set(roomId, room)
-    console.log(`[room] Created room ${roomId}`)
     // Hydrate any persisted whiteboard state so a board drawn in a previous
     // session (e.g. before a server restart) is restored. No-op without DB.
     try {
@@ -215,6 +216,10 @@ function createRoom(roomId: string, worker: Worker): Promise<Room> {
     } catch {
       // Ignore — slides start empty.
     }
+    // В реестр — только после полной подготовки, чтобы никто не получил
+    // комнату с ещё не загруженной доской.
+    rooms.set(roomId, room)
+    console.log(`[room] Created room ${roomId}`)
     return room
   })
 }
