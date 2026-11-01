@@ -218,7 +218,7 @@ export function RoomVideoGrid({
   // large screens. Выезжает слева. Используется и при демонстрации экрана,
   // и при открытой доске.
   const participantsColumn = (
-    <div className="relative flex shrink-0">
+    <div className="relative z-20 flex shrink-0">
       {/* Toggle handle: sits below the strip on mobile, on the right edge of
           the column on large screens */}
       <button

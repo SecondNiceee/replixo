@@ -431,7 +431,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
                 // отступаем, чтобы он не накрывал доску.
                 ? cn("absolute inset-0 z-[9980]", !participantsHidden && "lg:left-52")
                 // Обычное окно: доска — сосед колонки участников по flex-строке.
-                : "relative min-h-0 min-w-0 flex-1",
+                : "relative isolate min-h-0 min-w-0 flex-1",
             )}
           >
             <Whiteboard
