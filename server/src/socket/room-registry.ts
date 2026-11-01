@@ -160,7 +160,7 @@ export function allowRoomCreation(roomId: string, ttlMs: number = ROOM_CREATE_GR
   const existing = creatableRooms.get(roomId)
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => creatableRooms.delete(roomId), ttlMs)
-  // Разрешение не должно держать процесс живым.
+  // Разрешени�� не должно держать процесс живым.
   timer.unref?.()
   creatableRooms.set(roomId, timer)
 }
@@ -176,8 +176,26 @@ export function revokeRoomCreation(roomId: string): void {
   creatableRooms.delete(roomId)
 }
 
+// Создание комнаты асинхронное (router + загрузка доски из БД). Без общего
+// промиса два одновременных входа оба видят «комнаты нет», создают два
+// экземпляра, и второй перезаписывает первый в реестре — участники
+// оказываются в разных роутерах. Поэтому все ждут один и тот же промис.
+const pendingRooms = new Map<string, Promise<Room>>()
+
 export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
-  if (rooms.has(roomId)) return Promise.resolve(rooms.get(roomId)!)
+  const existing = rooms.get(roomId)
+  if (existing) return Promise.resolve(existing)
+  const pending = pendingRooms.get(roomId)
+  if (pending) return pending
+
+  const creation = createRoom(roomId, worker).finally(() => {
+    pendingRooms.delete(roomId)
+  })
+  pendingRooms.set(roomId, creation)
+  return creation
+}
+
+function createRoom(roomId: string, worker: Worker): Promise<Room> {
   return Room.create(roomId, worker).then(async (room) => {
     rooms.set(roomId, room)
     console.log(`[room] Created room ${roomId}`)
