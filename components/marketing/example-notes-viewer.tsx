@@ -31,7 +31,7 @@ export function ExampleNotesViewer() {
       className="scroll-mt-24 border-t border-border py-14 sm:py-20"
     >
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-6 pb-10">
-        <h2 id="examples-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+        <h2 id="examples-title" className="text-balance text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           Примеры конспектов
         </h2>
         <p className="max-w-2xl text-pretty leading-relaxed text-muted-foreground">

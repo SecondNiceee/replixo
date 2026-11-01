@@ -25,7 +25,7 @@ export default function AppDownloadPage() {
             <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
               Replixo для компьютера
             </p>
-            <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl md:text-6xl">
+            <h1 className="text-balance text-3xl font-semibold leading-snug tracking-tight sm:text-4xl">
               Всегда на связи. Прямо с рабочего стола.
             </h1>
             <p className="max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">

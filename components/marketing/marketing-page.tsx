@@ -19,7 +19,7 @@ export function MarketingPage({
       <main className="flex-1 pt-24">
         <header className="mx-auto flex max-w-6xl flex-col gap-5 px-6 pb-16 pt-12 sm:pt-20">
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-muted-foreground">{eyebrow}</p>
-          <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.1] tracking-tight text-foreground sm:text-5xl">
+          <h1 className="max-w-3xl text-balance text-3xl font-semibold leading-snug tracking-tight text-foreground sm:text-4xl">
             {title}
           </h1>
           <div className="max-w-2xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">{lead}</div>
@@ -44,7 +44,7 @@ export function MarketingSection({
   return (
     <section aria-labelledby={id} className="border-t border-border py-14 sm:py-20">
       <div className="mx-auto grid max-w-6xl grid-cols-1 px-6 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
-        <h2 id={id} className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+        <h2 id={id} className="text-balance text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
           {title}
         </h2>
         <div className="flex flex-col gap-6 text-pretty text-base leading-relaxed text-muted-foreground">{children}</div>
