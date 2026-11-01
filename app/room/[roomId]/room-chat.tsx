@@ -198,6 +198,33 @@ export const RoomChat = memo(function RoomChat({
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, open])
 
+  // Рост поля ввода уменьшает окно переписки. Если пользователь был внизу,
+  // сохраняем последние сообщения над полем; при чтении истории не прыгаем вниз.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!open || !el) return
+
+    let height = el.clientHeight
+    let atBottom = el.scrollHeight - el.scrollTop - height < 24
+    const onScroll = () => {
+      // При изменении высоты браузер тоже может вызвать scroll. До обработки
+      // ResizeObserver это ещё не означает, что пользователь ушёл от конца.
+      if (el.clientHeight === height) {
+        atBottom = el.scrollHeight - el.scrollTop - height < 24
+      }
+    }
+    const observer = new ResizeObserver(() => {
+      height = el.clientHeight
+      if (atBottom) el.scrollTop = el.scrollHeight
+    })
+    el.addEventListener("scroll", onScroll, { passive: true })
+    observer.observe(el)
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      observer.disconnect()
+    }
+  }, [open])
+
   // Грузим по одному файлу: порядок превью совпадает с порядком выбора.
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -319,7 +346,7 @@ export const RoomChat = memo(function RoomChat({
         if (dragDepth.current <= 0) setDragging(false)
       }}
       onDrop={handleDrop}
-      className="relative flex h-full w-screen max-w-[360px] flex-col border-l border-border bg-card"
+      className="relative flex h-full min-h-0 w-screen max-w-[360px] flex-col overflow-hidden border-l border-border bg-card"
     >
       {/* Drag overlay */}
       {dragging && (
