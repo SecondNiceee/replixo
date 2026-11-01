@@ -541,10 +541,16 @@ html[data-theme='dark'] {
     pointer-events: none;
   }
 
+  /* Без SVG-фильтров (feTurbulence перерисовывался на каждом кадре скролла
+     и грузил CPU): простой текст в маске, цвет берётся из --foreground,
+     поэтому узор сам подстраивается под светлую и тёмную тему. */
   .pattern-chalk::before {
-    background-image: url('/patterns/chalk.svg');
-    background-size: 720px 560px;
-    opacity: 0.075;
+    background-color: var(--foreground);
+    -webkit-mask-image: url('/patterns/chalk.svg');
+    mask-image: url('/patterns/chalk.svg');
+    -webkit-mask-size: 880px 680px;
+    mask-size: 880px 680px;
+    opacity: 0.06;
   }
 
   @media (min-width: 768px) {
