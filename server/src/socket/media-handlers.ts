@@ -76,6 +76,17 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
     getPeerSocket(roomId, peerId) === socket.id
   )
 
+  // Любое действие над транспортами/продюсерами/консьюмерами участника можно
+  // выполнять только из сокета, который этим участником и является. Иначе,
+  // зная код комнаты и peerId, можно закрыть чужой транспорт или заглушить
+  // чужой микрофон.
+  const rejectForeignPeer = (event: string, roomId: unknown, peerId: unknown, callback?: Callback<never>): boolean => {
+    if (typeof roomId === 'string' && typeof peerId === 'string' && ownsPeer(roomId, peerId)) return false
+    console.warn(`[media] ${event} rejected room=${String(roomId)} peer=${String(peerId)} socket=${socket.id}`)
+    if (callback) err(callback, 'Socket does not own this peer')
+    return true
+  }
+
   // -----------------------------------------------------------------------
   // joinRoom
   // -----------------------------------------------------------------------
@@ -239,9 +250,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'createWebRtcTransport',
     async (payload: CreateTransportPayload, callback: Callback<object>) => {
-      const { roomId, peerId, direction } = payload
+      const { roomId, peerId, direction } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('createWebRtcTransport', roomId, peerId, callback as Callback<never>)) return
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
 
@@ -259,9 +271,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'connectTransport',
     async (payload: ConnectTransportPayload, callback: Callback<void>) => {
-      const { roomId, peerId, transportId, dtlsParameters } = payload
+      const { roomId, peerId, transportId, dtlsParameters } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('connectTransport', roomId, peerId, callback as Callback<never>)) return
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
 
@@ -282,8 +295,9 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
       payload: { roomId: string; peerId: string; transportId: string },
       callback: Callback<object>,
     ) => {
-      const { roomId, peerId, transportId } = payload
+      const { roomId, peerId, transportId } = payload ?? {}
       try {
+        if (rejectForeignPeer('restartIce', roomId, peerId, callback as Callback<never>)) return
         const room = rooms.get(roomId)
         if (!room) return err(callback as Callback<never>, `Room ${roomId} not found`)
 
@@ -430,6 +444,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
       const { roomId, peerId, consumerId, paused } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('pauseConsumer', roomId, peerId, callback as Callback<never> | undefined)) return
         const room = rooms.get(roomId)
         if (!room) {
           if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
@@ -462,6 +477,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
       const { roomId, peerId, consumerId, spatialLayer, temporalLayer } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('setConsumerLayers', roomId, peerId, callback as Callback<never> | undefined)) return
         const room = rooms.get(roomId)
         if (!room) {
           if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
@@ -486,9 +502,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'requestConsumerKeyFrame',
     async (payload: ResumeConsumerPayload, callback?: Callback<void>) => {
-      const { roomId, peerId, consumerId } = payload
+      const { roomId, peerId, consumerId } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('requestConsumerKeyFrame', roomId, peerId, callback as Callback<never> | undefined)) return
         const room = rooms.get(roomId)
         if (!room) {
           if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
@@ -509,9 +526,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'closeProducer',
     (payload: CloseProducerPayload, callback?: Callback<void>) => {
-      const { roomId, peerId, producerId } = payload
+      const { roomId, peerId, producerId } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('closeProducer', roomId, peerId, callback as Callback<never> | undefined)) return
         const room = rooms.get(roomId)
         if (!room) {
           if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
@@ -533,9 +551,10 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'pauseProducer',
     async (payload: PauseProducerPayload, callback?: Callback<void>) => {
-      const { roomId, peerId, producerId, paused } = payload
+      const { roomId, peerId, producerId, paused } = payload ?? {}
 
       try {
+        if (rejectForeignPeer('pauseProducer', roomId, peerId, callback as Callback<never> | undefined)) return
         const room = rooms.get(roomId)
         if (!room) {
           if (callback) return err(callback as Callback<never>, `Room ${roomId} not found`)
