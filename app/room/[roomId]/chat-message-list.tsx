@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
 import { AttachmentView } from "@/components/chat/attachment-view"
 import { MessageText } from "@/components/chat/message-text"
-import { formatTime } from "@/lib/chat-format"
+import { formatTime, isImageAttachment } from "@/lib/chat-format"
 import { colorForPeer, isReadByEveryone } from "./chat-helpers"
 
 interface ChatMessageListProps {
@@ -37,6 +37,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   isUnread,
   isRead,
 }: ChatMessageItemProps) {
+  const photo = !!m.attachment && isImageAttachment(m.attachment)
   return (
     <li className="flex flex-col gap-3">
       {isFirstUnread && (
@@ -68,15 +69,23 @@ const ChatMessageItem = memo(function ChatMessageItem({
         </div>
         <div
           className={cn(
-            "flex max-w-[85%] flex-col gap-2 rounded-2xl px-3 py-2 text-sm leading-relaxed transition-shadow",
+            "flex max-w-[85%] flex-col overflow-hidden rounded-2xl text-sm leading-relaxed transition-shadow",
             m.self
               ? "rounded-br-sm bg-primary text-primary-foreground"
               : "rounded-bl-sm bg-secondary text-secondary-foreground",
+            // Фото занимает пузырь целиком, как в личных сообщениях: без
+            // отступов цветная рамка пузыря вокруг картинки не проглядывает.
+            photo ? "gap-0" : "gap-2 px-3 py-2",
             isUnread && !m.self && "ring-1 ring-primary/50",
           )}
         >
           {m.attachment && (
-            <AttachmentView attachment={m.attachment} baseUrl={mediaBaseUrl} self={m.self} />
+            <AttachmentView
+              attachment={m.attachment}
+              baseUrl={mediaBaseUrl}
+              self={m.self}
+              captioned={photo && !!m.text}
+            />
           )}
           {m.text && <MessageText text={m.text} />}
         </div>
