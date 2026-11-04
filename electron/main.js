@@ -25,6 +25,7 @@ const {
   getCaptureRegion,
   resolveCaptureDisplay,
 } = require("./capture-region")
+const { setupAutoUpdater } = require("./updater")
 
 // Имя приложения задаём ДО initDiagnostics(): app.getPath("userData") строится
 // из app.getName(), а тот берётся из package.json ("productName" || "name").
@@ -426,7 +427,7 @@ async function pollPresentationWindows() {
     if (presentationWatch !== watch) return
 
     const slideshowWindows = windows.filter((w) => isSlideshowWindow(w.name))
-    // Сначала показ ИМЕННО той презентации, которую демонстрируют. Если совпадения
+    // Сначала показ ИМЕННО той презентаци��, которую демонстрируют. Если совпадения
     // по документу нет (заголовок показа может не содержать имени файла — например
     // «Показ слайдов PowerPoint»), берём единственный найденный показ.
     const slideshow =
@@ -590,7 +591,7 @@ function startGlobalMouseHook() {
       if (!isDoubleClick) return
 
       // Electron screen API и DOM используют DIP-координаты. Координаты native
-      // hook могут быть физическими пикселями при Windows scaling, поэтому для
+      // hook могут быть физическими пи��селями при Windows scaling, поэтому для
       // renderer берём актуальную позицию курсора через Electron.
       const { screen } = require("electron")
       const cursor = screen.getCursorScreenPoint()
@@ -1157,6 +1158,7 @@ app.whenReady().then(() => {
   setupClipboard()
   setupAudioCapture()
   setupDiagnosticsIpc()
+  setupAutoUpdater(() => mainWindow)
   createWindow()
 
   app.on("activate", () => {

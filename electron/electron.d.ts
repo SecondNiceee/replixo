@@ -57,6 +57,20 @@ interface ElectronAPI {
   // Диагностика крашей: путь к main.log и открытие папки логов.
   getLogPath: () => Promise<string | null>
   openLogsFolder: () => Promise<boolean>
+
+  // Автообновление (electron/updater.js). Опциональны: старые сборки без них.
+  getAppVersion?: () => Promise<string>
+  getUpdateStatus?: () => Promise<DesktopUpdateStatus>
+  checkForUpdates?: () => Promise<DesktopUpdateStatus>
+  installUpdate?: () => Promise<boolean>
+  onUpdateStatus?: (callback: (status: DesktopUpdateStatus) => void) => () => void
+}
+
+interface DesktopUpdateStatus {
+  status: "idle" | "checking" | "downloading" | "ready"
+  version: string | null
+  percent: number | null
+  error: string | null
 }
 
 interface DesktopNotificationPayload {

@@ -19,6 +19,7 @@ import {
   UPLOAD_TTL_MS,
   WINDOWS_INSTALLER_PATH,
   WINDOWS_INSTALLER_NAME,
+  UPDATES_DIR,
 } from './config'
 import { setupSocketIO } from './socket'
 import { canonicalRoomCode } from './room-code'
@@ -258,16 +259,47 @@ async function main(): Promise<void> {
   // Accept-Ranges и обрабатывает Range-запросы — то есть поддерживает докачку
   // и докачивание после обрыва, что критично для большого файла.
   // ---------------------------------------------------------------------------
+  // Фид автообновлений desktop-приложения (electron-updater, generic provider).
+  // latest.yml не кэшируется, иначе клиенты не увидят новый релиз; сам .exe
+  // и .blockmap неизменяемы (в имени версия) и отдаются с поддержкой Range.
+  app.use(
+    '/updates',
+    express.static(UPDATES_DIR, {
+      index: false,
+      dotfiles: 'ignore',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.yml')) {
+          res.setHeader('Cache-Control', 'no-cache')
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+        }
+      },
+    }),
+  )
+
+  const resolveInstaller = (): { filePath: string; name: string } => {
+    try {
+      const manifest = fs.readFileSync(path.join(UPDATES_DIR, 'latest.yml'), 'utf8')
+      const match = manifest.match(/^path:\s*['"]?([^'"\r\n]+)['"]?\s*$/m)
+      const file = match?.[1] ? path.basename(match[1].trim()) : null
+      if (file) return { filePath: path.join(UPDATES_DIR, file), name: file }
+    } catch {
+      // Фида ещё нет — используем установщик по старому пути.
+    }
+    return { filePath: WINDOWS_INSTALLER_PATH, name: WINDOWS_INSTALLER_NAME }
+  }
+
   app.get('/download/windows', (_req: Request, res: Response) => {
-    fs.access(WINDOWS_INSTALLER_PATH, fs.constants.R_OK, (err) => {
+    const installer = resolveInstaller()
+    fs.access(installer.filePath, fs.constants.R_OK, (err) => {
       if (err) {
         console.error(
-          `[download] Установщик не найден: ${WINDOWS_INSTALLER_PATH}`,
+          `[download] Установщик не найден: ${installer.filePath}`,
         )
         res.status(404).json({ error: 'Установщик временно недоступен' })
         return
       }
-      res.download(WINDOWS_INSTALLER_PATH, WINDOWS_INSTALLER_NAME, (dlErr) => {
+      res.download(installer.filePath, installer.name, (dlErr) => {
         // Частая «ошибка» — клиент оборвал соединение (закрыл вкладку/пауза).
         // Это не повод шуметь в логах как о настоящей проблеме.
         if (dlErr && !res.headersSent) {

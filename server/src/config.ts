@@ -53,6 +53,12 @@ export const WINDOWS_INSTALLER_PATH =
   process.env.WINDOWS_INSTALLER_PATH ??
   path.join(process.cwd(), 'downloads', 'Replixo-Setup-version-4.exe')
 
+// Папка фида автообновлений (latest.yml + установщик + .blockmap из release/).
+// Отдаётся как /updates/. Если в ней есть latest.yml, /download/windows отдаёт
+// установщик, указанный в нём, — новый релиз выкладывается одной заливкой.
+export const UPDATES_DIR =
+  process.env.UPDATES_DIR ?? path.join(process.cwd(), 'updates')
+
 // Имя файла, под которым установщик будет сохранён у пользователя.
 export const WINDOWS_INSTALLER_NAME =
   process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe'

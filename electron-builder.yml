@@ -40,6 +40,15 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Replixo
-  # Имя установщика без пробелов, чтобы ссылка /download/windows отдавала файл
-  # с корректным именем.
-  artifactName: Replixo-Setup-version-4.exe
+  # Имя с версией: latest.yml ссылается на конкретный файл, и разные релизы
+  # не перетирают друг друга в кэше. /download/windows сам находит актуальный
+  # установщик по latest.yml.
+  artifactName: Replixo-Setup-${version}.exe
+  differentialPackage: true
+
+# Автообновление: electron-updater читает https://replixo.ru/updates/latest.yml.
+# После `pnpm dist` залейте из release/ на сервер в UPDATES_DIR три файла:
+# latest.yml, Replixo-Setup-<версия>.exe и Replixo-Setup-<версия>.exe.blockmap.
+publish:
+  provider: generic
+  url: https://replixo.ru/updates/

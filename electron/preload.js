@@ -121,4 +121,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // -------------------------------------------------------------------------
   getLogPath: () => ipcRenderer.invoke("get-log-path"),
   openLogsFolder: () => ipcRenderer.invoke("open-logs-folder"),
+
+  // Автообновление (electron/updater.js).
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  getUpdateStatus: () => ipcRenderer.invoke("get-update-status"),
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  installUpdate: () => ipcRenderer.invoke("install-update"),
+  onUpdateStatus: (callback) => {
+    const handler = (_e, status) => callback(status)
+    ipcRenderer.on("update-status", handler)
+    return () => ipcRenderer.removeListener("update-status", handler)
+  },
 })
