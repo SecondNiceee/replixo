@@ -55,7 +55,7 @@ export function LessonSummaryLockedButton() {
         disabled
         tabIndex={-1}
         aria-label="ИИ-конспект урока недоступен без регистрации"
-        className="pointer-events-none size-12 rounded-full"
+        className="pointer-events-none size-10 sm:size-12 rounded-full"
       >
         <FileText className="size-5" />
       </Button>
@@ -87,7 +87,7 @@ export function LessonSummaryButton({ recorder }: { recorder: LessonSummaryRecor
       disabled={summarizing}
       aria-busy={summarizing}
       className={cn(
-        "size-12 rounded-full",
+        "size-10 sm:size-12 rounded-full",
         recording && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
       )}
       aria-label={
