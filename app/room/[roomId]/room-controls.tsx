@@ -142,7 +142,7 @@ export function RoomControls({
         )}
       >
         <div className={cn(collapsed ? "overflow-hidden" : "overflow-visible")}>
-    <footer className="flex items-center justify-center gap-2 border-t border-border px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-3 sm:px-5 sm:py-4">
+    <footer className="flex items-center justify-center gap-1.5 border-t border-border px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-3 sm:px-5 sm:py-4">
       {/* Mic + device settings */}
       <Dialog open={micSettingsOpen} onOpenChange={setMicSettingsOpen}>
         <div className="group relative flex items-center">
@@ -173,7 +173,7 @@ export function RoomControls({
             size="icon"
             onClick={onToggleMic}
             className={cn(
-              "size-12 rounded-full",
+              "size-10 sm:size-12 rounded-full",
               isMicMuted && "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
             )}
             aria-label={isMicMuted ? "Включить микрофон" : "Выключить микрофон"}
@@ -259,7 +259,7 @@ export function RoomControls({
         onClick={onToggleCam}
         disabled={isCamStarting}
         className={cn(
-          "size-12 rounded-full",
+          "size-10 sm:size-12 rounded-full",
           (isCamOff || cameraSuppressed) &&
             !isCamStarting &&
             "border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20",
@@ -297,7 +297,7 @@ export function RoomControls({
           variant="outline"
           onClick={onToggleScreenShare}
           className={cn(
-            "size-12 rounded-full rounded-r-none border-r-0",
+            "size-10 sm:size-12 rounded-full rounded-r-none border-r-0",
             isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
           )}
           aria-label={isScreenSharing ? "Остановить демонстрацию экрана" : "Демонстрация экрана"}
@@ -307,7 +307,7 @@ export function RoomControls({
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
-              "inline-flex h-12 w-6 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
+              "inline-flex h-10 w-6 sm:h-12 items-center justify-center rounded-l-none rounded-r-full border border-input bg-background px-1 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none",
               isScreenSharing && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
             )}
             aria-label="Качество демонстрации экрана"
@@ -341,7 +341,7 @@ export function RoomControls({
           size="icon"
           onClick={onToggleAnnotation}
           className={cn(
-            "size-12 rounded-full",
+            "size-10 sm:size-12 rounded-full",
             annotationActive && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
           )}
           aria-label={annotationActive ? "Закрыть рисование по экрану" : "Рисовать по экрану"}
@@ -356,7 +356,7 @@ export function RoomControls({
         size="icon"
         onClick={onToggleWhiteboard}
         className={cn(
-          "size-12 rounded-full",
+          "size-10 sm:size-12 rounded-full",
           whiteboardOpen && "border-foreground bg-foreground/10 text-foreground hover:bg-foreground/20",
         )}
         aria-label={whiteboardOpen ? "Закрыть доску" : "Открыть совместную доску"}
@@ -374,7 +374,7 @@ export function RoomControls({
         variant="destructive"
         size="icon"
         onClick={onLeave}
-        className="size-12 rounded-full"
+        className="size-10 sm:size-12 rounded-full"
         aria-label="Покинуть комнату"
       >
         <PhoneOff className="size-5" />

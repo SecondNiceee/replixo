@@ -1,7 +1,16 @@
 "use client"
 
-import { Copy, Check, Pencil, Settings, Link2, Hash } from "lucide-react"
+import { Copy, Check, Pencil, Settings, Link2, Hash, Menu, Users } from "lucide-react"
 import { useState, useCallback } from "react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { EditNameDialog } from "@/components/edit-name-dialog"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
@@ -44,30 +53,29 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
   return (
     <>
       <header className={cn(
-        "left-0 right-0 z-50 flex items-center justify-between px-5 pt-3 pb-1 bg-transparent transition-[right,margin] duration-300 ease-in-out",
+        "left-0 right-0 z-50 flex items-center justify-between gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-1 bg-transparent transition-[right,margin] duration-300 ease-in-out sm:px-5",
         isFixed ? "fixed top-0" : "relative",
         chatOpen && "sm:mr-[360px]",
         participantsOpen && "lg:ml-[208px]",
       )}>
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-foreground">Replixo</span>
-          <span className="h-4 w-px bg-border" />
-          <div className="group relative">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="group relative min-w-0">
             <button
               type="button"
               onClick={handleCopyCode}
-              className="flex items-center gap-1.5 rounded-lg bg-secondary px-2.5 py-1 text-xs font-mono text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={`Скопировать код комнаты ${roomId}`}
+              className="flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-lg bg-secondary/90 px-2.5 text-xs font-mono text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground"
             >
-              {roomId}
+              <span className="truncate">{roomId}</span>
               {copied ? (
-                <Check className="size-3 text-green-500" />
+                <Check className="size-3 shrink-0 text-green-500" />
               ) : (
-                <Copy className="size-3" />
+                <Copy className="size-3 shrink-0" />
               )}
             </button>
 
-            {/* Hover dropdown */}
-            <div className="invisible absolute left-0 top-full z-50 pt-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100">
+            {/* Hover dropdown — desktop only; on touch the actions live in the mobile menu */}
+            <div className="invisible absolute left-0 top-full z-50 hidden pt-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 sm:block">
               <div className="min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-lg">
                 <button
                   type="button"
@@ -97,7 +105,54 @@ export function RoomHeader({ roomId, displayName, status, participantCount, isFi
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* Mobile: status pill + one menu instead of a row that collides at 380px */}
+        <div className="flex shrink-0 items-center gap-2 sm:hidden">
+          <div className="flex h-8 items-center gap-1.5 rounded-lg bg-secondary/90 px-2.5 backdrop-blur-sm">
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                status === "connected" ? "bg-green-500" : "bg-muted-foreground",
+              )}
+            />
+            <Users className="size-3.5 text-muted-foreground" />
+            <span className="text-xs tabular-nums text-muted-foreground">{participantCount}</span>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Меню комнаты"
+              className="flex size-8 cursor-pointer items-center justify-center rounded-lg bg-secondary/90 text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground"
+            >
+              <Menu className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="truncate">{displayName}</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setEditNameOpen(true)}>
+                  <Pencil />
+                  Изменить имя
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={handleCopyCode}>
+                  {copied === "code" ? <Check className="text-green-500" /> : <Hash />}
+                  Скопировать код
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleCopyLink}>
+                  {copied === "link" ? <Check className="text-green-500" /> : <Link2 />}
+                  Скопировать ссылку
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onOpenSettings}>
+                <Settings />
+                Настройки
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <div className="hidden items-center gap-3 sm:flex">
           <button
             onClick={() => setEditNameOpen(true)}
             className="group flex items-center gap-1.5 rounded-lg bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
