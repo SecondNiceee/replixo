@@ -1,4 +1,5 @@
 import { saveMessage, saveReadMarker } from '../db'
+import { sanitizeReply } from '../reply'
 import type { ChatMessagePayload, ChatReadPayload } from '../types'
 import { createRateLimiter, type HandlerContext } from './helpers'
 import { rooms, getPeerSocket } from './room-registry'
@@ -30,7 +31,7 @@ export function registerChatHandlers(ctx: HandlerContext): void {
   socket.on('chatMessage', (payload: unknown) => {
     // --- Input validation ---
     if (!payload || typeof payload !== 'object') return
-    const { roomId: rid, peerId: pid, text, id: clientId, attachment } = payload as ChatMessagePayload
+    const { roomId: rid, peerId: pid, text, id: clientId, attachment, replyTo } = payload as ChatMessagePayload
     if (typeof rid !== 'string' || !rid) return
     if (typeof pid !== 'string' || !pid) return
     if (typeof text !== 'string') return
@@ -102,6 +103,9 @@ export function registerChatHandlers(ctx: HandlerContext): void {
       displayName: peer.displayName,
       text: trimmed,
       attachment: safeAttachment ?? null,
+      // В комнате участники анонимны (имя задаёт сам участник), поэтому снимок
+      // цитаты берём у клиента и только приводим к безопасной форме.
+      replyTo: sanitizeReply(replyTo),
       timestamp: now,
     }
 
@@ -114,6 +118,7 @@ export function registerChatHandlers(ctx: HandlerContext): void {
       displayName: message.displayName,
       text: message.text,
       attachment: message.attachment,
+      replyTo: message.replyTo,
       timestamp: message.timestamp,
     })
   })

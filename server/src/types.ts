@@ -209,6 +209,8 @@ export interface ChatMessagePayload {
   id?: string
   // Необязательное вложение. Сообщение валидно, если есть text ИЛИ attachment.
   attachment?: ChatMessageAttachment
+  // Цитата при ответе; проверяется sanitizeReply (server/src/reply.ts).
+  replyTo?: unknown
 }
 
 // Server → client (broadcast): a chat message with server-assigned id/timestamp.

@@ -5,6 +5,7 @@ import type { Socket } from "socket.io-client"
 import type { ChatAttachment } from "./types"
 import { SERVER_URL, getPeerToken } from "./types"
 import type { Action } from "./reducer"
+import type { ReplyRef } from "@/lib/chat/reply"
 
 interface UseChatParams {
   roomId: string
@@ -21,7 +22,7 @@ export function useChat({
   socketRef,
   dispatch,
 }: UseChatParams) {
-  const sendChatMessage = useCallback((text: string, attachment?: ChatAttachment | null) => {
+  const sendChatMessage = useCallback((text: string, attachment?: ChatAttachment | null, replyTo?: ReplyRef | null) => {
     const trimmed = text.trim().slice(0, 2000)
     if (!trimmed && !attachment) return
     const socket = socketRef.current
@@ -34,6 +35,7 @@ export function useChat({
       text: trimmed,
       id,
       ...(attachment ? { attachment } : {}),
+      ...(replyTo ? { replyTo } : {}),
     })
     dispatch({
       type: "ADD_MESSAGE",
@@ -45,6 +47,7 @@ export function useChat({
         timestamp: Date.now(),
         self: true,
         attachment: attachment ?? null,
+        replyTo: replyTo ?? null,
       },
     })
   }, [roomId, displayName, peerIdRef, socketRef, dispatch])

@@ -187,6 +187,9 @@ export const directMessage = pgTable(
     text: text('text').notNull().default(''),
     // Вложение: { url, name, size, mime } | null (заполняется на шаге вложений).
     attachment: jsonb('attachment'),
+    // Снимок цитаты при ответе (lib/chat/reply.ts) | null. Собирает сервер из
+    // оригинала, поэтому подделать чужую цитату нельзя.
+    replyTo: jsonb('replyTo'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
     editedAt: timestamp('editedAt'),
     deletedAt: timestamp('deletedAt'),
@@ -212,6 +215,8 @@ export const message = pgTable(
     // Вложение (файл на диске сервера) в виде JSON: { url, name, size, mime }.
     // null — обычное текстовое сообщение.
     attachment: jsonb('attachment'),
+    // Снимок цитаты при ответе (lib/chat/reply.ts) | null.
+    replyTo: jsonb('replyTo'),
     createdAt: timestamp('createdAt').notNull().defaultNow(),
   },
   (t) => [index('message_roomId_createdAt_idx').on(t.roomId, t.createdAt)],
@@ -229,7 +234,7 @@ export const messageRead = pgTable(
   {
     roomId: text('roomId').notNull(),
     peerId: text('peerId').notNull(),
-    // Время (createdAt) последнего прочитанного участником сообщения.
+    // Время (createdAt) последнего прочитан��ого участником сообщения.
     lastReadAt: timestamp('lastReadAt').notNull().defaultNow(),
     updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   },
@@ -288,7 +293,7 @@ export const annotationSettings = pgTable('annotation_settings', {
 // --- Shared whiteboard -----------------------------------------------------
 // Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
 // снапшот документа целиком (JSON-строка от tldraw getSnapshot). Снапшот
-// периодически перезаписывается, пока участники рисуют, и стирает��я вместе с
+// периодически перезаписывается, пока участники рисуют, и стирает����я вместе с
 // комнатой, когда она опустела. open — открыта ли доска у всех сейчас.
 
 export const whiteboard = pgTable('whiteboard', {

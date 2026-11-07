@@ -10,6 +10,8 @@ export type Producer = any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Consumer = any
 
+import type { ReplyRef } from "@/lib/chat/reply"
+
 // ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
@@ -98,6 +100,8 @@ export interface ChatMessage {
   timestamp: number
   self: boolean
   attachment?: ChatAttachment | null
+  /** Цитата, если это ответ на другое сообщение. */
+  replyTo?: ReplyRef | null
 }
 
 // Camera simulcast layers

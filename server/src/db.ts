@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { Pool } from 'pg'
+import type { MessageReply } from './reply'
 
 // Вложение сообщения (файл, лежащий на диске сервера). null-поля означают, что
 // сообщение чисто текстовое.
@@ -29,6 +30,7 @@ export interface StoredMessage {
   text: string
   timestamp: number
   attachment?: MessageAttachment | null
+  replyTo?: MessageReply | null
 }
 
 // Отметка "прочитано": до какого момента (timestamp, мс) участник прочитал чат.
@@ -86,12 +88,35 @@ export const dbPool = pool
  * (это исключает дубликаты при загрузке истории). Повторная вставка того же id
  * игнорируется.
  */
+let replyColumnsReady: Promise<void> | null = null
+
+/**
+ * Колонки "replyTo" (drizzle/add_message_reply.sql) добавляем сами, как и
+ * call_session: иначе выкладка кода раньше ручной миграции сломала бы и запись
+ * сообщений, и чтение истории. ADD COLUMN IF NOT EXISTS идемпотентен.
+ */
+export function ensureReplyColumns(): Promise<void> {
+  if (!pool) return Promise.resolve()
+  replyColumnsReady ??= pool
+    .query(
+      `ALTER TABLE "dm_message" ADD COLUMN IF NOT EXISTS "replyTo" jsonb;
+       ALTER TABLE "message" ADD COLUMN IF NOT EXISTS "replyTo" jsonb;`,
+    )
+    .then(() => undefined)
+    .catch((e) => {
+      replyColumnsReady = null
+      throw e
+    })
+  return replyColumnsReady
+}
+
 export async function saveMessage(msg: StoredMessage): Promise<void> {
   if (!pool) return
   try {
+    await ensureReplyColumns()
     await pool.query(
-      `INSERT INTO "message" ("id", "roomId", "peerId", "displayName", "text", "attachment", "createdAt")
-       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0))
+      `INSERT INTO "message" ("id", "roomId", "peerId", "displayName", "text", "attachment", "replyTo", "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, to_timestamp($8 / 1000.0))
        ON CONFLICT ("id") DO NOTHING`,
       [
         msg.id,
@@ -100,6 +125,7 @@ export async function saveMessage(msg: StoredMessage): Promise<void> {
         msg.displayName,
         msg.text,
         msg.attachment ? JSON.stringify(msg.attachment) : null,
+        msg.replyTo ? JSON.stringify(msg.replyTo) : null,
         msg.timestamp,
       ],
     )
@@ -118,10 +144,11 @@ export async function getRoomMessages(
 ): Promise<StoredMessage[]> {
   if (!pool) return []
   try {
+    await ensureReplyColumns()
     // Берём последние `limit` сообщений, затем разворачиваем в хронологический
     // порядок (старые сверху) для отображения в чате.
     const { rows } = await pool.query(
-      `SELECT "id", "roomId", "peerId", "displayName", "text", "attachment",
+      `SELECT "id", "roomId", "peerId", "displayName", "text", "attachment", "replyTo",
               (EXTRACT(EPOCH FROM "createdAt") * 1000)::bigint AS "timestamp"
        FROM "message"
        WHERE "roomId" = $1
@@ -138,6 +165,7 @@ export async function getRoomMessages(
         text: r.text as string,
         // pg возвращает jsonb уже распарсенным объектом (или null).
         attachment: (r.attachment as MessageAttachment | null) ?? null,
+        replyTo: (r.replyTo as MessageReply | null) ?? null,
         timestamp: Number(r.timestamp),
       }))
       .reverse()

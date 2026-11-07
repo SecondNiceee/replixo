@@ -747,7 +747,7 @@ html[data-theme='dark'] {
   /* ---------------------------------------------------------------------------
      Скролл без полосы (.scroll-none)
      ---------------------------------------------------------------------------
-     Прокрутка колесом/клавишами работает как обычно, но самой полосы нет и
+     Прокрутка колесом/клавишами работает как обычно, но сам��й полосы нет и
      места она не занимает. Нужно там, где полоса — визуальный шум даже в тонком
      виде: например в строке ввода сообщения, которая по высоте всего в
      несколько строк.
@@ -948,4 +948,27 @@ html[data-theme='dark'] {
 .reveal[data-reveal='hidden'] {
   opacity: 0;
   transform: translate3d(0, 24px, 0);
+}
+
+/* Подсветка оригинала после клика по цитате ответа (lib/chat/reply.ts). */
+[data-message-id] {
+  border-radius: 1rem;
+}
+[data-message-id][data-flash] {
+  animation: message-flash 1.6s ease-out;
+}
+@keyframes message-flash {
+  0%,
+  30% {
+    background-color: color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-message-id][data-flash] {
+    animation-duration: 0.01s;
+    outline: 2px solid var(--primary);
+  }
 }

@@ -1,4 +1,5 @@
 import type { PresenceStatus } from '@/stores/dm-store'
+import { normalizeReply, type ReplyRef } from '@/lib/chat/reply'
 
 // Формы данных личного чата на клиенте.
 //
@@ -52,6 +53,8 @@ export interface DmMessage {
   senderId: string
   text: string
   attachment: DmAttachment | null
+  /** Цитата, если это ответ на другое сообщение. */
+  replyTo: ReplyRef | null
   createdAt: number
   /** Локальный статус оптимистичной отправки. Отсутствует у истории из БД. */
   status?: DmMessageStatus
@@ -64,6 +67,7 @@ export interface RawDmMessage {
   text: string
   /** jsonb из БД — то есть на клиенте это `unknown` до проверки формы. */
   attachment?: unknown
+  replyTo?: unknown
   createdAt: string | number
 }
 
@@ -89,6 +93,7 @@ export function normalizeMessage(raw: RawDmMessage): DmMessage {
     senderId: raw.senderId,
     text: raw.text ?? '',
     attachment: normalizeAttachment(raw.attachment),
+    replyTo: normalizeReply(raw.replyTo),
     createdAt:
       typeof raw.createdAt === 'number'
         ? raw.createdAt
@@ -160,7 +165,7 @@ function plural(n: number, one: string, few: string, many: string): string {
  *
  * Обратное неверно и поэтому здесь не используется: свежее время бывает и у
  * того, кто ушёл десять секунд назад (при разрыве время пишется принудительно).
- * Свежесть оставляет статус неизвестным, и такие строки честно ждут websocket —
+ * Свежес��ь оставляет статус неизвестным, и такие строки честно ждут websocket —
  * но их единицы, а не весь список.
  *
  * 90 секунд — минутный период записи плюс запас на задержку UPDATE и расхождение

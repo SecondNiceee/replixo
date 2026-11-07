@@ -5,6 +5,7 @@ import { rememberProducerTransport, isProducerOnStaleTransport } from "./mediaso
 
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
+import { normalizeReply } from "@/lib/chat/reply"
 import type { Socket } from "socket.io-client"
 import {
   SERVER_URL,
@@ -389,7 +390,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           displayName: string
           producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
         }>
-        messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }>
+        messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null; replyTo?: unknown }>
         readMarkers?: Array<{ peerId: string; ts: number }>
         whiteboardOpen?: boolean
         whiteboardSnapshot?: string | null
@@ -429,6 +430,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   text: m.text, timestamp: m.timestamp,
                   self: m.peerId === peerIdRef.current,
                   attachment: m.attachment ?? null,
+                  replyTo: normalizeReply(m.replyTo),
                 },
               })
             }
@@ -695,7 +697,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       } catch (error) {
         joinInFlightRef.current = false
         console.error(`[media] Rebuild failed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`, error)
-        dispatch({ type: "ERROR", error: "Не удалось восстановить аудио/видео. Переподключитесь к комнате." })
+        dispatch({ type: "ERROR", error: "Не удалось восст��новить аудио/видео. Переподключитесь к комнате." })
       } finally {
         recoveryInFlightRef.current = false
       }

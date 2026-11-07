@@ -27,13 +27,17 @@ import { formatFileSize, isImageAttachment } from "@/lib/chat-format"
 import { isNoteAttachment, noteAttachment } from "@/lib/chat/note-attachment"
 import { ComposerTextarea } from "@/app/chat/composer-textarea"
 import { NotePickerDialog } from "@/app/chat/note-picker-dialog"
+import { MessageContextMenu } from "@/components/chat/message-context-menu"
+import { ReplyComposerBar } from "@/components/chat/reply-quote"
+import { buildReply, type ReplyRef } from "@/lib/chat/reply"
+import { getOrCreatePeerId } from "@/hooks/mediasoup/types"
 
 interface RoomChatProps {
   open: boolean
   onClose: () => void
   roomId: string
   messages: ChatMessage[]
-  onSend: (text: string, attachment?: ChatAttachment | null) => void
+  onSend: (text: string, attachment?: ChatAttachment | null, replyTo?: ReplyRef | null) => void
   // Uploads a file to the room and resolves with its attachment metadata.
   onUploadFile: (file: File) => Promise<ChatAttachment>
   // Base URL of the media server, used to build absolute attachment links.
@@ -280,20 +284,51 @@ export const RoomChat = memo(function RoomChat({
     [addFiles],
   )
 
-  // Каждое вложение — отдельным сообщением, текст — к последнему.
+  // Ответ на сообщение: свой peerId нужен, чтобы цитаты моих сообщений
+  // подписывались «Вы» (getOrCreatePeerId кэширует значение на странице).
+  const selfPeerId = getOrCreatePeerId(roomId)
+  const [replyTo, setReplyTo] = useState<ReplyRef | null>(null)
+  const cancelReply = useCallback(() => setReplyTo(null), [])
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+  const findMessage = useCallback((id: string) => messagesRef.current.find((m) => m.id === id), [])
+  const canReply = useCallback((id: string) => !!findMessage(id), [findMessage])
+  const getMessageText = useCallback((id: string) => findMessage(id)?.text ?? "", [findMessage])
+  const startReply = useCallback(
+    (id: string) => {
+      const m = findMessage(id)
+      if (!m) return
+      setReplyTo(
+        buildReply({
+          id: m.id,
+          authorId: m.peerId,
+          author: m.displayName,
+          text: m.text,
+          attachment: m.attachment,
+        }),
+      )
+    },
+    [findMessage],
+  )
+
+  // Каждое вложение — отдельным сообщением, текст и цитата — к последнему.
   const submit = useCallback(() => {
     const trimmed = text.trim()
     if (uploading || (!trimmed && pendingList.length === 0)) return
     if (pendingList.length === 0) {
-      onSend(trimmed, null)
+      onSend(trimmed, null, replyTo)
     } else {
-      pendingList.forEach((att, i) => onSend(i === pendingList.length - 1 ? trimmed : "", att))
+      pendingList.forEach((att, i) => {
+        const isLast = i === pendingList.length - 1
+        onSend(isLast ? trimmed : "", att, isLast ? replyTo : null)
+      })
     }
     stopTyping()
     setText("")
     setPendingList([])
     setUploadError(null)
-  }, [text, pendingList, uploading, onSend, stopTyping])
+    setReplyTo(null)
+  }, [text, pendingList, uploading, onSend, stopTyping, replyTo])
 
   // Ctrl+V with copied images/files: clipboard files arrive as items of kind
   // "file". Only intercept when one exists, so plain text paste still works.
@@ -373,18 +408,22 @@ export const RoomChat = memo(function RoomChat({
 
       {/* Messages */}
       <div ref={scrollRef} className="scroll-slim min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <ChatMessageList
-          messages={messages}
-          mediaBaseUrl={mediaBaseUrl}
-          unreadFromIndex={unreadFromIndex}
-          readMarkers={readMarkers}
-          peerIds={peerIds}
-        />
+        <MessageContextMenu canReply={canReply} getText={getMessageText} onReply={startReply}>
+          <ChatMessageList
+            messages={messages}
+            mediaBaseUrl={mediaBaseUrl}
+            unreadFromIndex={unreadFromIndex}
+            readMarkers={readMarkers}
+            peerIds={peerIds}
+            selfPeerId={selfPeerId}
+          />
+        </MessageContextMenu>
       </div>
 
       <TypingIndicator />
 
       <div className="shrink-0 border-t border-border/60 bg-card/70">
+        {replyTo && <ReplyComposerBar reply={replyTo} selfAuthorId={selfPeerId} onCancel={cancelReply} />}
         {/* Upload status / staged attachments */}
         {(pendingList.length > 0 || uploading || uploadError) && (
           <div className="flex flex-col gap-2 px-3 pt-3">
@@ -401,7 +440,7 @@ export const RoomChat = memo(function RoomChat({
                   type="button"
                   onClick={() => setUploadError(null)}
                   className="shrink-0 opacity-70 hover:opacity-100"
-                  aria-label="Скрыть ошибку"
+                  aria-label="Скрыть ошибк��"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -485,6 +524,8 @@ export const RoomChat = memo(function RoomChat({
             onPaste={handlePaste}
             disabled={false}
             maxLength={2000}
+            focusKey={replyTo?.id ?? null}
+            onEscape={replyTo ? cancelReply : undefined}
           />
           <Button
             type="submit"

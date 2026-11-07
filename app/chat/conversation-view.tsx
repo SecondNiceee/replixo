@@ -21,6 +21,8 @@ import { PresenceDot } from '@/components/chat/presence-dot'
 import { cn } from '@/lib/utils'
 import { useSession } from '@/lib/auth-client'
 import { noteAttachment } from '@/lib/chat/note-attachment'
+import { MessageContextMenu } from '@/components/chat/message-context-menu'
+import { buildReply, type ReplyRef } from '@/lib/chat/reply'
 import { DmMessageList } from './dm-message-list'
 import { DmComposer } from './dm-composer'
 import { TypingIndicator } from './typing-indicator'
@@ -207,30 +209,71 @@ export function ConversationView({
     el.scrollTop = el.scrollHeight - saved.height + saved.top
   }, [firstMessageId])
 
+  // Сообщение, на которое сейчас отвечаем. В другом диалоге оно чужое — сброс.
+  const [replyTo, setReplyTo] = useState<ReplyRef | null>(null)
+  useEffect(() => {
+    setReplyTo(null)
+  }, [conversationId])
+  const cancelReply = useCallback(() => setReplyTo(null), [])
+
   const handleSend = useCallback(
     (text: string, attachments: DmAttachment[]) => {
       // Сообщение ушло — индикатор набора у собеседника гасим сразу, не
       // дожидаясь таймаута молчания.
       stopTyping()
+      setReplyTo(null)
       if (attachments.length === 0) {
-        send(text, null)
+        send(text, null, replyTo)
         return
       }
       // Несколько файлов — несколько отдельных сообщений, лента раскладывает
       // их как обычную переписку. Текст из поля уходит только с последним:
       // так подпись явно относится к конкретной фотографии, а не «висит»
-      // отдельно от всех вложений.
+      // отдельно от всех вложений. Цитата — тоже к последнему, вместе с текстом.
       attachments.forEach((attachment, i) => {
         const isLast = i === attachments.length - 1
-        send(isLast ? text : '', attachment)
+        send(isLast ? text : '', attachment, isLast ? replyTo : null)
       })
     },
-    [send, stopTyping],
+    [send, stopTyping, replyTo],
   )
 
   const { data: session } = useSession()
   const isTeacher = session?.user.role === 'teacher'
   const friendId = conversation?.friendId
+  const sessionUser = session?.user as { name?: string; username?: string | null } | undefined
+  const selfName = sessionUser?.username || sessionUser?.name || ''
+  const peerName = conversation ? conversationTitle(conversation) : ''
+
+  // Отвечать можно только на уже сохранённое сообщение: оригинал ищет сервер,
+  // а неотправленного в базе ещё нет.
+  const canReply = useCallback(
+    (id: string) => {
+      const m = messages.find((x) => x.id === id)
+      return !!m && m.status !== 'sending' && m.status !== 'failed'
+    },
+    [messages],
+  )
+  const getMessageText = useCallback(
+    (id: string) => messages.find((x) => x.id === id)?.text ?? '',
+    [messages],
+  )
+  const startReply = useCallback(
+    (id: string) => {
+      const m = messages.find((x) => x.id === id)
+      if (!m) return
+      setReplyTo(
+        buildReply({
+          id: m.id,
+          authorId: m.senderId,
+          author: m.senderId === selfId ? selfName : peerName,
+          text: m.text,
+          attachment: m.attachment,
+        }),
+      )
+    },
+    [messages, selfId, selfName, peerName],
+  )
 
   // Сначала выдаём собеседнику доступ (иначе ссылка на конспект откроется у
   // него с 404), потом шлём карточку обычным путём — с оптимистичным показом.
@@ -296,7 +339,7 @@ export function ConversationView({
                 : 'text-muted-foreground',
             )}
           >
-            {/* Место подписи не пустует: вместо статуса, которого у заметок нет,
+            {/* Место подписи не пустует: вм��сто статуса, которого у заметок нет,
                 она объясняет сам чат — «Заметки только для вас». */}
             {isSelfChat ? FAVORITES_HINT : peerLabel}
           </span>
@@ -339,13 +382,15 @@ export function ConversationView({
                 <span className="sr-only">Загружаем более ранние сообщения</span>
               </div>
             )}
-            <DmMessageList
-              messages={messages}
-              selfId={selfId}
-              peerReadAt={peerReadAt}
-              isSelfChat={isSelfChat}
-              onRetry={retry}
-            />
+            <MessageContextMenu canReply={canReply} getText={getMessageText} onReply={startReply}>
+              <DmMessageList
+                messages={messages}
+                selfId={selfId}
+                peerReadAt={peerReadAt}
+                isSelfChat={isSelfChat}
+                onRetry={retry}
+              />
+            </MessageContextMenu>
           </div>
         )}
       </div>
@@ -372,6 +417,9 @@ export function ConversationView({
         onTyping={notifyTyping}
         disabled={!connected}
         onSendNote={isTeacher ? handleSendNote : undefined}
+        replyTo={replyTo}
+        onCancelReply={cancelReply}
+        selfId={selfId}
       />
     </section>
   )

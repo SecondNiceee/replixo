@@ -105,6 +105,10 @@ interface ComposerTextareaProps {
   disabled: boolean
   /** Чат комнаты режет сообщения на сервере до 2000 символов. */
   maxLength?: number
+  /** Смена значения ставит фокус в поле (например, при выборе «Ответить»). */
+  focusKey?: string | null
+  /** Escape в поле — например, отмена ответа. */
+  onEscape?: () => void
 }
 
 /**
@@ -119,9 +123,15 @@ export function ComposerTextarea({
   onPaste,
   disabled,
   maxLength = MAX_LENGTH,
+  focusKey,
+  onEscape,
 }: ComposerTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const rulerRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    if (focusKey) textareaRef.current?.focus()
+  }, [focusKey])
 
   // Линейку создаём один раз на компонент и убираем за собой: она живёт в
   // document.body, а не в React-дереве, поэтому сама не удалится.
@@ -176,6 +186,11 @@ export function ComposerTextarea({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape' && onEscape && !e.nativeEvent.isComposing) {
+        e.preventDefault()
+        onEscape()
+        return
+      }
       // Enter отправляет, Shift+Enter — перенос строки. Во время набора
       // иероглифов (CJK IME) Enter подтверждает композицию, а не отправляет.
       if (e.key !== 'Enter' || e.shiftKey) return
@@ -183,7 +198,7 @@ export function ComposerTextarea({
       e.preventDefault()
       onSubmit()
     },
-    [onSubmit],
+    [onSubmit, onEscape],
   )
 
   return (

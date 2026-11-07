@@ -37,6 +37,7 @@ import {
 } from './uploads'
 import { clientIp, createKeyedRateLimiter } from './limits'
 import { startWorkers, closeWorkers } from './workers'
+import { ensureReplyColumns } from './db'
 import {
   contentDisposition,
   decodeOriginalName,
@@ -323,6 +324,12 @@ async function main(): Promise<void> {
   // Mediasoup Worker
   // ---------------------------------------------------------------------------
   await startWorkers()
+
+  // Next-приложение читает "replyTo" в истории ЛС — колонка должна появиться
+  // сразу при старте, а не при первом отправленном сообщении.
+  ensureReplyColumns().catch((e) => {
+    console.error('[db] ensureReplyColumns failed:', (e as Error).message)
+  })
 
   // ---------------------------------------------------------------------------
   // Socket.io

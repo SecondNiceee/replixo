@@ -8,7 +8,8 @@
 // постоянки бессмысленен (в отличие от эфемерного чата комнаты).
 // ---------------------------------------------------------------------------
 
-import { dbPool } from '../db'
+import { dbPool, ensureReplyColumns } from '../db'
+import { REPLY_TEXT_LIMIT, type MessageReply } from '../reply'
 
 export interface DmIdentity {
   userId: string
@@ -183,7 +184,7 @@ export interface StoredNotification {
 /**
  * Прочитать уведомление вместе с именем актора и счётчиком непрочитанных.
  *
- * `recipientId` в условии обязателен: id уведомления приходит от Next-роута, и
+ * `recipientId` в условии обязателен: id уведомления ��риходит от Next-роута, и
  * привязка к получателю гарантирует, что чужая запись не уйдёт в чужую комнату
  * даже при ошибке на стороне вызывающего.
  */
@@ -357,6 +358,42 @@ export async function markRead(
 }
 
 /**
+ * Снимок цитаты для ответа — строго из БД и только из того же диалога. Клиент
+ * присылает лишь id оригинала, поэтому вложить в уста собеседника чужие слова
+ * через подделанную цитату нельзя. null — оригинала нет (или он удалён).
+ */
+export async function resolveReply(
+  conversationId: string,
+  replyToId: string,
+): Promise<MessageReply | null> {
+  if (!dbPool) return null
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT m."senderId", m."text", m."attachment", u."name", u."username"
+       FROM "dm_message" m
+       JOIN "user" u ON u."id" = m."senderId"
+       WHERE m."id" = $1 AND m."conversationId" = $2 AND m."deletedAt" IS NULL
+       LIMIT 1`,
+      [replyToId, conversationId],
+    )
+    if (rows.length === 0) return null
+    const row = rows[0]
+    const attachment = row.attachment as { name?: unknown } | null
+    return {
+      id: replyToId,
+      authorId: row.senderId as string,
+      author: String(row.username ?? row.name ?? '').slice(0, 80),
+      text: String(row.text ?? '').trim().slice(0, REPLY_TEXT_LIMIT),
+      attachmentName:
+        attachment && typeof attachment.name === 'string' ? attachment.name.slice(0, 120) : null,
+    }
+  } catch (e) {
+    console.error('[dm] resolveReply failed:', (e as Error).message)
+    return null
+  }
+}
+
+/**
  * Записать сообщение в одной транзакции:
  *   membership → INSERT сообщения → указатель последнего сообщения →
  *   инкремент непрочитанных у всех, кроме отправителя.
@@ -371,8 +408,10 @@ export async function insertMessage(msg: {
   senderId: string
   text: string
   attachment?: DmAttachment | null
+  replyTo?: MessageReply | null
 }): Promise<InsertedMessage | null> {
   if (!dbPool) return null
+  await ensureReplyColumns()
   const client = await dbPool.connect()
   try {
     await client.query('BEGIN')
@@ -390,8 +429,8 @@ export async function insertMessage(msg: {
     // attachment — jsonb: node-postgres сам сериализует объект, но null нужно
     // передать именно как null, а не как строку "null".
     const inserted = await client.query(
-      `INSERT INTO "dm_message" ("id", "conversationId", "senderId", "text", "attachment", "createdAt")
-       VALUES ($1, $2, $3, $4, $5::jsonb, now())
+      `INSERT INTO "dm_message" ("id", "conversationId", "senderId", "text", "attachment", "replyTo", "createdAt")
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, now())
        ON CONFLICT ("id") DO NOTHING
        RETURNING (EXTRACT(EPOCH FROM "createdAt") * 1000)::bigint AS "ts"`,
       [
@@ -400,6 +439,7 @@ export async function insertMessage(msg: {
         msg.senderId,
         msg.text,
         msg.attachment ? JSON.stringify(msg.attachment) : null,
+        msg.replyTo ? JSON.stringify(msg.replyTo) : null,
       ],
     )
 
