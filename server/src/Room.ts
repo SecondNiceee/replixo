@@ -7,7 +7,14 @@ import type {
   WebRtcServer,
 } from 'mediasoup/types'
 import * as mediasoup from 'mediasoup'
-import { mediaCodecs, webRtcTransportOptions, MAX_PEERS_PER_ROOM, iceServers } from './config'
+import {
+  mediaCodecs,
+  webRtcTransportOptions,
+  MAX_PEERS_PER_ROOM,
+  MAX_PRODUCERS_PER_PEER,
+  MAX_CONSUMERS_PER_PEER,
+  iceServers,
+} from './config'
 import { Peer } from './Peer'
 import type {
   TransportCreatedPayload,
@@ -42,8 +49,11 @@ export class Room {
   // Заполняется при создании комнаты из БД и обновляется по мере рисования.
   presentationDrawings: Map<number, string> = new Map()
 
-  private constructor(id: string) {
+  readonly worker: Worker
+
+  private constructor(id: string, worker: Worker) {
     this.id = id
+    this.worker = worker
   }
 
   // ---------------------------------------------------------------------------
@@ -51,7 +61,7 @@ export class Room {
   // ---------------------------------------------------------------------------
 
   static async create(id: string, worker: Worker): Promise<Room> {
-    const room = new Room(id)
+    const room = new Room(id, worker)
     room.router = await worker.createRouter({ mediaCodecs })
     room.webRtcServer = worker.appData.webRtcServer as WebRtcServer | undefined
     return room
@@ -248,6 +258,9 @@ export class Room {
 
     const transport = peer.getTransport(transportId)
     if (!transport) throw new Error(`Transport ${transportId} not found`)
+    if (peer.producers.size >= MAX_PRODUCERS_PER_PEER) {
+      throw new Error(`Too many producers (max ${MAX_PRODUCERS_PER_PEER})`)
+    }
 
     const producer = await transport.produce({ kind, rtpParameters, appData } as Parameters<typeof transport.produce>[0])
 
@@ -272,6 +285,9 @@ export class Room {
   ): Promise<ConsumedPayload> {
     const consumerPeer = this.peers.get(consumerPeerId)
     if (!consumerPeer) throw new Error(`Consumer peer ${consumerPeerId} not found`)
+    if (consumerPeer.consumers.size >= MAX_CONSUMERS_PER_PEER) {
+      throw new Error(`Too many consumers (max ${MAX_CONSUMERS_PER_PEER})`)
+    }
 
     // Find recv transport for this peer (marked by appData.direction)
     let recvTransport: WebRtcTransport | null = null

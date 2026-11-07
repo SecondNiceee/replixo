@@ -105,6 +105,10 @@ interface ComposerTextareaProps {
   disabled: boolean
   /** Чат комнаты режет сообщения на сервере до 2000 символов. */
   maxLength?: number
+  /** Смена значения ставит фокус в поле (например, при выборе «Ответить»). */
+  focusKey?: string | null
+  /** Escape в поле — например, отмена ответа. */
+  onEscape?: () => void
 }
 
 /**
@@ -119,9 +123,15 @@ export function ComposerTextarea({
   onPaste,
   disabled,
   maxLength = MAX_LENGTH,
+  focusKey,
+  onEscape,
 }: ComposerTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const rulerRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    if (focusKey) textareaRef.current?.focus()
+  }, [focusKey])
 
   // Линейку создаём один раз на компонент и убираем за собой: она живёт в
   // document.body, а не в React-дереве, поэтому сама не удалится.
@@ -176,6 +186,11 @@ export function ComposerTextarea({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === 'Escape' && onEscape && !e.nativeEvent.isComposing) {
+        e.preventDefault()
+        onEscape()
+        return
+      }
       // Enter отправляет, Shift+Enter — перенос строки. Во время набора
       // иероглифов (CJK IME) Enter подтверждает композицию, а не отправляет.
       if (e.key !== 'Enter' || e.shiftKey) return
@@ -183,7 +198,7 @@ export function ComposerTextarea({
       e.preventDefault()
       onSubmit()
     },
-    [onSubmit],
+    [onSubmit, onEscape],
   )
 
   return (
@@ -204,7 +219,11 @@ export function ComposerTextarea({
     // py-2.5 (10px сверху и снизу) вместе со строкой в 20px (leading-5) даёт
     // ровно 40px — высоту кнопок size-10, чтобы скрепка и отправка стояли по
     // центру строки. При росте поля кнопки остаются по центру последней строки.
-    <div className="flex-1 rounded-md bg-foreground/5 py-2.5 pl-4 pr-2 transition-colors focus-within:bg-card focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring">
+    //
+    // Отступы слева и справа одинаковые (px-4). Раньше справа стоял pr-2 «под
+    // полосу прокрутки», но текст переносился по той же границе, и при наборе
+    // справа от него оставалось вдвое меньше места, чем слева.
+    <div className="flex-1 rounded-md bg-foreground/5 px-4 py-2.5 transition-colors focus-within:bg-card focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring">
       <textarea
         ref={textareaRef}
         value={value}
@@ -224,8 +243,8 @@ export function ComposerTextarea({
         //
         // scroll-hairline: полоса вдвое уже обычной (4px). Общий .scroll-slim в
         // поле высотой в пару строк выглядит непропорционально широким, а совсем
-        // без полосы не видно, что текст уехал за верхний край. Гуттер ей даёт
-        // pr-2 на обёртке, чтобы полоса не липла к краю.
+        // без полосы не видно, что текст уехал за верхний край. От края её
+        // отделяет тот же px-4 обёртки.
         className="scroll-hairline block w-full resize-none select-text bg-transparent p-0 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
       />
     </div>

@@ -10,6 +10,7 @@ import {
   setPeerSocket,
   getPeerClient,
   setPeerClient,
+  verifyPeerToken,
   isClosing,
   DISCONNECT_GRACE_MS,
   CLOSE_GRACE_MS,
@@ -44,7 +45,7 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   socket.on(
     'rejoinProbe',
     (
-      { roomId: rawRoomId, peerId, clientId }: { roomId: string; peerId: string; clientId?: string },
+      { roomId: rawRoomId, peerId, clientId, peerToken }: { roomId: string; peerId: string; clientId?: string; peerToken?: string },
       callback: Callback<void>,
     ) => {
       const roomId = canonicalRoomCode(rawRoomId)
@@ -54,6 +55,12 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
       const room = rooms.get(roomId)
       if (!room || !room.hasPeer(peerId)) {
         return err(callback as Callback<never>, 'peer evicted')
+      }
+      // Without the owner's token a probe could rebind a disconnected peer's
+      // seat (and its live producers) to a foreign socket.
+      if (!verifyPeerToken(roomId, peerId, peerToken)) {
+        console.warn(`[socket] Rejoin rejected (bad token) room=${roomId} peer=${peerId} socket=${socket.id}`)
+        return err(callback as Callback<never>, 'invalid peer token')
       }
       // A probe from a DIFFERENT page instance must not silently steal the peer:
       // it owns no transports or producers, so the takeover would leave a mute,

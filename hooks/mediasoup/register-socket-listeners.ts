@@ -4,6 +4,7 @@ import { normalizeSource } from "./types"
 import type { Consumer, MediaSource, Transport, ChatAttachment } from "./types"
 import type { Action } from "./reducer"
 import { useRoomTypingStore } from "@/stores/room-typing-store"
+import { normalizeReply } from "@/lib/chat/reply"
 
 const typingStore = () => useRoomTypingStore.getState()
 
@@ -129,9 +130,12 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
     dispatch({ type: "PEER_VIDEO_PAUSED", peerId: remotePeerId, paused: !!paused })
   })
 
-  socket.on("chatMessage", (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }) => {
+  socket.on("chatMessage", (msg: { id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null; replyTo?: unknown }) => {
     if (!msg || typeof msg.id !== "string") return
-    dispatch({ type: "ADD_MESSAGE", message: { ...msg, self: false, attachment: msg.attachment ?? null } })
+    dispatch({
+      type: "ADD_MESSAGE",
+      message: { ...msg, self: false, attachment: msg.attachment ?? null, replyTo: normalizeReply(msg.replyTo) },
+    })
   })
 
   // typing:false can be lost (tab closed, network drop), so every "typing"

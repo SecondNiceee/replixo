@@ -58,6 +58,7 @@ export async function GET(
       senderId: directMessage.senderId,
       text: directMessage.text,
       attachment: directMessage.attachment,
+      replyTo: directMessage.replyTo,
       createdAt: directMessage.createdAt,
     })
     .from(directMessage)

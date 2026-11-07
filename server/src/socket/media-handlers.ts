@@ -1,4 +1,3 @@
-import type { Worker } from 'mediasoup/types'
 import { Peer } from '../Peer'
 import { getRoomMessages, getRoomReadMarkers } from '../db'
 import type {
@@ -13,11 +12,17 @@ import type {
   CloseProducerPayload,
   PauseProducerPayload,
 } from '../types'
-import { ack, err, type Callback, type HandlerContext } from './helpers'
+import { ack, err, createRateLimiter, type Callback, type HandlerContext } from './helpers'
 import { canonicalRoomCode } from '../room-code'
-import { MAX_PEERS_PER_ROOM } from '../config'
+import { MAX_PEERS_PER_ROOM, MAX_ROOMS, MAX_ROOM_CREATIONS_PER_IP, ROOM_CREATE_WINDOW_MS } from '../config'
+import { clientIp, createKeyedRateLimiter } from '../limits'
 import {
   rooms,
+  isRoomKnown,
+  roomCount,
+  hasPeerToken,
+  verifyPeerToken,
+  issuePeerToken,
   clearPendingDisconnect,
   getPeerSocket,
   setPeerSocket,
@@ -67,8 +72,13 @@ async function optional<T>(promise: Promise<T>, ms: number, label: string, fallb
   }
 }
 
-export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void {
+const allowRoomCreationFromIp = createKeyedRateLimiter(MAX_ROOM_CREATIONS_PER_IP, ROOM_CREATE_WINDOW_MS)
+
+export function registerMediaHandlers(ctx: HandlerContext): void {
   const { io, socket, session } = ctx
+  const ip = clientIp(socket.handshake.headers, socket.handshake.address)
+  // Normal clients join once per (re)connect; this only stops join floods.
+  const allowJoin = createRateLimiter(10, 10_000)
 
   const ownsPeer = (roomId: string, peerId: string): boolean => (
     session.roomId === roomId &&
@@ -93,11 +103,18 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
   socket.on(
     'joinRoom',
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
-      const { peerId, displayName, rtpCapabilities, create, clientId } = payload ?? {}
+      const { peerId, displayName, rtpCapabilities, create, clientId, peerToken } = payload ?? {}
       const roomId = canonicalRoomCode(payload?.roomId)
 
       try {
-        if (!roomId || typeof peerId !== 'string' || !peerId || typeof displayName !== 'string' || !displayName.trim()) {
+        if (!allowJoin()) {
+          return err(callback as Callback<never>, 'Слишком много попыток входа, подождите немного')
+        }
+        if (
+          !roomId ||
+          typeof peerId !== 'string' || !peerId || peerId.length > 128 ||
+          typeof displayName !== 'string' || !displayName.trim()
+        ) {
           return err(callback as Callback<never>, 'Некорректные данные подключения')
         }
         // Комната ещё не поднята — пускаем только того, кто пришёл её создавать,
@@ -106,6 +123,27 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         // поднимает комнату).
         if (!create && !rooms.has(roomId) && !isRoomCreationAllowed(roomId)) {
           return err(callback as Callback<never>, 'Комната не найдена')
+        }
+
+        if (!isRoomKnown(roomId)) {
+          if (roomCount() >= MAX_ROOMS) {
+            console.warn(`[room] Room limit reached (${MAX_ROOMS}), rejected room=${roomId} ip=${ip}`)
+            return err(callback as Callback<never>, 'Сервер перегружен, попробуйте чуть позже')
+          }
+          if (!allowRoomCreationFromIp(ip)) {
+            console.warn(`[room] Room creation rate limit ip=${ip} room=${roomId}`)
+            return err(callback as Callback<never>, 'Слишком много новых комнат, попробуйте позже')
+          }
+        }
+
+        // This peerId is already seated (live or within its reconnect grace
+        // window). Only its owner — who holds the server-issued token — may take
+        // the seat over; anyone else who merely saw the peerId in `peerJoined`
+        // is refused instead of kicking the real participant out.
+        const alreadyOwnedBySocket = getPeerSocket(roomId, peerId) === socket.id
+        if (!alreadyOwnedBySocket && hasPeerToken(roomId, peerId) && !verifyPeerToken(roomId, peerId, peerToken)) {
+          console.warn(`[room] Peer takeover rejected (bad token) room=${roomId} peer=${peerId} socket=${socket.id} ip=${ip}`)
+          return err(callback as Callback<never>, 'Этот участник уже в комнате с другого устройства')
         }
 
         if (session.roomId && session.peerId && (session.roomId !== roomId || session.peerId !== peerId)) {
@@ -146,7 +184,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         // доски из БД. Если worker мёртв или база висит, промис может не
         // зарезолвиться никогда — ограничиваем и отвечаем ошибкой, чтобы клиент
         // показал её вместо бесконечного спиннера.
-        const room = await withTimeout(getOrCreateRoom(roomId, worker), 15_000, 'getOrCreateRoom')
+        const room = await withTimeout(getOrCreateRoom(roomId), 15_000, 'getOrCreateRoom')
         const repeatedJoin = room.hasPeer(peerId) && getPeerSocket(roomId, peerId) === socket.id
 
         if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, `Room is full (max ${MAX_PEERS_PER_ROOM} participants)`)
@@ -165,6 +203,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         session.peerId = peerId
         setPeerSocket(roomId, peerId, socket.id)
         setPeerClient(roomId, peerId, typeof clientId === 'string' ? clientId : undefined)
+        const issuedPeerToken = issuePeerToken(roomId, peerId)
         socket.join(roomId)
 
         const existingPeers = room.getExistingPeersFor(peerId)
@@ -192,6 +231,7 @@ export function registerMediaHandlers(ctx: HandlerContext, worker: Worker): void
         }
 
         ack(callback, {
+          peerToken: issuedPeerToken,
           rtpCapabilities: room.getRtpCapabilities(),
           existingPeers,
           currentSlide: room.currentSlide ?? null,

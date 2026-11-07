@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/hooks/use-mediasoup"
 import { AttachmentView } from "@/components/chat/attachment-view"
 import { MessageText } from "@/components/chat/message-text"
+import { ReplyQuote } from "@/components/chat/reply-quote"
 import { formatTime, isImageAttachment } from "@/lib/chat-format"
 import { colorForPeer, isReadByEveryone } from "./chat-helpers"
 
@@ -18,6 +19,8 @@ interface ChatMessageListProps {
   // Currently connected remote peer ids, used to decide when a message has
   // been read by everyone else in the room.
   peerIds: string[]
+  // Own peerId — quotes of my own messages are labelled «Вы».
+  selfPeerId: string
 }
 
 interface ChatMessageItemProps {
@@ -26,6 +29,7 @@ interface ChatMessageItemProps {
   isFirstUnread: boolean
   isUnread: boolean
   isRead: boolean
+  selfPeerId: string
 }
 
 // Each message only receives primitives, so typing in the composer or a new
@@ -36,6 +40,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   isFirstUnread,
   isUnread,
   isRead,
+  selfPeerId,
 }: ChatMessageItemProps) {
   const photo = !!m.attachment && isImageAttachment(m.attachment)
   return (
@@ -49,7 +54,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
           <span className="h-px flex-1 bg-primary/40" />
         </div>
       )}
-      <div className={cn("flex flex-col gap-0.5", m.self ? "items-end" : "items-start")}>
+      <div data-message-id={m.id} className={cn("flex flex-col gap-0.5", m.self ? "items-end" : "items-start")}>
         <div className="flex items-baseline gap-2">
           <span
             className={cn(
@@ -79,6 +84,14 @@ const ChatMessageItem = memo(function ChatMessageItem({
             isUnread && !m.self && "ring-1 ring-primary/50",
           )}
         >
+          {m.replyTo && (
+            <ReplyQuote
+              reply={m.replyTo}
+              selfAuthorId={selfPeerId}
+              self={m.self}
+              className={photo ? "mx-2 mb-1.5 mt-2" : undefined}
+            />
+          )}
           {m.attachment && (
             <AttachmentView
               attachment={m.attachment}
@@ -100,6 +113,7 @@ export const ChatMessageList = memo(function ChatMessageList({
   unreadFromIndex,
   readMarkers,
   peerIds,
+  selfPeerId,
 }: ChatMessageListProps) {
   if (messages.length === 0) {
     return (
@@ -123,6 +137,7 @@ export const ChatMessageList = memo(function ChatMessageList({
           isFirstUnread={hasUnread && i === unreadFromIndex}
           isUnread={hasUnread && i >= (unreadFromIndex as number)}
           isRead={m.self && isReadByEveryone(m.timestamp, peerIds, readMarkers)}
+          selfPeerId={selfPeerId}
         />
       ))}
     </ul>

@@ -3,8 +3,9 @@
 import { useCallback } from "react"
 import type { Socket } from "socket.io-client"
 import type { ChatAttachment } from "./types"
-import { SERVER_URL } from "./types"
+import { SERVER_URL, getPeerToken } from "./types"
 import type { Action } from "./reducer"
+import type { ReplyRef } from "@/lib/chat/reply"
 
 interface UseChatParams {
   roomId: string
@@ -21,7 +22,7 @@ export function useChat({
   socketRef,
   dispatch,
 }: UseChatParams) {
-  const sendChatMessage = useCallback((text: string, attachment?: ChatAttachment | null) => {
+  const sendChatMessage = useCallback((text: string, attachment?: ChatAttachment | null, replyTo?: ReplyRef | null) => {
     const trimmed = text.trim().slice(0, 2000)
     if (!trimmed && !attachment) return
     const socket = socketRef.current
@@ -34,6 +35,7 @@ export function useChat({
       text: trimmed,
       id,
       ...(attachment ? { attachment } : {}),
+      ...(replyTo ? { replyTo } : {}),
     })
     dispatch({
       type: "ADD_MESSAGE",
@@ -45,6 +47,7 @@ export function useChat({
         timestamp: Date.now(),
         self: true,
         attachment: attachment ?? null,
+        replyTo: replyTo ?? null,
       },
     })
   }, [roomId, displayName, peerIdRef, socketRef, dispatch])
@@ -54,6 +57,10 @@ export function useChat({
     form.append("file", file)
     const res = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/upload`, {
       method: "POST",
+      headers: {
+        "X-Peer-Id": peerIdRef.current,
+        "X-Peer-Token": getPeerToken(roomId) ?? "",
+      },
       body: form,
     })
     if (!res.ok) {
@@ -65,7 +72,7 @@ export function useChat({
       throw new Error(message)
     }
     return (await res.json()) as ChatAttachment
-  }, [roomId])
+  }, [roomId, peerIdRef])
 
   const markChatRead = useCallback((ts: number) => {
     if (!Number.isFinite(ts) || ts <= 0) return

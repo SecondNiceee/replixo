@@ -5,11 +5,14 @@ import { rememberProducerTransport, isProducerOnStaleTransport } from "./mediaso
 
 import { useEffect, useRef, useCallback, useReducer } from "react"
 import { io } from "socket.io-client"
+import { normalizeReply } from "@/lib/chat/reply"
 import type { Socket } from "socket.io-client"
 import {
   SERVER_URL,
   CLIENT_ID,
   getOrCreatePeerId,
+  getPeerToken,
+  setPeerToken,
 } from "@/hooks/mediasoup/types"
 import type { ChatAttachment, ScreenQuality, Consumer, Transport, Producer, DeviceType } from "./mediasoup/types"
 
@@ -265,7 +268,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       recoveryInFlightRef.current = false
       void rebuildConnectionRef.current("manual-probe-timeout")
     }, 8000)
-    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID }, (error: string | null) => {
+    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, peerToken: getPeerToken(roomId) }, (error: string | null) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
@@ -380,13 +383,14 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
 
       type JoinAck = {
+        peerToken?: string
         rtpCapabilities: object
         existingPeers: Array<{
           peerId: string
           displayName: string
           producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
         }>
-        messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null }>
+        messages?: Array<{ id: string; peerId: string; displayName: string; text: string; timestamp: number; attachment?: ChatAttachment | null; replyTo?: unknown }>
         readMarkers?: Array<{ peerId: string; ts: number }>
         whiteboardOpen?: boolean
         whiteboardSnapshot?: string | null
@@ -403,6 +407,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
             return
           }
+
+          if (typeof data.peerToken === "string" && data.peerToken) setPeerToken(roomId, data.peerToken)
 
           await device.load({ routerRtpCapabilities: data.rtpCapabilities })
           dispatch({ type: "CONNECTED", localStream })
@@ -424,6 +430,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   text: m.text, timestamp: m.timestamp,
                   self: m.peerId === peerIdRef.current,
                   attachment: m.attachment ?? null,
+                  replyTo: normalizeReply(m.replyTo),
                 },
               })
             }
@@ -603,7 +610,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
       socket.emit(
         "joinRoom",
-        { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, displayName, rtpCapabilities: {}, create },
+        {
+          roomId,
+          peerId: peerIdRef.current,
+          clientId: CLIENT_ID,
+          peerToken: getPeerToken(roomId),
+          displayName,
+          rtpCapabilities: {},
+          create,
+        },
         (error: string | null, data: JoinAck | undefined) => {
           if (ackSettled) return
           ackSettled = true
@@ -682,7 +697,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       } catch (error) {
         joinInFlightRef.current = false
         console.error(`[media] Rebuild failed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`, error)
-        dispatch({ type: "ERROR", error: "Не удалось восстановить аудио/видео. Переподключитесь к комнате." })
+        dispatch({ type: "ERROR", error: "Не удалось восст��новить аудио/видео. Переподключитесь к комнате." })
       } finally {
         recoveryInFlightRef.current = false
       }
@@ -707,7 +722,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         recoveryInFlightRef.current = false
         void rebuildMediaSession("rejoin-probe-timeout")
       }, 8000)
-      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID }, (error: string | null) => {
+      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, peerToken: getPeerToken(roomId) }, (error: string | null) => {
         if (settled) return
         settled = true
         clearTimeout(timeout)
@@ -803,7 +818,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const sendLeaveBeacon = () => {
       if (!hasJoinedRef.current) return
       if (typeof navigator === "undefined" || !navigator.sendBeacon) return
-      const url = `${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/leave?peerId=${encodeURIComponent(peerIdRef.current)}`
+      const token = getPeerToken(roomId) ?? ""
+      const url = `${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/leave?peerId=${encodeURIComponent(peerIdRef.current)}&token=${encodeURIComponent(token)}`
       try { navigator.sendBeacon(url) } catch { /* best-effort */ }
     }
     const onPageHide = (e: PageTransitionEvent) => {

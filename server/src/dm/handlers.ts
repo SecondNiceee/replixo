@@ -4,6 +4,7 @@ import {
   areFriends,
   friendLinkState,
   insertMessage,
+  resolveReply,
   isMember,
   listMemberIds,
   markRead,
@@ -123,7 +124,7 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       respond(cb, { ok: false, error: 'bad_payload' })
       return
     }
-    const { conversationId, id, text, attachment } = payload as Record<string, unknown>
+    const { conversationId, id, text, attachment, replyToId } = payload as Record<string, unknown>
 
     if (
       typeof conversationId !== 'string' ||
@@ -172,6 +173,13 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       }
     }
 
+    // Цитату собираем из БД того же диалога; если оригинал не нашёлся,
+    // сообщение уходит как обычное, а не теряется целиком.
+    const replyTo =
+      typeof replyToId === 'string' && replyToId && replyToId.length <= MAX_ID_LENGTH
+        ? await resolveReply(conversationId, replyToId)
+        : null
+
     // Membership проверяется внутри транзакции: null = не участник.
     const stored = await insertMessage({
       id,
@@ -179,6 +187,7 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       senderId,
       text: trimmed,
       attachment: safeAttachment ?? null,
+      replyTo,
     })
     if (!stored) {
       respond(cb, { ok: false, error: 'not_member' })
@@ -196,6 +205,7 @@ export function registerDmHandlers(nsp: Namespace, socket: Socket): void {
       senderName: data.name ?? '',
       text: trimmed,
       attachment: safeAttachment ?? null,
+      replyTo,
       createdAt: stored.createdAt,
     }
 

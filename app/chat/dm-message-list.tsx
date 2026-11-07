@@ -4,6 +4,7 @@ import { Check, CheckCheck, Clock, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AttachmentView } from '@/components/chat/attachment-view'
 import { MessageText } from '@/components/chat/message-text'
+import { ReplyQuote } from '@/components/chat/reply-quote'
 import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatTime, isImageAttachment } from '@/lib/chat-format'
 import { FAVORITES_EMPTY_TEXT, type DmMessage } from './types'
@@ -74,7 +75,12 @@ export function DmMessageList({
               </div>
             )}
 
-            <div className={cn('flex flex-col gap-0.5', self ? 'items-end' : 'items-start')}>
+            <div
+              // По этому атрибуту контекстное меню узнаёт, по какому сообщению
+              // кликнули, а цитата находит оригинал для прокрутки.
+              data-message-id={m.id}
+              className={cn('flex flex-col gap-0.5', self ? 'items-end' : 'items-start')}
+            >
               <div
                 className={cn(
                   'flex max-w-[85%] flex-col overflow-hidden rounded-2xl text-sm leading-relaxed',
@@ -87,6 +93,15 @@ export function DmMessageList({
                   photo ? 'gap-0' : 'gap-2 px-3 py-2',
                 )}
               >
+                {m.replyTo && (
+                  <ReplyQuote
+                    reply={m.replyTo}
+                    selfAuthorId={selfId}
+                    self={self}
+                    // У фото пузырь без отступов — цитате их возвращаем.
+                    className={photo ? 'mx-2 mb-1.5 mt-2' : undefined}
+                  />
+                )}
                 {m.attachment && (
                   <AttachmentView
                     attachment={m.attachment}

@@ -1,8 +1,9 @@
-import type { Worker } from 'mediasoup/types'
+import { randomBytes, timingSafeEqual } from 'crypto'
 import type { Server } from 'socket.io'
 import { Room } from '../Room'
 import { deleteRoomMessages, getWhiteboard, getPresentationDrawings, saveCallSession } from '../db'
 import { deleteRoomUploads } from '../uploads'
+import { acquireWorker, releaseWorker } from '../workers'
 
 // ---------------------------------------------------------------------------
 // In-memory room store shared by all handler modules
@@ -42,6 +43,46 @@ export function setPeerClient(roomId: string, peerId: string, clientId: string |
   const key = roomPeerKey(roomId, peerId)
   if (clientId) peerClients.set(key, clientId)
   else peerClients.delete(key)
+}
+
+// roomId + peerId → secret peer token. peerId is NOT secret: every participant
+// learns everyone else's peerId from `peerJoined`. Without a second factor any
+// participant could join with a victim's peerId, get the victim kicked as a
+// "duplicate tab" and take over their seat. The token is issued by the server
+// on the first join, kept by the client in localStorage (so a reload or a
+// second tab of the same browser still proves ownership) and required for
+// every operation that claims an already-present peer: join takeover,
+// rejoinProbe, the leave beacon and chat uploads. Dropped on eviction, so a
+// departed peerId becomes free to claim again.
+const peerTokens = new Map<string, string>()
+
+export function hasPeerToken(roomId: string, peerId: string): boolean {
+  return peerTokens.has(roomPeerKey(roomId, peerId))
+}
+
+export function verifyPeerToken(roomId: string, peerId: string, token: unknown): boolean {
+  const expected = peerTokens.get(roomPeerKey(roomId, peerId))
+  if (!expected || typeof token !== 'string' || token.length !== expected.length) return false
+  return timingSafeEqual(Buffer.from(token), Buffer.from(expected))
+}
+
+/** Return the peer's existing token or mint a new one. */
+export function issuePeerToken(roomId: string, peerId: string): string {
+  const key = roomPeerKey(roomId, peerId)
+  let token = peerTokens.get(key)
+  if (!token) {
+    token = randomBytes(24).toString('base64url')
+    peerTokens.set(key, token)
+  }
+  return token
+}
+
+/** The peer is currently in the live room and presented its own token. */
+export function isAuthenticRoomPeer(roomId: string, peerId: unknown, token: unknown): boolean {
+  if (typeof peerId !== 'string' || !peerId) return false
+  const room = rooms.get(roomId)
+  if (!room || !room.hasPeer(peerId)) return false
+  return verifyPeerToken(roomId, peerId, token)
 }
 
 // roomId + peerId → pending-removal timer. When a socket drops (phone locks/backgrounds,
@@ -135,6 +176,7 @@ export function evictPeer(io: Server, roomId: string, peerId: string, expectedSo
   io.to(roomId).emit('peerLeft', { peerId })
   peerSockets.delete(roomPeerKey(roomId, peerId))
   peerClients.delete(roomPeerKey(roomId, peerId))
+  peerTokens.delete(roomPeerKey(roomId, peerId))
 
   console.log(`[room] Peer ${peerId} evicted from room ${roomId}`)
   cleanupRoomIfEmpty(roomId)
@@ -182,7 +224,17 @@ export function revokeRoomCreation(roomId: string): void {
 // оказываются в разных роутерах. Поэтому все ждут один и тот же промис.
 const pendingRooms = new Map<string, Promise<Room>>()
 
-export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
+/** The room is live or currently being created by someone else. */
+export function isRoomKnown(roomId: string): boolean {
+  return rooms.has(roomId) || pendingRooms.has(roomId)
+}
+
+/** Live rooms plus rooms being created — what MAX_ROOMS is compared against. */
+export function roomCount(): number {
+  return rooms.size + pendingRooms.size
+}
+
+export function getOrCreateRoom(roomId: string): Promise<Room> {
   // pendingRooms проверяем первым: пока комната готовится (router + загрузка
   // доски/рисунков из БД), все входящие ждут один и тот же промис и получают
   // уже полностью загруженное состояние.
@@ -191,15 +243,19 @@ export function getOrCreateRoom(roomId: string, worker: Worker): Promise<Room> {
   const existing = rooms.get(roomId)
   if (existing) return Promise.resolve(existing)
 
-  const creation = createRoom(roomId, worker).finally(() => {
+  const creation = createRoom(roomId).finally(() => {
     pendingRooms.delete(roomId)
   })
   pendingRooms.set(roomId, creation)
   return creation
 }
 
-function createRoom(roomId: string, worker: Worker): Promise<Room> {
-  return Room.create(roomId, worker).then(async (room) => {
+function createRoom(roomId: string): Promise<Room> {
+  const worker = acquireWorker()
+  return Room.create(roomId, worker).catch((e: unknown) => {
+    releaseWorker(worker)
+    throw e
+  }).then(async (room) => {
     // Hydrate any persisted whiteboard state so a board drawn in a previous
     // session (e.g. before a server restart) is restored. No-op without DB.
     try {
@@ -228,6 +284,7 @@ export function cleanupRoomIfEmpty(roomId: string): void {
   const room = rooms.get(roomId)
   if (room && room.isEmpty()) {
     room.close()
+    releaseWorker(room.worker)
     rooms.delete(roomId)
     console.log(`[room] Removed empty room ${roomId}`)
     // Комната уничтожена — стираем всю историю её чата и файловые вложения с

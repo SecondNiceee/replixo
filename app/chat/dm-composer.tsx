@@ -14,6 +14,8 @@ import { SERVER_URL } from '@/hooks/mediasoup/types'
 import { formatFileSize, isImageAttachment } from '@/lib/chat-format'
 import { normalizeAttachment, type DmAttachment } from './types'
 import { ComposerTextarea } from './composer-textarea'
+import { ReplyComposerBar } from '@/components/chat/reply-quote'
+import type { ReplyRef } from '@/lib/chat/reply'
 
 interface DmComposerProps {
   /** Нужен для загрузки: файл кладётся в папку конкретного диалога. */
@@ -25,6 +27,11 @@ interface DmComposerProps {
   disabled: boolean
   /** Есть только у преподавателя: пункт «Конспект» в меню «+». */
   onSendNote?: (note: { id: string; title: string }) => Promise<void>
+  /** Сообщение, на которое отвечаем (плашка над полем). */
+  replyTo: ReplyRef | null
+  onCancelReply: () => void
+  /** Мой id — чтобы подписать цитату своего сообщения «Вы». */
+  selfId: string
 }
 
 /** Больше — неудобно листать превью и незачем: это личный чат, не файлообменник. */
@@ -36,6 +43,9 @@ export function DmComposer({
   onTyping,
   disabled,
   onSendNote,
+  replyTo,
+  onCancelReply,
+  selfId,
 }: DmComposerProps) {
   const [text, setText] = useState('')
   const [notePickerOpen, setNotePickerOpen] = useState(false)
@@ -200,6 +210,8 @@ export function DmComposer({
       onDragOver={(e) => e.preventDefault()}
       className="shrink-0 border-t border-border/60 bg-card/70"
     >
+      {replyTo && <ReplyComposerBar reply={replyTo} selfAuthorId={selfId} onCancel={onCancelReply} />}
+
       {/* Статус загрузки / готовые вложения */}
       {(pendingList.length > 0 || uploading || uploadError) && (
         <div className="flex flex-col gap-2 px-3 pt-3">
@@ -331,6 +343,8 @@ export function DmComposer({
           onSubmit={submit}
           onPaste={handlePaste}
           disabled={disabled}
+          focusKey={replyTo?.id ?? null}
+          onEscape={replyTo ? onCancelReply : undefined}
         />
         <Button
           type="submit"

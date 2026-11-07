@@ -40,6 +40,28 @@ export function ensureRoomDir(roomId: string): string {
   return dir
 }
 
+/** Суммарный размер файлов комнаты в байтах (0, если папки ещё нет). */
+export async function getRoomUploadsSize(roomId: string): Promise<number> {
+  if (!isValidRoomId(roomId)) return 0
+  const dir = roomUploadDir(roomId)
+  let names: string[]
+  try {
+    names = await fsp.readdir(dir)
+  } catch {
+    return 0
+  }
+  let total = 0
+  for (const name of names) {
+    try {
+      const stat = await fsp.stat(path.join(dir, name))
+      if (stat.isFile()) total += stat.size
+    } catch {
+      // Файл удалили между readdir и stat — просто не считаем его.
+    }
+  }
+  return total
+}
+
 /**
  * Удалить все вложения комнаты. Вызывается при уничтожении комнаты, чтобы файлы
  * стирались вместе с ней (без утечки места на диске). Fire-and-forget.

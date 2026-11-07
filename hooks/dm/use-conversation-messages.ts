@@ -8,6 +8,7 @@ import {
   type DmMessage,
   type RawDmMessage,
 } from '@/app/chat/types'
+import type { ReplyRef } from '@/lib/chat/reply'
 
 // ---------------------------------------------------------------------------
 // История одного диалога + отправка через сокет.
@@ -116,7 +117,7 @@ export function useConversationMessages(
 
   // --- Отправка -----------------------------------------------------------
   const emit = useCallback(
-    (id: string, cid: string, text: string, attachment: DmAttachment | null) => {
+    (id: string, cid: string, text: string, attachment: DmAttachment | null, replyToId: string | null) => {
       if (!socket) {
         setMessages((prev) =>
           prev.map((m) => (m.id === id ? { ...m, status: 'failed' } : m)),
@@ -128,7 +129,7 @@ export function useConversationMessages(
         .timeout(ACK_TIMEOUT_MS)
         .emit(
           'dm:send',
-          { conversationId: cid, id, text, attachment },
+          { conversationId: cid, id, text, attachment, replyToId },
           (err: unknown, res: unknown) => {
             if (activeIdRef.current !== cid) return
             const ok = !err && (res as { ok?: boolean } | undefined)?.ok === true
@@ -151,7 +152,7 @@ export function useConversationMessages(
   )
 
   const send = useCallback(
-    (text: string, attachment: DmAttachment | null = null) => {
+    (text: string, attachment: DmAttachment | null = null, replyTo: ReplyRef | null = null) => {
       const cid = conversationId
       const trimmed = text.trim().slice(0, 4000)
       // Файл без подписи — нормальный случай, поэтому пустой текст сам по себе
@@ -164,11 +165,13 @@ export function useConversationMessages(
         senderId: selfId,
         text: trimmed,
         attachment,
+        // Оптимистичная цитата; каноническую соберёт сервер и вернёт в dm:message.
+        replyTo,
         createdAt: Date.now(),
         status: 'sending',
       }
       setMessages((prev) => [...prev, selfMessage])
-      emit(id, cid, trimmed, attachment)
+      emit(id, cid, trimmed, attachment, replyTo?.id ?? null)
     },
     [conversationId, emit, selfId],
   )
@@ -183,7 +186,7 @@ export function useConversationMessages(
         prev.map((m) => (m.id === id ? { ...m, status: 'sending' } : m)),
       )
       // Файл уже лежит на сервере — повторяем то же вложение, заново не грузим.
-      emit(id, cid, target.text, target.attachment)
+      emit(id, cid, target.text, target.attachment, target.replyTo?.id ?? null)
     },
     [conversationId, messages, emit],
   )

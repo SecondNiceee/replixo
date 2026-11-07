@@ -16,6 +16,11 @@ export interface JoinRoomPayload {
   rtpCapabilities: object
   create?: boolean
   /**
+   * Secret issued by the server on the first join of this peerId. Required to
+   * take over a peerId that is already seated in the room.
+   */
+  peerToken?: string
+  /**
    * Nonce generated once per page load. Since `peerId` is stable per browser
    * profile + room, this is what lets the server tell a reconnect of the same
    * page apart from a genuine second tab.
@@ -204,6 +209,8 @@ export interface ChatMessagePayload {
   id?: string
   // Необязательное вложение. Сообщение валидно, если есть text ИЛИ attachment.
   attachment?: ChatMessageAttachment
+  // Цитата при ответе; проверяется sanitizeReply (server/src/reply.ts).
+  replyTo?: unknown
 }
 
 // Server → client (broadcast): a chat message with server-assigned id/timestamp.
