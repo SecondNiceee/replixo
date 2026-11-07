@@ -126,10 +126,18 @@ export function ConversationView({
     onFallback: onReadFallback,
   })
 
+  const contentRef = useRef<HTMLDivElement>(null)
+  const topSentinelRef = useRef<HTMLDivElement>(null)
+  // «Держаться у низа»: true, пока человек сам не отлистал ленту вверх.
+  // Ref, а не state — читается в ResizeObserver без переподписки.
+  const stickToBottomRef = useRef(true)
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX)
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX
+    stickToBottomRef.current = bottom
+    setAtBottom(bottom)
   }, [])
 
   // Полоса прокрутки ленты проявляется только на время скролла. Переподписка по
@@ -138,12 +146,28 @@ export function ConversationView({
   useScrollbarAutohide(scrollRef, [conversationId])
 
   // Автоскролл вниз при новом сообщении и при открытии диалога. Догрузка
-  // старых сообщений сюда не попадает: последний id не меняется.
-  useEffect(() => {
+  // старых сообщений сюда не попадает: последний id не меняется. Layout-эффект —
+  // чтобы первый кадр открытого диалога сразу был внизу, без мелькания сверху.
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
+    stickToBottomRef.current = true
     setAtBottom(true)
-  }, [lastMessageId, conversationId])
+  }, [lastMessageId, conversationId, loading])
+
+  // Фото в ленте не знают своей высоты, пока не загрузятся, и догружаются уже
+  // после прокрутки вниз: каждое раздвигало ленту, и диалог открывался «чуть
+  // выше конца». Пока человек внизу, любой рост контента снова прижимает низ.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    const content = contentRef.current
+    if (!scroller || !content) return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scroller.scrollTop = scroller.scrollHeight
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [conversationId, loading])
 
   // Якорь на время догрузки истории: высота и позиция ленты до вставки.
   const restoreRef = useRef<{ height: number; top: number } | null>(null)
@@ -153,6 +177,24 @@ export function ConversationView({
     if (el) restoreRef.current = { height: el.scrollHeight, top: el.scrollTop }
     void loadMore()
   }, [loadMore])
+
+  // Пагинация вверх: более ранние сообщения грузятся, только когда человек
+  // долистал до верха ленты (с запасом в 200px, чтобы порция успела прийти
+  // до упора). Наблюдатель пересоздаётся после каждой порции: если её не
+  // хватило, чтобы заполнить экран, он сразу сработает ещё раз.
+  useEffect(() => {
+    const root = scrollRef.current
+    const sentinel = topSentinelRef.current
+    if (!root || !sentinel || loading || !hasMore || loadingMore) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) handleLoadMore()
+      },
+      { root, rootMargin: '200px 0px 0px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [loading, hasMore, loadingMore, handleLoadMore, messages.length])
 
   // Вставка старых сообщений увеличивает scrollHeight сверху, и без правки
   // scrollTop лента визуально «улетает» вниз ровно на высоту вставленного
@@ -284,36 +326,27 @@ export function ConversationView({
         onScroll={handleScroll}
         className="chat-canvas scroll-slim min-h-0 flex-1 overflow-y-auto px-4 py-3"
       >
-        {hasMore && (
-          <div className="flex justify-center pb-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="text-xs"
-            >
-              {loadingMore ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                'Показать более ранние'
-              )}
-            </Button>
-          </div>
-        )}
-
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <DmMessageList
-            messages={messages}
-            selfId={selfId}
-            peerReadAt={peerReadAt}
-            isSelfChat={isSelfChat}
-            onRetry={retry}
-          />
+          <div ref={contentRef}>
+            {hasMore && <div ref={topSentinelRef} aria-hidden="true" className="h-px" />}
+            {loadingMore && (
+              <div className="flex justify-center pb-3" role="status">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden="true" />
+                <span className="sr-only">Загружаем более ранние сообщения</span>
+              </div>
+            )}
+            <DmMessageList
+              messages={messages}
+              selfId={selfId}
+              peerReadAt={peerReadAt}
+              isSelfChat={isSelfChat}
+              onRetry={retry}
+            />
+          </div>
         )}
       </div>
 
