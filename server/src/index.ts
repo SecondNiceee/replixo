@@ -7,27 +7,36 @@ import { randomUUID } from 'crypto'
 import express, { type Request, type Response } from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import * as mediasoup from 'mediasoup'
 import fs from 'fs'
 import {
   PORT,
   CLIENT_ORIGIN,
-  workerSettings,
-  webRtcServerOptions,
   UPLOAD_DIR,
   MAX_FILE_SIZE,
   UPLOAD_TTL_MS,
   WINDOWS_INSTALLER_PATH,
   WINDOWS_INSTALLER_NAME,
+  MAX_UPLOADS_PER_IP_PER_MINUTE,
+  ROOM_UPLOAD_QUOTA,
 } from './config'
 import { setupSocketIO } from './socket'
 import { canonicalRoomCode } from './room-code'
-import { evictPeer, markClosing, scheduleEviction, getPeerSocket, CLOSE_GRACE_MS } from './socket/room-registry'
+import {
+  evictPeer,
+  markClosing,
+  scheduleEviction,
+  getPeerSocket,
+  isAuthenticRoomPeer,
+  CLOSE_GRACE_MS,
+} from './socket/room-registry'
 import {
   ensureUploadRoot,
   ensureRoomDir,
+  getRoomUploadsSize,
   sweepOrphanUploads,
 } from './uploads'
+import { clientIp, createKeyedRateLimiter } from './limits'
+import { startWorkers, closeWorkers } from './workers'
 import {
   contentDisposition,
   decodeOriginalName,
@@ -73,8 +82,15 @@ async function main(): Promise<void> {
       setHeaders: (res, filePath) => {
         res.setHeader('X-Content-Type-Options', 'nosniff')
         res.setHeader('Cache-Control', 'private, max-age=86400')
+        // /uploads is served from the app's own origin (nginx proxies it), so a
+        // user file opened directly must never run scripts there. The sandbox
+        // gives the document an opaque origin; <img> previews are unaffected.
+        res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
         const ext = path.extname(filePath).toLowerCase()
-        const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.bmp'].includes(ext)
+        // SVG is deliberately not inline: opened as a page it can execute
+        // <script>. It still renders as a preview through <img>, which ignores
+        // Content-Disposition and never runs scripts.
+        const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp'].includes(ext)
         if (!isImage) {
           // На диске файл называется UUID'ом, поэтому без явного имени браузер
           // сохранил бы «a1b2….pdf». Клиент передаёт исходное имя в ?name=;
@@ -116,6 +132,8 @@ async function main(): Promise<void> {
     limits: { fileSize: MAX_FILE_SIZE, files: 1 },
   })
 
+  const allowRoomUpload = createKeyedRateLimiter(MAX_UPLOADS_PER_IP_PER_MINUTE, 60_000)
+
   app.post(
     '/rooms/:roomId/upload',
     (req: Request, res: Response) => {
@@ -124,7 +142,30 @@ async function main(): Promise<void> {
         res.status(400).json({ error: 'invalid roomId' })
         return
       }
-      upload.single('file')(req, res, (uploadErr: unknown) => {
+      // No account is needed, but the uploader must be a participant of the
+      // live room. Otherwise anyone could write files under made-up room codes
+      // that are never cleaned up with a room (only by the 48 h sweeper).
+      // All checks run before multer, which starts writing to disk at once.
+      if (!isAuthenticRoomPeer(roomId, req.header('x-peer-id'), req.header('x-peer-token'))) {
+        res.status(403).json({ error: 'Загрузка доступна только участникам звонка' })
+        return
+      }
+      if (!allowRoomUpload(clientIp(req.headers, req.socket.remoteAddress))) {
+        res.status(429).json({ error: 'Слишком много файлов, подождите минуту' })
+        return
+      }
+      void getRoomUploadsSize(roomId).then((used) => {
+        if (used >= ROOM_UPLOAD_QUOTA) {
+          res.status(413).json({ error: 'В этой комнате загружено слишком много файлов' })
+          return
+        }
+        receiveRoomUpload(req, res, roomId)
+      })
+    },
+  )
+
+  function receiveRoomUpload(req: Request, res: Response, roomId: string): void {
+    upload.single('file')(req, res, (uploadErr: unknown) => {
         if (uploadErr) {
           const message = (uploadErr as Error).message ?? 'upload failed'
           const tooLarge = message.includes('File too large')
@@ -147,8 +188,7 @@ async function main(): Promise<void> {
           mime: file.mimetype || 'application/octet-stream',
         })
       })
-    },
-  )
+  }
 
   // ---------------------------------------------------------------------------
   // Вложения личных чатов: POST /dm/:conversationId/upload
@@ -282,24 +322,12 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // Mediasoup Worker
   // ---------------------------------------------------------------------------
-  const worker = await mediasoup.createWorker(workerSettings)
-
-  worker.on('died', (error) => {
-    console.error('[mediasoup] Worker died, exiting in 2 seconds...', error)
-    setTimeout(() => process.exit(1), 2000)
-  })
-
-  console.log(`[mediasoup] Worker created (pid: ${worker.pid})`)
-
-  if (webRtcServerOptions) {
-    worker.appData.webRtcServer = await worker.createWebRtcServer(webRtcServerOptions)
-    console.log(`[mediasoup] WebRtcServer listening on port ${webRtcServerOptions.listenInfos[0].port} (udp+tcp)`)
-  }
+  await startWorkers()
 
   // ---------------------------------------------------------------------------
   // Socket.io
   // ---------------------------------------------------------------------------
-  const io = setupSocketIO(httpServer, worker)
+  const io = setupSocketIO(httpServer)
 
   // Маршруты «Next-сервер → сокет-сервер». Регистрируются после io, потому что
   // им нужен namespace /dm для рассылки. Защищены общим секретом.
@@ -319,7 +347,9 @@ async function main(): Promise<void> {
   app.post('/rooms/:roomId/leave', (req: Request, res: Response) => {
     const roomId = canonicalRoomCode(req.params.roomId)
     const peerId = typeof req.query.peerId === 'string' ? req.query.peerId : ''
-    if (!roomId || !peerId) {
+    // Only the peer itself may announce its departure; otherwise anyone who
+    // saw a peerId could shrink that peer's reconnect window to 6 s.
+    if (!roomId || !peerId || !isAuthenticRoomPeer(roomId, peerId, req.query.token)) {
       res.status(204).end()
       return
     }
@@ -362,7 +392,7 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     console.log('[server] Shutting down...')
     clearInterval(sweepTimer)
-    worker.close()
+    closeWorkers()
     httpServer.close(() => process.exit(0))
   }
 

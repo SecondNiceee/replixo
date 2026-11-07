@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import os from 'os'
 import path from 'path'
 import type { RtpCodecCapability, TransportListenIp, WorkerLogTag } from 'mediasoup/types'
 
@@ -86,14 +87,61 @@ export const listenIps: TransportListenIp[] = [
 // from rtcMinPort..rtcMaxPort as before.
 const rtcPort = process.env.RTC_PORT ? parseInt(process.env.RTC_PORT, 10) : null
 
-export const webRtcServerOptions = rtcPort
-  ? {
-      listenInfos: [
-        { protocol: 'udp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port: rtcPort },
-        { protocol: 'tcp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port: rtcPort },
-      ],
-    }
-  : null
+// Number of mediasoup workers. One worker = one CPU core, so with a single
+// worker the second core sits idle. Each worker behind the balancer needs its
+// own port: worker #i listens on RTC_PORT + i, and every such port must be
+// forwarded in balancer-nginx/nginx-18u101-stream.conf. Defaults to 1 so an
+// existing single-port deployment keeps working unchanged.
+export const MEDIASOUP_WORKERS = Math.max(
+  1,
+  Math.min(os.cpus().length || 1, parseInt(process.env.MEDIASOUP_WORKERS ?? '1', 10) || 1),
+)
+
+export function webRtcServerOptionsFor(workerIndex: number) {
+  if (!rtcPort) return null
+  const port = rtcPort + workerIndex
+  return {
+    listenInfos: [
+      { protocol: 'udp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port },
+      { protocol: 'tcp' as const, ip: '0.0.0.0', announcedAddress: announcedIp, port },
+    ],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Abuse limits (protect the single VPS from scripted floods)
+// ---------------------------------------------------------------------------
+
+function intEnv(name: string, fallback: number): number {
+  const value = parseInt(process.env[name] ?? '', 10)
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+// Behind nginx every request comes from the balancer, so the real client IP is
+// taken from X-Real-IP. Set TRUST_PROXY=0 only if port 3001 is exposed directly
+// (then the header could be forged and the socket address is used instead).
+export const TRUST_PROXY = process.env.TRUST_PROXY !== '0'
+
+// Total rooms on this server (live + being created). Each room holds a
+// mediasoup router plus whiteboard state in memory.
+export const MAX_ROOMS = intEnv('MAX_ROOMS', 300)
+// Concurrent call sockets from one IP. Generous enough for a school or office
+// behind one NAT, small enough that one script can't open thousands.
+export const MAX_SOCKETS_PER_IP = intEnv('MAX_SOCKETS_PER_IP', 40)
+// New rooms one IP may create per ROOM_CREATE_WINDOW_MS.
+export const MAX_ROOM_CREATIONS_PER_IP = intEnv('MAX_ROOM_CREATIONS_PER_IP', 20)
+export const ROOM_CREATE_WINDOW_MS = 10 * 60_000
+// A peer normally has at most mic + camera + screen video + screen audio.
+export const MAX_PRODUCERS_PER_PEER = 8
+// Enough for every producer of a full room plus recovery re-consumes.
+export const MAX_CONSUMERS_PER_PEER = 96
+// Room chat attachments: per-IP upload rate and per-room disk quota.
+export const MAX_UPLOADS_PER_IP_PER_MINUTE = intEnv('MAX_UPLOADS_PER_IP_PER_MINUTE', 20)
+export const ROOM_UPLOAD_QUOTA = intEnv('ROOM_UPLOAD_QUOTA', 500 * 1024 * 1024)
+// Socket.io drops any single message above this size. Whiteboard and slide
+// snapshots are accepted up to 5 MB, so the buffer must be a bit larger
+// (the default of 1 MB silently discarded big boards).
+export const SOCKET_MAX_MESSAGE_BYTES = 6 * 1024 * 1024
 
 // ICE servers sent to every WebRTC client.
 //

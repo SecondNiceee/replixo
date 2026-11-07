@@ -3,7 +3,7 @@
 import { useCallback } from "react"
 import type { Socket } from "socket.io-client"
 import type { ChatAttachment } from "./types"
-import { SERVER_URL } from "./types"
+import { SERVER_URL, getPeerToken } from "./types"
 import type { Action } from "./reducer"
 
 interface UseChatParams {
@@ -54,6 +54,10 @@ export function useChat({
     form.append("file", file)
     const res = await fetch(`${SERVER_URL}/rooms/${encodeURIComponent(roomId)}/upload`, {
       method: "POST",
+      headers: {
+        "X-Peer-Id": peerIdRef.current,
+        "X-Peer-Token": getPeerToken(roomId) ?? "",
+      },
       body: form,
     })
     if (!res.ok) {
@@ -65,7 +69,7 @@ export function useChat({
       throw new Error(message)
     }
     return (await res.json()) as ChatAttachment
-  }, [roomId])
+  }, [roomId, peerIdRef])
 
   const markChatRead = useCallback((ts: number) => {
     if (!Number.isFinite(ts) || ts <= 0) return

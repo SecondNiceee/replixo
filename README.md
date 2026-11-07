@@ -43,10 +43,8 @@
 | `INTERNAL_HOOK_SECRET` | Секрет для хука дружбы. **Должен совпадать с `server/.env`** | `openssl rand -hex 32` |
 | `MEDIASOUP_URL` | Приватный адрес сервера для запросов сервер→сервер | `http://localhost:3001` |
 | `NEXT_PUBLIC_MEDIASOUP_URL` | URL Mediasoup сервера | `http://YOUR_SERVER_IP:3001` |
-| `NEXT_PUBLIC_STUN_URL` | STUN сервер | `stun:stun.example.com:3478` |
-| `NEXT_PUBLIC_TURN_URL` | TURN сервер | `turn:turn.example.com:3478` |
-| `NEXT_PUBLIC_TURN_USERNAME` | Логин TURN | `your_username` |
-| `NEXT_PUBLIC_TURN_CREDENTIAL` | Пароль TURN | `your_password` |
+
+> STUN/TURN во фронтенде не настраиваются: сервер передаёт их клиенту сам (см. `server/.env` ниже).
 
 ### Бэкенд — `server/.env` (папка `server/`)
 
@@ -63,6 +61,13 @@
 | `TURN_USERNAME` | Логин TURN | `your_username` |
 | `TURN_CREDENTIAL` | Пароль TURN | `your_password` |
 | `STUN_URL` | STUN сервер | `stun:stun.l.google.com:19302` |
+| `MEDIASOUP_WORKERS` | Число mediasoup-воркеров (1 воркер = 1 ядро). Каждый слушает `RTC_PORT + i` — все эти порты нужно пробросить в балансере | `1` |
+| `MAX_ROOMS` | Максимум комнат на сервере | `300` |
+| `MAX_SOCKETS_PER_IP` | Максимум сокетов звонка с одного IP | `40` |
+| `MAX_ROOM_CREATIONS_PER_IP` | Новых комнат с одного IP за 10 минут | `20` |
+| `MAX_UPLOADS_PER_IP_PER_MINUTE` | Загрузок файлов в чат комнаты с одного IP в минуту | `20` |
+| `ROOM_UPLOAD_QUOTA` | Лимит файлов на одну комнату, байты | `524288000` |
+| `TRUST_PROXY` | `0` — не доверять `X-Real-IP` (если порт 3001 открыт наружу напрямую) | `1` |
 
 > `ANNOUNCED_IP` — самое важное поле. Укажи публичный IP VPS, иначе WebRTC не установит соединение между участниками.
 

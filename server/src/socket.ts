@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'http'
-import type { Worker } from 'mediasoup/types'
 import { Server, Socket } from 'socket.io'
-import { CLIENT_ORIGIN } from './config'
+import { CLIENT_ORIGIN, MAX_SOCKETS_PER_IP, SOCKET_MAX_MESSAGE_BYTES } from './config'
+import { clientIp } from './limits'
 import type { HandlerContext, SocketSession } from './socket/helpers'
 import { registerMediaHandlers } from './socket/media-handlers'
 import { registerChatHandlers } from './socket/chat-handlers'
@@ -25,7 +25,7 @@ import { setupDmNamespace } from './dm/namespace'
 //   helpers.ts               — ack/err, rate limiter, shared types
 // ---------------------------------------------------------------------------
 
-export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
+export function setupSocketIO(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
     cors: {
       origin: CLIENT_ORIGIN,
@@ -37,6 +37,27 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     // at 10 s means three missed pings before the server gives up.
     pingTimeout: 30000,
     pingInterval: 10000,
+    maxHttpBufferSize: SOCKET_MAX_MESSAGE_BYTES,
+  })
+
+  // Cap concurrent call sockets per IP so one script can't open thousands of
+  // connections (each able to hold a room and its mediasoup router).
+  const socketsPerIp = new Map<string, number>()
+  io.use((socket, next) => {
+    const ip = clientIp(socket.handshake.headers, socket.handshake.address)
+    const count = socketsPerIp.get(ip) ?? 0
+    if (count >= MAX_SOCKETS_PER_IP) {
+      console.warn(`[socket] Connection limit reached ip=${ip} (${MAX_SOCKETS_PER_IP})`)
+      next(new Error('Слишком много подключений с одного адреса'))
+      return
+    }
+    socketsPerIp.set(ip, count + 1)
+    socket.once('disconnect', () => {
+      const remaining = (socketsPerIp.get(ip) ?? 1) - 1
+      if (remaining > 0) socketsPerIp.set(ip, remaining)
+      else socketsPerIp.delete(ip)
+    })
+    next()
   })
 
   io.on('connection', (socket: Socket) => {
@@ -47,7 +68,7 @@ export function setupSocketIO(httpServer: HttpServer, worker: Worker): Server {
     const session: SocketSession = { roomId: null, peerId: null }
     const ctx: HandlerContext = { io, socket, session }
 
-    registerMediaHandlers(ctx, worker)
+    registerMediaHandlers(ctx)
     registerChatHandlers(ctx)
     registerWhiteboardHandlers(ctx)
     registerPresentationHandlers(ctx)

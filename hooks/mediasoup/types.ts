@@ -361,3 +361,41 @@ export function getOrCreatePeerId(roomId: string): string {
   memoryPeerIds.set(key, peerId)
   return peerId
 }
+
+const PEER_TOKEN_PREFIX = "replixo_peer_token:"
+const memoryPeerTokens = new Map<string, string>()
+
+function peerTokenKey(roomId: string): string {
+  const room = (roomId ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")
+  return `${PEER_TOKEN_PREFIX}${room || "default"}`
+}
+
+/**
+ * Secret the server issues on the first join of this peerId. It proves we own
+ * the peerId (which other participants can see) when reconnecting, reloading,
+ * uploading or leaving. Kept in localStorage next to the peerId so a reload or
+ * a second tab of this browser is still recognised as the same participant.
+ */
+export function getPeerToken(roomId: string): string | undefined {
+  const key = peerTokenKey(roomId)
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem(key)
+      if (stored) return stored
+    } catch {
+      // Storage blocked — fall back to the in-memory copy.
+    }
+  }
+  return memoryPeerTokens.get(key)
+}
+
+export function setPeerToken(roomId: string, token: string): void {
+  const key = peerTokenKey(roomId)
+  memoryPeerTokens.set(key, token)
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(key, token)
+  } catch {
+    // Storage blocked — the in-memory copy lasts for this page.
+  }
+}

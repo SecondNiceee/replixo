@@ -16,6 +16,11 @@ export interface JoinRoomPayload {
   rtpCapabilities: object
   create?: boolean
   /**
+   * Secret issued by the server on the first join of this peerId. Required to
+   * take over a peerId that is already seated in the room.
+   */
+  peerToken?: string
+  /**
    * Nonce generated once per page load. Since `peerId` is stable per browser
    * profile + room, this is what lets the server tell a reconnect of the same
    * page apart from a genuine second tab.
