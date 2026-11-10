@@ -37,6 +37,9 @@ const REBUILD_COOLDOWN_MS = 30000
 // a slow link, but finite — an unanswered join must surface as an error rather
 // than an endless "Подключение к комнате".
 const JOIN_ACK_TIMEOUT_MS = 15000
+// Сколько раз повторить вход при восстановлении после обрыва, прежде чем
+// показать ошибку: паузы 1, 2, 4, 8, 8 с — около 40 с на восстановление сети.
+const MAX_RECOVERY_JOIN_RETRIES = 5
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -103,6 +106,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const joinInFlightRef = useRef(false)
   const connectionGenerationRef = useRef(0)
   const recoveryInFlightRef = useRef(false)
+  // Был ли участник уже в комнате в этой сессии. Неудачный вход при
+  // восстановлении (после обрыва сети) не должен заканчиваться фатальной
+  // ошибкой — человек сидел в звонке, его нужно тихо вернуть повторной попыткой.
+  const wasInRoomRef = useRef(false)
+  const joinRetryCountRef = useRef(0)
+  const joinRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Отмена ожидания ack текущего joinRoom. Если сокет оборвался, ответа на
+  // этот запрос не будет никогда — ждать его 15 с и потом падать бессмысленно.
+  const abortPendingJoinRef = useRef<(() => void) | null>(null)
   const lastRebuildAtRef = useRef(0)
   const rebuildConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
   // Set by the weak-network guard. Read by useTransports so an ICE-recovery
@@ -298,6 +310,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     connectionGenerationRef.current += 1
     joinInFlightRef.current = false
     recoveryInFlightRef.current = false
+    wasInRoomRef.current = false
+    joinRetryCountRef.current = 0
+    if (joinRetryTimerRef.current) clearTimeout(joinRetryTimerRef.current)
+    joinRetryTimerRef.current = null
+    abortPendingJoinRef.current?.()
+    abortPendingJoinRef.current = null
     const socket = socketRef.current
     if (socket) {
       socket.emit("leaveRoom", { roomId, peerId: peerIdRef.current })
@@ -356,18 +374,37 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       if (joinInFlightRef.current || socketRef.current !== socket || connectionGenerationRef.current !== generation) return
       joinInFlightRef.current = true
 
-      // Anything that throws — or never resolves — between here and the end of
+      // Anything that throws �� or never resolves — between here and the end of
       // the ack handler used to leave `status` at "connecting" forever, because
       // the only ways out of the "Подключение к комнате" spinner are CONNECTED
       // and ERROR. Every failure path must therefore clear joinInFlightRef
       // (otherwise later join/rebuild attempts are silently skipped) and report.
-      const failJoin = (message: string, cause?: unknown) => {
+      const isStale = () => socketRef.current !== socket || connectionGenerationRef.current !== generation
+      const failJoin = (message: string, cause?: unknown, retryable = false) => {
         joinInFlightRef.current = false
         console.error(`[media] Join failed room=${roomId} peer=${peerIdRef.current}: ${message}`, cause)
-        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+        if (isStale()) return
         // A failure after we're already in the room is handled by the rebuild
         // logic — don't tear down an established session with a fatal error.
-        if (!hasJoinedRef.current) dispatch({ type: "ERROR", error: message })
+        if (hasJoinedRef.current) return
+        // Повторный вход после обрыва (человек уже сидел в звонке): сеть ещё
+        // «плавает», и один потерянный ответ не повод выкидывать его из комнаты
+        // на экран ошибки. Пробуем ещё несколько раз с нарастающей паузой.
+        if (retryable && wasInRoomRef.current && joinRetryCountRef.current < MAX_RECOVERY_JOIN_RETRIES) {
+          joinRetryCountRef.current += 1
+          const delay = Math.min(1000 * 2 ** (joinRetryCountRef.current - 1), 8000)
+          console.warn(`[media] Recovery join retry ${joinRetryCountRef.current}/${MAX_RECOVERY_JOIN_RETRIES} in ${delay}ms room=${roomId}`)
+          if (joinRetryTimerRef.current) clearTimeout(joinRetryTimerRef.current)
+          joinRetryTimerRef.current = setTimeout(() => {
+            joinRetryTimerRef.current = null
+            if (isStale() || hasJoinedRef.current) return
+            // Сокет сейчас offline — вход запустит обработчик "connect", как
+            // только соединение вернётся.
+            if (socket.connected) void doJoinSequence()
+          }, delay)
+          return
+        }
+        dispatch({ type: "ERROR", error: message })
       }
 
       let device: DeviceType
@@ -413,6 +450,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           await device.load({ routerRtpCapabilities: data.rtpCapabilities })
           dispatch({ type: "CONNECTED", localStream })
           hasJoinedRef.current = true
+          wasInRoomRef.current = true
+          joinRetryCountRef.current = 0
 
           dispatch({
             type: "SET_WHITEBOARD",
@@ -594,7 +633,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           // browser, revoked permission, transport closed mid-setup). Rejections
           // inside a socket.io ack callback are swallowed, so previously
           // CONNECTED was simply never dispatched and the spinner spun forever.
-          failJoin("Не удалось войти в комнату. Попробуйте переподключиться.", e)
+          failJoin("Не удалось войти в комнату. Попробуйте переподключиться.", e, true)
         }
       }
 
@@ -605,8 +644,19 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       const ackTimeout = setTimeout(() => {
         if (ackSettled) return
         ackSettled = true
-        failJoin("Сервер не ответил на запрос входа в комнату. Проверьте соединение и попробуйте снова.")
+        abortPendingJoinRef.current = null
+        failJoin("Сервер не ответил на запрос входа в комнату. Проверьте соединение и попробуйте снова.", undefined, true)
       }, JOIN_ACK_TIMEOUT_MS)
+      // Сокет оборвался, пока мы ждали ответ: этот ack уже не придёт. Снимаем
+      // ожидание сразу, чтобы после переподключения вход пошёл заново, а не
+      // упирался в joinInFlightRef и не заканчивался ошибкой по таймауту.
+      abortPendingJoinRef.current = () => {
+        if (ackSettled) return
+        ackSettled = true
+        clearTimeout(ackTimeout)
+        joinInFlightRef.current = false
+        console.warn(`[media] Join aborted by socket disconnect room=${roomId} peer=${peerIdRef.current}`)
+      }
 
       socket.emit(
         "joinRoom",
@@ -623,6 +673,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           if (ackSettled) return
           ackSettled = true
           clearTimeout(ackTimeout)
+          abortPendingJoinRef.current = null
           void applyJoinAck(error, data)
         },
       )
@@ -755,6 +806,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
     socket.on("disconnect", (reason) => {
       console.warn(`[socket] Disconnected room=${roomId} peer=${peerIdRef.current} socket=${socket.id ?? "none"} reason=${reason}`)
+      abortPendingJoinRef.current?.()
+      abortPendingJoinRef.current = null
     })
 
     registerRoomSocketListeners(socket, {

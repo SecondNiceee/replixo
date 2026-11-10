@@ -74,13 +74,27 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
       const previousSocket = previousSocketId
         ? io.sockets.sockets.get(previousSocketId)
         : undefined
-      if (previousSocketId !== socket.id && previousSocket?.connected) {
+      // The old socket still looks connected. When it belongs to this very page
+      // (same clientId, token checked above) it is a half-open ghost: a page has
+      // one socket, and it is talking to us right now from a new one. The server
+      // only notices a dead TCP connection after pingTimeout, so rejecting here
+      // forced a full media rebuild (everyone saw this person drop out) on every
+      // short network blip. Take the seat over and drop the ghost instead.
+      const sameClientGhost =
+        previousSocketId !== socket.id && !!previousSocket?.connected && !!clientId && ownerClientId === clientId
+      if (previousSocketId !== socket.id && previousSocket?.connected && !sameClientGhost) {
         return err(callback as Callback<never>, 'peer is active on another socket')
       }
 
       // Bind the new generation before cancelling eviction. Every delayed
       // callback checks this mapping and therefore cannot remove this session.
       setPeerSocket(roomId, peerId, socket.id)
+      if (sameClientGhost && previousSocket) {
+        // Rebound first, so the ghost's disconnect handler sees a newer owner
+        // and ignores it instead of scheduling an eviction.
+        console.info(`[socket] Rejoin took over stale socket room=${roomId} peer=${peerId} oldSocket=${previousSocketId} newSocket=${socket.id}`)
+        previousSocket.disconnect(true)
+      }
       if (clientId) setPeerClient(roomId, peerId, clientId)
       clearPendingDisconnect(roomId, peerId)
       socket.join(roomId)
