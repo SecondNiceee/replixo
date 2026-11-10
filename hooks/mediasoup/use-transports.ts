@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import type { Socket } from "socket.io-client"
+import { requestAck } from "./socket-request"
 import type { DeviceType, Transport, Consumer, Producer, MediaSource } from "./types"
 import { normalizeSource } from "./types"
 import type { Action } from "./reducer"
@@ -130,7 +131,7 @@ export function useTransports({
   const restartIceForTransport = useCallback(
     (transport: Transport | null, attempt = 0) => {
       const socket = socketRef.current
-      if (!socket || !transport || transport.closed) return
+      if (!socket?.connected || !transport || transport.closed) return
       // One restart at a time per transport. The flag is now held until the ICE
       // result is actually verified (below), so the storm of `connectionstatechange`
       // events plus the visibility/online/pageshow recovery hooks can no longer
@@ -226,83 +227,68 @@ export function useTransports({
   // Create a single WebRTC transport (send or recv)
   // ---------------------------------------------------------------------------
   const createTransport = useCallback(
-    (socket: Socket, device: DeviceType, direction: "send" | "recv"): Promise<Transport> => {
-      return new Promise((resolve, reject) => {
-        socket.emit(
-          "createWebRtcTransport",
-          { roomId, peerId: peerIdRef.current, direction },
-          (error: string | null, transportData: {
-            transportId: string
-            iceParameters: object
-            iceCandidates: object[]
-            dtlsParameters: object
-            iceServers: object[]
-          } | undefined) => {
-            if (error || !transportData) {
-              reject(new Error(`createWebRtcTransport ${direction}: ${error}`))
-              return
-            }
+    async (socket: Socket, device: DeviceType, direction: "send" | "recv", signal?: AbortSignal): Promise<Transport> => {
+      const transportData = await requestAck<{
+        transportId: string
+        iceParameters: object
+        iceCandidates: object[]
+        dtlsParameters: object
+        iceServers: object[]
+      }>(socket, "createWebRtcTransport", { roomId, peerId: peerIdRef.current, direction }, { signal })
+      if (signal?.aborted || !transportData) throw new Error("Transport setup interrupted")
+      // Device/Transport типизированы как any (см. types.ts) — mediasoup-client
+      // сам валидирует параметры, дополнительные касты не нужны.
+      const opts = {
+        id: transportData.transportId,
+        iceParameters: transportData.iceParameters,
+        iceCandidates: transportData.iceCandidates as RTCIceCandidate[],
+        dtlsParameters: transportData.dtlsParameters,
+        iceServers: transportData.iceServers as RTCIceServer[],
+      }
 
-            // Device/Transport типизированы как any (см. types.ts) — mediasoup-client
-            // сам валидирует параметры, дополнительные касты не нужны.
-            const opts = {
-              id: transportData.transportId,
-              iceParameters: transportData.iceParameters,
-              iceCandidates: transportData.iceCandidates as RTCIceCandidate[],
-              dtlsParameters: transportData.dtlsParameters,
-              iceServers: transportData.iceServers as RTCIceServer[],
-            }
+      const transport = direction === "send"
+        ? device.createSendTransport(opts)
+        : device.createRecvTransport(opts)
 
-            const transport = direction === "send"
-              ? device.createSendTransport(opts)
-              : device.createRecvTransport(opts)
+      transport.on("connect", ({ dtlsParameters }: { dtlsParameters: object }, callback: () => void, errback: (e: Error) => void) => {
+        void requestAck(socket, "connectTransport",
+          { roomId, peerId: peerIdRef.current, transportId: transport.id, dtlsParameters }, { signal },
+        ).then(() => callback(), errback)
+      })
 
-            transport.on("connect", ({ dtlsParameters }: { dtlsParameters: object }, callback: () => void, errback: (e: Error) => void) => {
-              socket.emit(
-                "connectTransport",
-                { roomId, peerId: peerIdRef.current, transportId: transport.id, dtlsParameters },
-                (err: string | null) => { err ? errback(new Error(err)) : callback() },
-              )
-            })
+      transport.on("connectionstatechange", (connectionState: string) => {
+        console.info(`[media] Transport state room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} state=${connectionState}`)
+        if (connectionState === "disconnected" || connectionState === "failed") {
+          restartIceForTransport(transport)
+        } else if (connectionState === "connected") {
+          clearIceRetry(transport.id)
+          iceRestartingRef.current.delete(transport.id)
+          recoverVideoConsumers(transport)
+        } else if (connectionState === "closed") {
+          clearIceRetry(transport.id)
+          iceRestartingRef.current.delete(transport.id)
+        }
+      })
 
-            transport.on("connectionstatechange", (connectionState: string) => {
-              console.info(`[media] Transport state room=${roomId} peer=${peerIdRef.current} transport=${transport.id} direction=${direction} state=${connectionState}`)
-              if (connectionState === "disconnected" || connectionState === "failed") {
-                restartIceForTransport(transport)
-              } else if (connectionState === "connected") {
-                clearIceRetry(transport.id)
-                iceRestartingRef.current.delete(transport.id)
-                recoverVideoConsumers(transport)
-              } else if (connectionState === "closed") {
-                clearIceRetry(transport.id)
-                iceRestartingRef.current.delete(transport.id)
-              }
-            })
-
-            if (direction === "send") {
-              transport.on(
-                "produce",
-                (
-                  { kind, rtpParameters, appData }: { kind: string; rtpParameters: object; appData: object },
-                  callback: (r: { id: string }) => void,
-                  errback: (e: Error) => void,
-                ) => {
-                  socket.emit(
-                    "produce",
-                    { roomId, peerId: peerIdRef.current, transportId: transport.id, kind, rtpParameters, appData },
-                    (err: string | null, data: { producerId: string } | undefined) => {
-                      if (err || !data) errback(new Error(err ?? "produce failed"))
-                      else callback({ id: data.producerId })
-                    },
-                  )
-                },
-              )
-            }
-
-            resolve(transport)
+      if (direction === "send") {
+        transport.on(
+          "produce",
+          (
+            { kind, rtpParameters, appData }: { kind: string; rtpParameters: object; appData: object },
+            callback: (r: { id: string }) => void,
+            errback: (e: Error) => void,
+          ) => {
+            void requestAck<{ producerId: string }>(socket, "produce",
+              { roomId, peerId: peerIdRef.current, transportId: transport.id, kind, rtpParameters, appData }, { signal },
+            ).then((data) => {
+              if (!data) throw new Error("produce returned no data")
+              callback({ id: data.producerId })
+            }).catch(errback)
           },
         )
-      })
+      }
+
+      return transport
     },
     [roomId, peerIdRef, restartIceForTransport, clearIceRetry, recoverVideoConsumers],
   )
@@ -319,13 +305,24 @@ export function useTransports({
         displayName: string
         producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
       }>,
+      signal?: AbortSignal,
     ) => {
-      const [send, recv] = await Promise.all([
-        createTransport(socket, device, "send"),
-        createTransport(socket, device, "recv"),
+      // Wait for both requests so a late success cannot leak the other half of
+      // a failed setup or overwrite transports belonging to a newer attempt.
+      const results = await Promise.allSettled([
+        createTransport(socket, device, "send", signal),
+        createTransport(socket, device, "recv", signal),
       ])
+      const [sendResult, recvResult] = results
+      if (signal?.aborted || sendResult.status === "rejected" || recvResult.status === "rejected") {
+        for (const result of results) if (result.status === "fulfilled") result.value.close()
+        throw new Error("Transport setup interrupted or failed")
+      }
+      const send = sendResult.value
+      const recv = recvResult.value
       sendTransportRef.current = send
       recvTransportRef.current = recv
+      signal?.addEventListener("abort", () => { send.close(); recv.close() }, { once: true })
 
       // Register every existing peer FIRST, before consuming their producers.
       // A peer sitting with mic muted and camera off has no producers, so if we
@@ -510,18 +507,23 @@ export function useTransports({
       kind: "audio" | "video",
       appData?: Record<string, unknown>,
     ) => {
+      const recv = recvTransportRef.current
+      if (!recv || recv.closed) return
+      const consumeKey = `${recv.id}:${producerId}`
       const existingConsumer = [...consumersRef.current.values()].find(
         (consumer) => !consumer.closed && consumer.producerId === producerId,
       )
       if (existingConsumer) return
-      const inFlight = consumeInFlightRef.current.get(producerId)
+      const inFlight = consumeInFlightRef.current.get(consumeKey)
       if (inFlight) return inFlight
 
       const runConsume = async (): Promise<void> => {
         const socket = socketRef.current
         const device = deviceRef.current
         const recvTransport = recvTransportRef.current
-        if (!socket || !device || !recvTransport || recvTransport.closed) return
+        if (!socket?.connected || !device || recvTransport !== recv || recvTransport.closed) return
+        const socketId = socket.id
+        const isCurrent = () => socket.connected && socket.id === socketId && socketRef.current === socket && recvTransportRef.current === recvTransport && !recvTransport.closed
 
         type ConsumerData = {
           consumerId: string
@@ -532,21 +534,10 @@ export function useTransports({
           appData: Record<string, unknown>
         }
 
-        const requestConsumer = () => new Promise<ConsumerData>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("consume-ack-timeout")), 8000)
-          socket.emit("consume", {
-            roomId,
-            peerId: peerIdRef.current,
-            producerId,
-            rtpCapabilities: device.rtpCapabilities,
-          }, (error: string | null, data: ConsumerData | undefined) => {
-            clearTimeout(timeout)
-            if (error || !data) reject(new Error(error ?? "consume-missing-data"))
-            else resolve(data)
-          })
-        })
-
-        const data = await requestConsumer()
+        const data = await requestAck<ConsumerData>(socket, "consume", {
+          roomId, peerId: peerIdRef.current, producerId, rtpCapabilities: device.rtpCapabilities,
+        }, { timeout: 8000 })
+        if (!isCurrent() || !data) return
         const rawSource = appData?.source ?? data.appData?.source
         const source: MediaSource = rawSource === "screen" ? "screen" : "media"
         let consumer: Consumer | null = null
@@ -560,6 +551,7 @@ export function useTransports({
             appData: { source },
           })
 
+          if (!isCurrent()) { consumer.close(); return }
           if (pendingClosedProducersRef.current.has(data.producerId)) {
             pendingClosedProducersRef.current.delete(data.producerId)
             consumer.close()
@@ -570,18 +562,11 @@ export function useTransports({
 
           consumersRef.current.set(data.consumerId, consumer)
           await waitForTransportConnected(recvTransport)
-          await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error("resume-consumer-ack-timeout")), 8000)
-            socket.emit("resumeConsumer", {
-              roomId,
-              peerId: peerIdRef.current,
-              consumerId: data.consumerId,
-            }, (error: string | null) => {
-              clearTimeout(timeout)
-              if (error) reject(new Error(error))
-              else resolve()
-            })
-          })
+          if (!isCurrent()) throw new Error("Consumer setup interrupted")
+          await requestAck(socket, "resumeConsumer", {
+            roomId, peerId: peerIdRef.current, consumerId: data.consumerId,
+          }, { timeout: 8000 })
+          if (!isCurrent()) throw new Error("Consumer setup interrupted")
 
           dispatch({
             type: "PEER_STREAM",
@@ -670,6 +655,7 @@ export function useTransports({
             consumersRef.current.delete(data.consumerId)
             consumer.close()
           }
+          if (!isCurrent()) return
           socket.emit("closeConsumer", { roomId, peerId: peerIdRef.current, consumerId: data.consumerId })
           dispatch({ type: "PEER_PRODUCER_CLOSED", peerId: remotePeerId, source, kind })
           console.error(`[media] Consumer setup failed room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} consumer=${data.consumerId} kind=${kind} transport=${recvTransport.id} state=${recvTransport.connectionState}`, error)
@@ -680,9 +666,9 @@ export function useTransports({
       const promise = runConsume().catch((error) => {
         console.error(`[media] Consume failed room=${roomId} peer=${peerIdRef.current} remotePeer=${remotePeerId} producer=${producerId} kind=${kind}`, error)
       }).finally(() => {
-        consumeInFlightRef.current.delete(producerId)
+        consumeInFlightRef.current.delete(consumeKey)
       })
-      consumeInFlightRef.current.set(producerId, promise)
+      consumeInFlightRef.current.set(consumeKey, promise)
       return promise
     },
     [roomId, peerIdRef, socketRef, deviceRef, recvTransportRef, consumersRef,

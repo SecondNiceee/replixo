@@ -12,7 +12,7 @@ import type {
   CloseProducerPayload,
   PauseProducerPayload,
 } from '../types'
-import { ack, err, createRateLimiter, type Callback, type HandlerContext } from './helpers'
+import { ack, err, createRateLimiter, withTimeout, optional, type Callback, type HandlerContext } from './helpers'
 import { canonicalRoomCode } from '../room-code'
 import { MAX_PEERS_PER_ROOM, MAX_ROOMS, MAX_ROOM_CREATIONS_PER_IP, ROOM_CREATE_WINDOW_MS } from '../config'
 import { clientIp, createKeyedRateLimiter } from '../limits'
@@ -37,41 +37,6 @@ import {
 // WebRTC / mediasoup signalling: joinRoom, transports, produce/consume
 // ---------------------------------------------------------------------------
 
-/**
- * Ограничить время ожидания промиса. Нужно, чтобы ни один `await` в обработчике
- * joinRoom не мог заблокировать отправку ack: пока ack не отправлен, клиент
- * висит на экране «Подключение к комнате» без каких-либо признаков ошибки.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timer)
-        reject(error)
-      },
-    )
-  })
-}
-
-/**
- * То же, но для некритичных данных: при таймауте/ошибке возвращаем fallback и
- * пускаем участника в комнату. Отсутствие истории чата — это деградация, а не
- * причина не пустить человека в звонок.
- */
-async function optional<T>(promise: Promise<T>, ms: number, label: string, fallback: T): Promise<T> {
-  try {
-    return await withTimeout(promise, ms, label)
-  } catch (e) {
-    console.error(`[room] ${label} failed, продолжаем без него:`, (e as Error).message)
-    return fallback
-  }
-}
-
 const allowRoomCreationFromIp = createKeyedRateLimiter(MAX_ROOM_CREATIONS_PER_IP, ROOM_CREATE_WINDOW_MS)
 
 export function registerMediaHandlers(ctx: HandlerContext): void {
@@ -79,6 +44,8 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
   const ip = clientIp(socket.handshake.headers, socket.handshake.address)
   // Normal clients join once per (re)connect; this only stops join floods.
   const allowJoin = createRateLimiter(10, 10_000)
+  let joinSequence = 0
+  socket.on('leaveRoom', () => { joinSequence += 1 })
 
   const ownsPeer = (roomId: string, peerId: string): boolean => (
     session.roomId === roomId &&
@@ -105,6 +72,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
       const { peerId, displayName, rtpCapabilities, create, clientId, peerToken } = payload ?? {}
       const roomId = canonicalRoomCode(payload?.roomId)
+      const sequence = ++joinSequence
 
       try {
         if (!allowJoin()) {
@@ -153,65 +121,56 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
           session.peerId = null
         }
 
-        const existingSocketId = getPeerSocket(roomId, peerId)
-        if (existingSocketId && existingSocketId !== socket.id) {
-          const oldSocket = io.sockets.sockets.get(existingSocketId)
-          // The same page instance reconnecting (network hand-off, sleep/wake)
-          // sends the same clientId. That must never be treated as a clone,
-          // otherwise the client kicks itself out of the room it is recovering
-          // into — and `kicked` is terminal on the client.
-          const sameClient = !!clientId && getPeerClient(roomId, peerId) === clientId
-          if (oldSocket?.connected && !sameClient) {
-            // Genuine duplicate: the same browser profile opened this room a
-            // second time (extra tab/window). peerId is derived from a
-            // persistent device id, so the stale session is kicked here instead
-            // of becoming a second participant that takes a slot and fights
-            // over producers.
-            console.warn(`[room] Duplicate session kicked room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`)
-            oldSocket.emit('kicked', { reason: 'duplicate' })
-            oldSocket.disconnect(true)
-          } else if (oldSocket?.connected) {
-            // Same page, new socket: drop the stale transport silently, no kick.
-            console.info(`[room] Reconnect takeover room=${roomId} peer=${peerId} oldSocket=${existingSocketId} newSocket=${socket.id}`)
-            oldSocket.disconnect(true)
-          }
-          evictPeer(io, roomId, peerId, existingSocketId)
-        }
-
-        clearPendingDisconnect(roomId, peerId)
-
         // Создание комнаты поднимает mediasoup-router и подтягивает состояние
         // доски из БД. Если worker мёртв или база висит, промис может не
         // зарезолвиться никогда — ограничиваем и отвечаем ошибкой, чтобы клиент
         // показал её вместо бесконечного спиннера.
-        const room = await withTimeout(getOrCreateRoom(roomId), 15_000, 'getOrCreateRoom')
-        const repeatedJoin = room.hasPeer(peerId) && getPeerSocket(roomId, peerId) === socket.id
-
-        if (!repeatedJoin && room.isFull()) return err(callback as Callback<never>, `Room is full (max ${MAX_PEERS_PER_ROOM} participants)`)
-
-        if (repeatedJoin) {
-          const peer = room.getPeer(peerId)!
-          peer.displayName = displayName.trim()
-          peer.rtpCapabilities = rtpCapabilities
-        } else {
-          const peer = new Peer({ peerId, displayName: displayName.trim(), socketId: socket.id })
-          peer.rtpCapabilities = rtpCapabilities
-          room.addPeer(peer)
+        const room = await withTimeout(getOrCreateRoom(roomId), 10_000, 'getOrCreateRoom')
+        // Room creation/hydration yields. A disconnected or superseded request
+        // must never claim ownership after the newer connection has joined.
+        if (!socket.connected || sequence !== joinSequence) return
+        if (rooms.get(roomId) !== room) return err(callback as Callback<never>, 'Комната не найдена')
+        if (getPeerSocket(roomId, peerId) !== socket.id && hasPeerToken(roomId, peerId) && !verifyPeerToken(roomId, peerId, peerToken)) {
+          return err(callback as Callback<never>, 'Этот участник уже в комнате с другого устройства')
         }
+        const oldPeer = room.getPeer(peerId)
+        const previousSocketId = getPeerSocket(roomId, peerId)
+        const previousSocket = previousSocketId !== socket.id && previousSocketId
+          ? io.sockets.sockets.get(previousSocketId) : undefined
+        const sameClient = !!clientId && getPeerClient(roomId, peerId) === clientId
+        const repeatedJoin = !!oldPeer && previousSocketId === socket.id
+        if (!oldPeer && room.isFull()) return err(callback as Callback<never>, `Room is full (max ${MAX_PEERS_PER_ROOM} participants)`)
+
+        // A full rejoin replaces media in place. Evicting the last participant
+        // here would destroy the room and delete its chat while they reconnect.
+        const closedProducers = oldPeer && !repeatedJoin ? [...oldPeer.producers.keys()] : []
+        if (!repeatedJoin) oldPeer?.close()
+        const peer = repeatedJoin ? oldPeer! : new Peer({ peerId, displayName: displayName.trim(), socketId: socket.id })
+        peer.displayName = displayName.trim()
+        peer.rtpCapabilities = rtpCapabilities
+        if (!repeatedJoin) room.addPeer(peer)
 
         session.roomId = roomId
         session.peerId = peerId
         setPeerSocket(roomId, peerId, socket.id)
         setPeerClient(roomId, peerId, typeof clientId === 'string' ? clientId : undefined)
+        clearPendingDisconnect(roomId, peerId)
         const issuedPeerToken = issuePeerToken(roomId, peerId)
         socket.join(roomId)
+        for (const producerId of closedProducers) socket.to(roomId).emit('producerClosed', { peerId, producerId })
+
+        if (previousSocket?.connected) {
+          if (!sameClient) previousSocket.emit('kicked', { reason: 'duplicate' })
+          // Bind first so the old disconnect cannot evict the replacement.
+          previousSocket.disconnect(true)
+        }
 
         const existingPeers = room.getExistingPeersFor(peerId)
-        console.log(`[room] ${repeatedJoin ? 'Repeated join ignored for' : 'Peer joined'} room=${roomId} peer=${peerId} socket=${socket.id} peers=${room.getPeerIds().length}`)
+        console.log(`[room] ${repeatedJoin ? 'Repeated join' : oldPeer ? 'Peer rejoined' : 'Peer joined'} room=${roomId} peer=${peerId} socket=${socket.id} peers=${room.getPeerIds().length}`)
 
         // A repeated acknowledgement from the same socket must not create a
         // second presence event or replay the join sound for other clients.
-        if (!repeatedJoin) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() })
+        if (!oldPeer) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() })
 
         // Load persisted chat history so the joining peer (or someone who just
         // reloaded the page) sees prior messages. Empty when persistence is off.
@@ -220,9 +179,11 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // Оба запроса некритичны для входа в звонок и выполняются параллельно с
         // ограничением по времени: висящая база больше не задерживает ack.
         const [messages, readMarkers] = await Promise.all([
-          optional(getRoomMessages(roomId), 5_000, 'getRoomMessages', []),
-          optional(getRoomReadMarkers(roomId), 5_000, 'getRoomReadMarkers', []),
+          optional(getRoomMessages(roomId), 3_000, 'getRoomMessages', []),
+          optional(getRoomReadMarkers(roomId), 3_000, 'getRoomReadMarkers', []),
         ])
+
+        if (!socket.connected || sequence !== joinSequence || !ownsPeer(roomId, peerId)) return
 
         // Serialize presentationDrawings Map → plain object for JSON transport.
         const presentationDrawings: Record<string, string> = {}

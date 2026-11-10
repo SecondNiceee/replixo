@@ -3,8 +3,9 @@
 import { captureMic, releaseMicTrack, diagnoseMicTrack } from "@/lib/mic-gate"
 import { rememberProducerTransport, isProducerOnStaleTransport } from "./mediasoup/producer-transport"
 
-import { useEffect, useRef, useCallback, useReducer } from "react"
+import { useEffect, useRef, useCallback, useReducer, useState } from "react"
 import { io } from "socket.io-client"
+import { requestAck } from "./mediasoup/socket-request"
 import { normalizeReply } from "@/lib/chat/reply"
 import type { Socket } from "socket.io-client"
 import {
@@ -37,8 +38,7 @@ const REBUILD_COOLDOWN_MS = 30000
 // a slow link, but finite — an unanswered join must surface as an error rather
 // than an endless "Подключение к комнате".
 const JOIN_ACK_TIMEOUT_MS = 15000
-// Сколько раз повторить вход при восстановлении после обрыва, прежде чем
-// показать ошибку: паузы 1, 2, 4, 8, 8 с — около 40 с на восстановление сети.
+// Recovery retries wait 1, 2, 4, 8, 8 seconds, in addition to request timeouts.
 const MAX_RECOVERY_JOIN_RETRIES = 5
 
 // ---------------------------------------------------------------------------
@@ -61,6 +61,8 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     whiteboardOpen: false,
     whiteboardSnapshot: null,
   })
+
+  const [isReconnecting, setIsReconnecting] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Refs
@@ -112,9 +114,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const wasInRoomRef = useRef(false)
   const joinRetryCountRef = useRef(0)
   const joinRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Отмена ожидания ack текущего joinRoom. Если сокет оборвался, ответа на
-  // этот запрос не будет никогда — ждать его 15 с и потом падать бессмысленно.
-  const abortPendingJoinRef = useRef<(() => void) | null>(null)
+  const joinAbortRef = useRef<AbortController | null>(null)
+  const recoveryAbortRef = useRef<AbortController | null>(null)
+  const probeConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
   const lastRebuildAtRef = useRef(0)
   const rebuildConnectionRef = useRef<(reason: string) => Promise<void>>(async () => {})
   // Set by the weak-network guard. Read by useTransports so an ICE-recovery
@@ -271,36 +273,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const now = Date.now()
     if (now - lastRecoverAtRef.current < 5000 || recoveryInFlightRef.current) return
     lastRecoverAtRef.current = now
-    recoveryInFlightRef.current = true
-    const generation = connectionGenerationRef.current
-    let settled = false
-    const timeout = setTimeout(() => {
-      if (settled) return
-      settled = true
-      recoveryInFlightRef.current = false
-      void rebuildConnectionRef.current("manual-probe-timeout")
-    }, 8000)
-    socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, peerToken: getPeerToken(roomId) }, (error: string | null) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      recoveryInFlightRef.current = false
-      if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
-      if (error) {
-        void rebuildConnectionRef.current(`manual-probe-rejected:${error}`)
-        return
-      }
-      // Re-assess: the probe round-trip takes a moment and things may have
-      // healed on their own (ICE often reconnects by itself).
-      const current = assessSession()
-      if (current.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
-      if (current.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
-      if (current.micBroken) void mediaControls.recoverMic("manual-probe")
-      if (current.camBroken) void mediaControls.recoverCamera()
-      if (current.screenBroken) {
-        window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
-      }
-    })
+    void probeConnectionRef.current("manual-probe")
   }, [roomId, transports, mediaControls, assessSession])
 
   // ---------------------------------------------------------------------------
@@ -314,11 +287,13 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     joinRetryCountRef.current = 0
     if (joinRetryTimerRef.current) clearTimeout(joinRetryTimerRef.current)
     joinRetryTimerRef.current = null
-    abortPendingJoinRef.current?.()
-    abortPendingJoinRef.current = null
+    joinAbortRef.current?.abort()
+    joinAbortRef.current = null
+    recoveryAbortRef.current?.abort()
+    recoveryAbortRef.current = null
     const socket = socketRef.current
     if (socket) {
-      socket.emit("leaveRoom", { roomId, peerId: peerIdRef.current })
+      if (socket.connected) socket.emit("leaveRoom", { roomId, peerId: peerIdRef.current })
       socket.disconnect()
       socketRef.current = null
     }
@@ -339,6 +314,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     iceRestartingRef.current.clear()
     iceRetryTimersRef.current.forEach((t) => clearTimeout(t))
     iceRetryTimersRef.current.clear()
+    setIsReconnecting(false)
     dispatch({ type: "DISCONNECTED" })
   }, [roomId, peerIdRef])
 
@@ -364,29 +340,41 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     const generation = ++connectionGenerationRef.current
 
     socket.on("connect_error", (e) => {
-      if (!hasJoinedRef.current) {
+      // Socket.IO retries transport failures. Namespace rejection has no
+      // automatic retry, so surface the explicit server error in that case.
+      if (socketRef.current === socket && (!wasInRoomRef.current || !socket.active) && !kickedRef.current) {
+        setIsReconnecting(false)
         dispatch({ type: "ERROR", error: `Не удалось подключиться к серверу: ${e.message}` })
       }
     })
 
     // Core join sequence — called on first connect and on full rejoin
     const doJoinSequence = async () => {
-      if (joinInFlightRef.current || socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+      if (joinInFlightRef.current || !socket.connected || kickedRef.current || socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+      if (joinRetryTimerRef.current) clearTimeout(joinRetryTimerRef.current)
+      joinRetryTimerRef.current = null
       joinInFlightRef.current = true
+      hasJoinedRef.current = false
+      const attempt = new AbortController()
+      joinAbortRef.current = attempt
+      const socketId = socket.id
 
-      // Anything that throws �� or never resolves — between here and the end of
+      // Anything that throws or never resolves between here and the end of
       // the ack handler used to leave `status` at "connecting" forever, because
       // the only ways out of the "Подключение к комнате" spinner are CONNECTED
       // and ERROR. Every failure path must therefore clear joinInFlightRef
       // (otherwise later join/rebuild attempts are silently skipped) and report.
-      const isStale = () => socketRef.current !== socket || connectionGenerationRef.current !== generation
+      const isStale = () => attempt.signal.aborted || joinAbortRef.current !== attempt || !socket.connected || socket.id !== socketId || socketRef.current !== socket || connectionGenerationRef.current !== generation || kickedRef.current
+      const assertActive = () => {
+        if (isStale()) throw new Error("Join superseded by a newer connection")
+      }
+      const retryableError = (error: unknown) => !/Комната не найдена|Room is full|другого устройства|Некорректные данные|invalid peer token/i.test(String(error))
       const failJoin = (message: string, cause?: unknown, retryable = false) => {
+        if (isStale()) return
         joinInFlightRef.current = false
         console.error(`[media] Join failed room=${roomId} peer=${peerIdRef.current}: ${message}`, cause)
-        if (isStale()) return
-        // A failure after we're already in the room is handled by the rebuild
-        // logic — don't tear down an established session with a fatal error.
-        if (hasJoinedRef.current) return
+        hasJoinedRef.current = false
+        closeCurrentMediaSession()
         // Повторный вход после обрыва (человек уже сидел в звонке): сеть ещё
         // «плавает», и один потерянный ответ не повод выкидывать его из комнаты
         // на экран ошибки. Пробуем ещё несколько раз с нарастающей паузой.
@@ -404,18 +392,20 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           }, delay)
           return
         }
+        setIsReconnecting(false)
         dispatch({ type: "ERROR", error: message })
       }
 
       let device: DeviceType
       try {
         const { Device } = await import("mediasoup-client")
+        assertActive()
         device = new Device()
         deviceRef.current = device
       } catch (e) {
         // A failed chunk load (flaky network, stale deploy) must not strand the
         // spinner: joinInFlightRef was already set above.
-        failJoin("Не удалось загрузить медиа-библиотеку. Обновите страницу.", e)
+        failJoin("Не удалось загрузить медиа-библиотеку. Обновите страницу.", e, true)
         return
       }
 
@@ -433,25 +423,20 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         whiteboardSnapshot?: string | null
       }
 
-      const applyJoinAck = async (error: string | null, data: JoinAck | undefined) => {
+      const applyJoinAck = async (data: JoinAck | undefined) => {
         try {
-          if (socketRef.current !== socket || connectionGenerationRef.current !== generation) {
-            joinInFlightRef.current = false
-            return
-          }
-          if (error || !data) {
-            joinInFlightRef.current = false
-            dispatch({ type: "ERROR", error: error ?? "joinRoom failed" })
-            return
-          }
+          assertActive()
+          if (!data) throw new Error("joinRoom returned no data")
 
           if (typeof data.peerToken === "string" && data.peerToken) setPeerToken(roomId, data.peerToken)
 
           await device.load({ routerRtpCapabilities: data.rtpCapabilities })
-          dispatch({ type: "CONNECTED", localStream })
-          hasJoinedRef.current = true
-          wasInRoomRef.current = true
-          joinRetryCountRef.current = 0
+          assertActive()
+          // Rebind with joinRoom FIRST. A reconnecting socket cannot reset a
+          // peer owned by the previous socket. Also discard partial transports
+          // left on the server by an earlier interrupted setup attempt.
+          await requestAck(socket, "resetMediaState", { roomId, peerId: peerIdRef.current }, { signal: attempt.signal })
+          assertActive()
 
           dispatch({
             type: "SET_WHITEBOARD",
@@ -483,14 +468,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             }
           }
 
-          await transports.setupTransports(socket, device, data.existingPeers)
+          await transports.setupTransports(socket, device, data.existingPeers, attempt.signal)
+          assertActive()
+          hasJoinedRef.current = true
+          wasInRoomRef.current = true
+          dispatch({ type: "CONNECTED", localStream })
 
           // Catch-up publish: re-publish any tracks the user had active before a rejoin
           const newSendTransport = sendTransportRef.current
-          if (!newSendTransport) {
-            joinInFlightRef.current = false
-            return
-          }
+          if (!newSendTransport) throw new Error("Send transport unavailable after setup")
 
           // The whole microphone catch-up is wrapped in its own try/catch: a
           // failure here used to bubble into `failJoin`, which does nothing at all
@@ -516,6 +502,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   // raw (unsuppressed) microphone. `captureMic` falls back to the
                   // system default when the remembered deviceId is gone.
                   const capture = await captureMic(selectedMicIdRef.current)
+                  if (isStale()) { releaseMicTrack(capture.track); return }
                   audioTrack = capture.track
                   selectedMicIdRef.current = capture.deviceId ?? undefined
                   localStreamRef.current?.addTrack(audioTrack)
@@ -546,6 +533,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                   // already-ended track.
                   stopTracks: false,
                 })
+                if (isStale()) { producer.close(); return }
                 rememberProducerTransport(producer, transport)
                 audioProducerRef.current = producer
                 // The join path used to publish without ever watching the track,
@@ -581,7 +569,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
               // Lock is released, so recovery can actually run: it retries on the
               // current transport and, if the device is really unavailable, turns
               // the button off instead of leaving silent "mic on" UI.
-              if (recoverMicAfterJoin) void mediaControls.recoverMic("join-republish-failed")
+              if (recoverMicAfterJoin && !isStale()) void mediaControls.recoverMic("join-republish-failed")
             }
           }
 
@@ -600,6 +588,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
                 }
                 const camStream = await navigator.mediaDevices.getUserMedia({ video: true })
                 videoTrack = camStream.getVideoTracks()[0]
+                if (isStale()) { camStream.getTracks().forEach((track) => track.stop()); return }
                 if (videoTrack) localStreamRef.current?.addTrack(videoTrack)
               } catch {
                 videoTrack = undefined
@@ -608,6 +597,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
             if (videoTrack && videoTrack.readyState === "live") {
               const { CAMERA_PRODUCE_OPTIONS } = await import("./mediasoup/types")
               const producer = await newSendTransport.produce({ track: videoTrack, ...CAMERA_PRODUCE_OPTIONS, stopTracks: false })
+              if (isStale()) { producer.close(); return }
               rememberProducerTransport(producer, newSendTransport)
               videoProducerRef.current = producer
               if (isCamOffRef.current) {
@@ -627,40 +617,22 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           if (screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live") {
             await mediaControls.recoverScreenShare()
           }
+          assertActive()
+          joinRetryCountRef.current = 0
+          setIsReconnecting(false)
           joinInFlightRef.current = false
+          if (joinAbortRef.current === attempt) joinAbortRef.current = null
         } catch (e) {
           // device.load / setupTransports / produce can all throw (unsupported
           // browser, revoked permission, transport closed mid-setup). Rejections
           // inside a socket.io ack callback are swallowed, so previously
           // CONNECTED was simply never dispatched and the spinner spun forever.
-          failJoin("Не удалось войти в комнату. Попробуйте переподключиться.", e, true)
+          failJoin("Не удалось войти в комнату. Попробуйте переподключиться.", e, retryableError(e))
         }
       }
 
-      // socket.io does not time out acknowledgements: if the server never calls
-      // back (hung DB query, dead mediasoup worker, lost WebSocket upgrade) the
-      // client waited indefinitely. Bound that wait explicitly.
-      let ackSettled = false
-      const ackTimeout = setTimeout(() => {
-        if (ackSettled) return
-        ackSettled = true
-        abortPendingJoinRef.current = null
-        failJoin("Сервер не ответил на запрос входа в комнату. Проверьте соединение и попробуйте снова.", undefined, true)
-      }, JOIN_ACK_TIMEOUT_MS)
-      // Сокет оборвался, пока мы ждали ответ: этот ack уже не придёт. Снимаем
-      // ожидание сразу, чтобы после переподключения вход пошёл заново, а не
-      // упирался в joinInFlightRef и не заканчивался ошибкой по таймауту.
-      abortPendingJoinRef.current = () => {
-        if (ackSettled) return
-        ackSettled = true
-        clearTimeout(ackTimeout)
-        joinInFlightRef.current = false
-        console.warn(`[media] Join aborted by socket disconnect room=${roomId} peer=${peerIdRef.current}`)
-      }
-
-      socket.emit(
-        "joinRoom",
-        {
+      try {
+        const data = await requestAck<JoinAck>(socket, "joinRoom", {
           roomId,
           peerId: peerIdRef.current,
           clientId: CLIENT_ID,
@@ -668,15 +640,15 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           displayName,
           rtpCapabilities: {},
           create,
-        },
-        (error: string | null, data: JoinAck | undefined) => {
-          if (ackSettled) return
-          ackSettled = true
-          clearTimeout(ackTimeout)
-          abortPendingJoinRef.current = null
-          void applyJoinAck(error, data)
-        },
-      )
+        }, { signal: attempt.signal, timeout: JOIN_ACK_TIMEOUT_MS })
+        assertActive()
+        await applyJoinAck(data)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failJoin(message.includes("acknowledgement timeout")
+          ? "Сервер не ответил на запрос входа в комнату. Проверьте соединение и попробуйте снова."
+          : message, error, retryableError(error))
+      }
     }
 
     const closeCurrentMediaSession = () => {
@@ -699,7 +671,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     }
 
     const rebuildMediaSession = async (reason: string) => {
-      if (recoveryInFlightRef.current || socketRef.current !== socket || !socket.connected) return
+      if (recoveryInFlightRef.current || joinInFlightRef.current || kickedRef.current || socketRef.current !== socket || !socket.connected) return
       // A rebuild closes every producer/transport and re-joins, which the other
       // participants see as this person dropping out and coming back. When the
       // network is genuinely bad the ICE watchdogs used to trigger it every few
@@ -715,99 +687,94 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         return
       }
       lastRebuildAtRef.current = now
+      setIsReconnecting(true)
       recoveryInFlightRef.current = true
       console.warn(`[media] Rebuild started room=${roomId} peer=${peerIdRef.current} socket=${socket.id} reason=${reason}`)
       try {
+        // Invalidate any setup still running before closing its transports.
+        joinAbortRef.current?.abort()
+        joinInFlightRef.current = false
+        hasJoinedRef.current = false
         closeCurrentMediaSession()
-        await new Promise<void>((resolve, reject) => {
-          let settled = false
-          const timeout = setTimeout(() => {
-            if (settled) return
-            settled = true
-            reject(new Error("resetMediaState acknowledgement timeout"))
-          }, 8000)
-          socket.emit("resetMediaState", { roomId, peerId: peerIdRef.current }, (error: string | null) => {
-            if (settled) return
-            settled = true
-            clearTimeout(timeout)
-            if (error) reject(new Error(error))
-            else resolve()
-          })
-        }).catch((error) => {
-          // The peer may already have been evicted during a long outage. In that
-          // case reset is unnecessary and joinRoom below recreates it.
-          console.warn(`[media] Server reset skipped room=${roomId} peer=${peerIdRef.current}`, error)
-          hasJoinedRef.current = false
-        })
-        joinInFlightRef.current = false
         await doJoinSequence()
-        if (screenStreamRef.current?.getVideoTracks()[0]?.readyState === "live") {
-          await mediaControls.recoverScreenShare()
-        }
-        console.info(`[media] Rebuild completed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`)
-      } catch (error) {
-        joinInFlightRef.current = false
-        console.error(`[media] Rebuild failed room=${roomId} peer=${peerIdRef.current} socket=${socket.id}`, error)
-        dispatch({ type: "ERROR", error: "Не удалось восст��новить аудио/видео. Переподключитесь к комнате." })
       } finally {
-        recoveryInFlightRef.current = false
+        if (socketRef.current === socket && socket.connected) recoveryInFlightRef.current = false
       }
     }
+
     rebuildConnectionRef.current = rebuildMediaSession
 
     // ---------------------------------------------------------------------------
     // Socket event listeners
     // ---------------------------------------------------------------------------
-    socket.on("connect", async () => {
-      console.info(`[socket] Connected room=${roomId} peer=${peerIdRef.current} socket=${socket.id} recovered=${hasJoinedRef.current}`)
-      if (!hasJoinedRef.current) {
-        await doJoinSequence()
-        return
-      }
-      if (recoveryInFlightRef.current) return
+    const probeAndRecover = async (reason: string) => {
+      if (recoveryInFlightRef.current || joinInFlightRef.current || !socket.connected || kickedRef.current || socketRef.current !== socket) return
+      const operation = new AbortController()
+      recoveryAbortRef.current = operation
       recoveryInFlightRef.current = true
-      let settled = false
-      const timeout = setTimeout(() => {
-        if (settled) return
-        settled = true
-        recoveryInFlightRef.current = false
-        void rebuildMediaSession("rejoin-probe-timeout")
-      }, 8000)
-      socket.emit("rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, peerToken: getPeerToken(roomId) }, (error: string | null) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timeout)
-        recoveryInFlightRef.current = false
-        if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
-        console.info(`[socket] Rejoin probe room=${roomId} peer=${peerIdRef.current} socket=${socket.id} result=${error ?? "accepted"}`)
-        if (!error) {
-          // A socket reconnect does not necessarily mean the media path broke
-          // (a short WebSocket blip leaves ICE and the capture tracks intact).
-          // Only repair what is actually damaged — a blanket ICE restart here
-          // freezes a perfectly healthy camera / screen share.
-          const assessment = assessSession()
-          if (assessment.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
-          if (assessment.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
-          // The microphone is just as fragile as the camera during an outage —
-          // and a dead mic is worse, because nothing about the UI reveals it.
-          if (assessment.micBroken) void mediaControls.recoverMic("rejoin-probe")
-          // The camera capture track often dies during the outage even though
-          // the transport itself is reusable. Re-check and republish it.
-          if (assessment.camBroken) void mediaControls.recoverCamera()
-          if (assessment.screenBroken) {
-            window.setTimeout(() => { void mediaControls.recoverScreenShare() }, 1500)
-          }
-        } else {
-          hasJoinedRef.current = false
-          void rebuildMediaSession(`rejoin-rejected:${error}`)
+      const socketId = socket.id
+      const isCurrent = () => !operation.signal.aborted && socketRef.current === socket && socket.connected && socket.id === socketId && connectionGenerationRef.current === generation && !kickedRef.current
+      try {
+        await requestAck(socket, "rejoinProbe", { roomId, peerId: peerIdRef.current, clientId: CLIENT_ID, peerToken: getPeerToken(roomId) }, { signal: operation.signal, timeout: 8000 })
+        if (!isCurrent()) return
+        if (!sendTransportRef.current || sendTransportRef.current.closed || !recvTransportRef.current || recvTransportRef.current.closed) {
+          recoveryInFlightRef.current = false
+          await rebuildMediaSession(`${reason}-closed-transport`)
+          return
         }
-      })
+        setIsReconnecting(false)
+        // A socket reconnect does not necessarily mean the media path broke
+        // (a short WebSocket blip leaves ICE and the capture tracks intact).
+        // Only repair what is actually damaged — a blanket ICE restart here
+        // freezes a perfectly healthy camera / screen share.
+        const assessment = assessSession()
+        if (assessment.sendBroken) transports.restartIceForTransport(sendTransportRef.current)
+        if (assessment.recvBroken) transports.restartIceForTransport(recvTransportRef.current)
+        // The microphone is just as fragile as the camera during an outage —
+        // and a dead mic is worse, because nothing about the UI reveals it.
+        if (assessment.micBroken) void mediaControls.recoverMic("rejoin-probe")
+        // The camera capture track often dies during the outage even though
+        // the transport itself is reusable. Re-check and republish it.
+        if (assessment.camBroken) void mediaControls.recoverCamera()
+        if (assessment.screenBroken) {
+          window.setTimeout(() => { if (isCurrent()) void mediaControls.recoverScreenShare() }, 1500)
+        }
+      } catch (error) {
+        if (!isCurrent()) return
+        console.warn(`[socket] Rejoin probe failed room=${roomId}`, error)
+        recoveryInFlightRef.current = false
+        await rebuildMediaSession(`${reason}-rejected`)
+      } finally {
+        if (recoveryAbortRef.current === operation) {
+          recoveryAbortRef.current = null
+          recoveryInFlightRef.current = false
+        }
+      }
+    }
+    probeConnectionRef.current = probeAndRecover
+
+    socket.on("connect", () => {
+      if (socketRef.current !== socket || connectionGenerationRef.current !== generation || kickedRef.current) return
+      console.info(`[socket] Connected room=${roomId} peer=${peerIdRef.current} socket=${socket.id} recovered=${hasJoinedRef.current}`)
+      if (!hasJoinedRef.current) void doJoinSequence()
+      else void probeAndRecover("rejoin-probe")
     })
 
     socket.on("disconnect", (reason) => {
-      console.warn(`[socket] Disconnected room=${roomId} peer=${peerIdRef.current} socket=${socket.id ?? "none"} reason=${reason}`)
-      abortPendingJoinRef.current?.()
-      abortPendingJoinRef.current = null
+      if (socketRef.current !== socket || connectionGenerationRef.current !== generation) return
+      console.warn(`[socket] Disconnected room=${roomId} peer=${peerIdRef.current} reason=${reason}`)
+      if (wasInRoomRef.current && !kickedRef.current) setIsReconnecting(true)
+      if (joinAbortRef.current) {
+        joinAbortRef.current.abort()
+        joinAbortRef.current = null
+        hasJoinedRef.current = false
+        closeCurrentMediaSession()
+      }
+      recoveryAbortRef.current?.abort()
+      joinInFlightRef.current = false
+      recoveryInFlightRef.current = false
+      if (joinRetryTimerRef.current) clearTimeout(joinRetryTimerRef.current)
+      joinRetryTimerRef.current = null
     })
 
     registerRoomSocketListeners(socket, {
@@ -896,6 +863,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
     // Status
     status: state.status,
     error: state.error,
+    isReconnecting,
     permissionError: mediaControls.permissionError,
     clearPermissionError: mediaControls.clearPermissionError,
     // Non-fatal microphone problems (publish failed, device vanished, recovery

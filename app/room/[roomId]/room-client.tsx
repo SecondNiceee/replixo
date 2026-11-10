@@ -131,6 +131,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
   const {
     status,
     error,
+    isReconnecting,
     permissionError,
     clearPermissionError,
     micNotice,
@@ -304,6 +305,11 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
       overlayMode ? "bg-transparent" : "bg-background",
     )}>
       {!overlayMode && <EnableSoundBanner />}
+      {isReconnecting && (
+        <div role="status" className="border-b border-border bg-muted px-4 py-2 text-center text-sm text-muted-foreground">
+          Восстанавливаем соединение с комнатой…
+        </div>
+      )}
 
       {/* Explains why video shrank or disappeared on a weak connection. */}
       {!overlayMode && (

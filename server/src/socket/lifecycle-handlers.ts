@@ -110,7 +110,7 @@ export function registerLifecycleHandlers(ctx: HandlerContext): void {
   // -----------------------------------------------------------------------
   socket.on('leaveRoom', ({ roomId: rawRoomId, peerId }: { roomId: string; peerId: string }) => {
     const roomId = canonicalRoomCode(rawRoomId)
-    if (!roomId || session.roomId !== roomId || session.peerId !== peerId) return
+    if (!roomId || session.roomId !== roomId || session.peerId !== peerId || getPeerSocket(roomId, peerId) !== socket.id) return
     handleLeave(roomId, peerId)
   })
 

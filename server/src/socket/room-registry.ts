@@ -4,6 +4,7 @@ import { Room } from '../Room'
 import { deleteRoomMessages, getWhiteboard, getPresentationDrawings, saveCallSession } from '../db'
 import { deleteRoomUploads } from '../uploads'
 import { acquireWorker, releaseWorker } from '../workers'
+import { optional, withTimeout } from './helpers'
 
 // ---------------------------------------------------------------------------
 // In-memory room store shared by all handler modules
@@ -252,29 +253,32 @@ export function getOrCreateRoom(roomId: string): Promise<Room> {
 
 function createRoom(roomId: string): Promise<Room> {
   const worker = acquireWorker()
-  return Room.create(roomId, worker).catch((e: unknown) => {
+  const creation = Room.create(roomId, worker)
+  return withTimeout(creation, 6_000, 'createRouter').catch((e: unknown) => {
+    // A worker that replies after the deadline must not keep an orphan router.
+    void creation.then((room) => room.close(), () => {})
     releaseWorker(worker)
     throw e
   }).then(async (room) => {
-    // Hydrate any persisted whiteboard state so a board drawn in a previous
-    // session (e.g. before a server restart) is restored. No-op without DB.
-    try {
-      const wb = await getWhiteboard(roomId)
-      room.whiteboardOpen = wb.open
-      room.whiteboardSnapshot = wb.snapshot
-    } catch {
-      // Ignore — board simply starts empty.
-    }
-    // Hydrate presentation drawing annotations (рисунки поверх слайдов).
-    try {
-      const drawings = await getPresentationDrawings(roomId)
-      room.presentationDrawings = drawings
-    } catch {
-      // Ignore — slides start empty.
-    }
+    // Persisted drawings are optional; a slow database must not prevent calls.
+    const [whiteboard, drawings] = await Promise.all([
+      optional(getWhiteboard(roomId), 3_000, 'getWhiteboard', { open: false, snapshot: null }),
+      optional(getPresentationDrawings(roomId), 3_000, 'getPresentationDrawings', new Map()),
+    ])
+    room.whiteboardOpen = whiteboard.open
+    room.whiteboardSnapshot = whiteboard.snapshot
+    room.presentationDrawings = drawings
     // В реестр — только после полной подготовки, чтобы никто не получил
     // комнату с ещё не загруженной доской.
     rooms.set(roomId, room)
+    // A join can disconnect while the room is being hydrated. If nobody ever
+    // joined, release the unused router without treating it as a finished call.
+    setTimeout(() => {
+      if (rooms.get(roomId) !== room || !room.isEmpty()) return
+      rooms.delete(roomId)
+      room.close()
+      releaseWorker(worker)
+    }, DISCONNECT_GRACE_MS).unref()
     console.log(`[room] Created room ${roomId}`)
     return room
   })

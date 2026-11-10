@@ -133,6 +133,8 @@ export class Room {
     const peer = this.peers.get(peerId)
     if (!peer) throw new Error(`Peer ${peerId} not found in room ${this.id}`)
 
+    const generation = peer.mediaGeneration
+
     // A peer must have only one transport per direction. Keeping an older recv
     // transport in a long-lived room makes consume() attach new participants to
     // a stale path; recreating the room then appears to "fix" missing audio.
@@ -164,6 +166,11 @@ export class Room {
       } catch {
         // Optional API; ignore if unavailable.
       }
+    }
+
+    if (this.peers.get(peerId) !== peer || peer.mediaGeneration !== generation || transport.closed) {
+      transport.close()
+      throw new Error('Media setup superseded')
     }
 
     transport.on('dtlsstatechange', (dtlsState: DtlsState) => {

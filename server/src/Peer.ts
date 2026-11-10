@@ -9,6 +9,7 @@ export class Peer implements PeerData {
   producers: Map<string, Producer>
   consumers: Map<string, Consumer>
   rtpCapabilities?: object
+  mediaGeneration = 0
 
   constructor({ peerId, displayName, socketId }: { peerId: string; displayName: string; socketId: string }) {
     this.peerId = peerId
@@ -48,6 +49,7 @@ export class Peer implements PeerData {
   // ---------------------------------------------------------------------------
 
   resetMedia(): void {
+    this.mediaGeneration += 1
     for (const transport of this.transports.values()) {
       transport.close()
     }

@@ -55,3 +55,38 @@ export interface HandlerContext {
   socket: Socket
   session: SocketSession
 }
+
+/**
+ * Ограничить время ожидания промиса. Нужно, чтобы ни один `await` в обработчике
+ * joinRoom не мог заблокировать отправку ack: пока ack не отправлен, клиент
+ * висит на экране «Подключение к комнате» без каких-либо признаков ошибки.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
+ * То же, но для некритичных данных: при таймауте/ошибке возвращаем fallback и
+ * пускаем участника в комнату. Отсутствие истории чата — это деградация, а не
+ * причина не пустить человека в звонок.
+ */
+export async function optional<T>(promise: Promise<T>, ms: number, label: string, fallback: T): Promise<T> {
+  try {
+    return await withTimeout(promise, ms, label)
+  } catch (e) {
+    console.error(`[room] ${label} failed, продолжаем без него:`, (e as Error).message)
+    return fallback
+  }
+}
