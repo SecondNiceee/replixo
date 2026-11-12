@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Peer } from '../Peer'
 import { getRoomMessages, getRoomReadMarkers } from '../db'
+import { validateSessionToken } from '../dm/db'
 import type {
   JoinRoomPayload,
   CreateTransportPayload,
@@ -48,6 +49,19 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
   let joinSequence = 0
   socket.on('leaveRoom', () => { joinSequence += 1 })
 
+  // Сессия проверяется один раз на сокет: повторные joinRoom при
+  // восстановлении связи не должны каждый раз ходить в базу.
+  let checkedSession: { token: string; userId: string | null } | null = null
+  const resolveAccountUserId = async (token: unknown): Promise<string | null> => {
+    if (typeof token !== 'string' || !token || token.length > 512) return null
+    if (checkedSession?.token === token) return checkedSession.userId
+    // База висит — человек входит как гость (громкость по браузеру), но в
+    // звонок попадает без задержки.
+    const identity = await optional(validateSessionToken(token), 3_000, 'validateSessionToken', null)
+    checkedSession = { token, userId: identity?.userId ?? null }
+    return checkedSession.userId
+  }
+
   const ownsPeer = (roomId: string, peerId: string): boolean => (
     session.roomId === roomId &&
     session.peerId === peerId &&
@@ -71,7 +85,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
   socket.on(
     'joinRoom',
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
-      const { peerId, displayName, rtpCapabilities, create, clientId, peerToken, playbackBrowserKey } = payload ?? {}
+      const { peerId, displayName, rtpCapabilities, create, clientId, peerToken, playbackBrowserKey, sessionToken } = payload ?? {}
       const roomId = canonicalRoomCode(payload?.roomId)
       const sequence = ++joinSequence
 
@@ -126,7 +140,12 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // доски из БД. Если worker мёртв или база висит, промис может не
         // зарезолвиться никогда — ограничиваем и отвечаем ошибкой, чтобы клиент
         // показал её вместо бесконечного спиннера.
-        const room = await withTimeout(getOrCreateRoom(roomId), 10_000, 'getOrCreateRoom')
+        // Аккаунт проверяем параллельно с подъёмом комнаты: вход от этого не
+        // становится дольше, а гость (без токена) в базу не ходит вовсе.
+        const [room, accountUserId] = await Promise.all([
+          withTimeout(getOrCreateRoom(roomId), 10_000, 'getOrCreateRoom'),
+          resolveAccountUserId(sessionToken),
+        ])
         // Room creation/hydration yields. A disconnected or superseded request
         // must never claim ownership after the newer connection has joined.
         if (!socket.connected || sequence !== joinSequence) return
@@ -147,11 +166,18 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         const closedProducers = oldPeer && !repeatedJoin ? [...oldPeer.producers.keys()] : []
         if (!repeatedJoin) oldPeer?.close()
         const peer = repeatedJoin ? oldPeer! : new Peer({ peerId, displayName: displayName.trim(), socketId: socket.id })
-        peer.playbackId = oldPeer?.playbackId
-        if (!peer.playbackId && typeof playbackBrowserKey === 'string' && /^[a-z0-9-]{12,64}$/i.test(playbackBrowserKey)) {
-          // Other participants only receive the digest, so the ID they see
-          // cannot be reused as the browser key for their volume settings.
-          peer.playbackId = createHash('sha256').update(playbackBrowserKey).digest('hex')
+        // Чужая громкость привязывается к этому идентификатору. Вошёл в
+        // аккаунт — к аккаунту (одна и та же на любом устройстве и в
+        // приложении), гость — к браузеру. Аккаунт подделать нельзя: id берётся
+        // только из проверенной сессии, а не из того, что прислал клиент.
+        // Остальным уходит только хэш, сам userId/ключ браузера не раскрывается.
+        if (accountUserId) {
+          peer.playbackId = createHash('sha256').update(`account:${accountUserId}`).digest('hex')
+        } else {
+          peer.playbackId = oldPeer?.playbackId
+          if (!peer.playbackId && typeof playbackBrowserKey === 'string' && /^[a-z0-9-]{12,64}$/i.test(playbackBrowserKey)) {
+            peer.playbackId = createHash('sha256').update(playbackBrowserKey).digest('hex')
+          }
         }
         peer.displayName = displayName.trim()
         peer.rtpCapabilities = rtpCapabilities
@@ -184,7 +210,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // Read markers of every participant so checkmarks render correctly on
         // already-sent messages right after joining/reloading.
         // Оба запроса некритичны для входа в звонок и выполняются параллельно с
-        // ограничением по времени: висящая база больше не задерживает ack.
+        // огранич��нием по времени: висящая база больше не задерживает ack.
         const [messages, readMarkers] = await Promise.all([
           optional(getRoomMessages(roomId), 3_000, 'getRoomMessages', []),
           optional(getRoomReadMarkers(roomId), 3_000, 'getRoomReadMarkers', []),

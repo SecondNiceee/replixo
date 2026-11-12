@@ -342,6 +342,31 @@ export function getPlaybackBrowserKey(): string | undefined {
   return playbackBrowserKey
 }
 
+let accountSessionTokenPromise: Promise<string | undefined> | undefined
+
+// Токен сессии (если человек вошёл в аккаунт) — по нему сервер привязывает
+// чужие настройки громкости к аккаунту, а не к браузеру. Запрашивается один раз
+// на страницу: гость получит 401 и останется на ключе браузера. Любая ошибка —
+// тоже гость, вход в звонок от этого не зависит.
+export function getAccountSessionToken(): Promise<string | undefined> {
+  if (typeof window === "undefined") return Promise.resolve(undefined)
+  accountSessionTokenPromise ??= fetch("/api/chat/socket-token", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(3000),
+  })
+    .then(async (res) => {
+      if (!res.ok) return undefined
+      const { token } = (await res.json()) as { token?: unknown }
+      return typeof token === "string" && token ? token : undefined
+    })
+    .catch(() => {
+      // Сеть моргнула — не запоминаем «гостя» навсегда, следующий вход спросит снова.
+      accountSessionTokenPromise = undefined
+      return undefined
+    })
+  return accountSessionTokenPromise
+}
+
 function peerIdKey(roomId: string): string {
   // Match the server's room canonicalisation (case-insensitive, separators
   // ignored) so "abc-defg" and "ABCDEFG" resolve to the same peer identity.

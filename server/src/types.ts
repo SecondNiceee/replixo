@@ -13,6 +13,8 @@ export interface JoinRoomPayload {
   roomId: string
   peerId: string
   playbackBrowserKey?: string
+  /** Токен сессии Better Auth, если человек вошёл в аккаунт. */
+  sessionToken?: string
   displayName: string
   rtpCapabilities: object
   create?: boolean

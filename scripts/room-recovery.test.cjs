@@ -81,7 +81,7 @@ function roomClient({ setup } = {}) {
     },
     'socket.io-client': { io: () => socket },
     '@/lib/chat/reply': {},
-    '@/hooks/mediasoup/types': { CLIENT_ID: 'same-page', getOrCreatePeerId: () => 'peer', getPeerToken: () => 'token', getPlaybackBrowserKey: () => 'test-browser-key' },
+    '@/hooks/mediasoup/types': { CLIENT_ID: 'same-page', getOrCreatePeerId: () => 'peer', getPeerToken: () => 'token', getPlaybackBrowserKey: () => 'test-browser-key', getAccountSessionToken: async () => undefined },
     'mediasoup-client': { Device: class { async load() {} } },
     './mediasoup/types': {},
     './mediasoup/use-transports': {
@@ -216,7 +216,7 @@ test('leaving the room cancels a pending retry', async () => {
   assert.equal(h.actions.at(-1).type, 'DISCONNECTED')
 })
 
-function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackBrowserKey } = {}) {
+function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackBrowserKey, sessionToken } = {}) {
   const peers = new Map()
   const owners = new Map()
   const clients = new Map()
@@ -253,6 +253,10 @@ function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackB
     'node:crypto': require('node:crypto'),
     '../Peer': loadTs('server/src/Peer.ts', {}),
     '../db': { getRoomMessages: async () => [], getRoomReadMarkers: async () => [] },
+    // Only "valid-session" is a real signed-in session; anything else is a guest.
+    '../dm/db': {
+      validateSessionToken: async (token) => (token === 'valid-session' ? { userId: 'user-1', name: '', username: null } : null),
+    },
     '../config': { MAX_PEERS_PER_ROOM: 1 },
     '../limits': { clientIp: () => '127.0.0.1', createKeyedRateLimiter: () => () => true },
   })
@@ -274,7 +278,7 @@ function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackB
     return connection
   }
   const join = (connection, peerToken, reply) => connection.inbound('joinRoom', {
-    roomId, peerId, clientId: 'same-page', peerToken, playbackBrowserKey, displayName: 'Test',
+    roomId, peerId, clientId: 'same-page', peerToken, playbackBrowserKey, sessionToken, displayName: 'Test',
   }, reply)
   const joinAndWait = (connection, token) => new Promise((resolve, reject) => {
     join(connection, token, (error, data) => error ? reject(new Error(error)) : resolve(data))
@@ -328,4 +332,21 @@ test('the same browser gets one playback ID in different rooms and after reconne
   assert.equal(b.joinedPeers[0].playbackId, id)
   assert.equal(a.peers.get('peer-a').playbackId, id)
   assert.equal(a.joinedPeers[0].playbackBrowserKey, undefined)
+})
+
+test('a signed-in user gets the same playback ID from different browsers; a bad token falls back to the browser', async () => {
+  const laptop = roomServer({ roomId: 'ROOM-A', peerId: 'peer-a', playbackBrowserKey: 'laptop-browser-key', sessionToken: 'valid-session' })
+  const phone = roomServer({ roomId: 'ROOM-B', peerId: 'peer-b', playbackBrowserKey: 'phone-browser-key', sessionToken: 'valid-session' })
+  const forged = roomServer({ roomId: 'ROOM-C', peerId: 'peer-c', playbackBrowserKey: 'laptop-browser-key', sessionToken: 'forged-session' })
+  await laptop.joinAndWait(laptop.socket('laptop'))
+  await phone.joinAndWait(phone.socket('phone'))
+  await forged.joinAndWait(forged.socket('forged'))
+
+  const accountId = laptop.peers.get('peer-a').playbackId
+  assert.match(accountId, /^[a-f0-9]{64}$/)
+  assert.equal(phone.peers.get('peer-b').playbackId, accountId)
+  // A token the server can't verify must not borrow the account identity.
+  const forgedId = forged.peers.get('peer-c').playbackId
+  assert.notEqual(forgedId, accountId)
+  assert.equal(forgedId, require('node:crypto').createHash('sha256').update('laptop-browser-key').digest('hex'))
 })
