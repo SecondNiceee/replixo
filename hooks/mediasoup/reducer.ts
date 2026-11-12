@@ -30,7 +30,7 @@ export type Action =
   | { type: "CONNECTED"; localStream: MediaStream }
   | { type: "DISCONNECTED" }
   | { type: "ERROR"; error: string }
-  | { type: "PEER_JOINED"; peerId: string; displayName: string }
+  | { type: "PEER_JOINED"; peerId: string; displayName: string; playbackId?: string }
   | { type: "PEER_STREAM"; peerId: string; displayName: string; kind: "video" | "audio"; source: MediaSource; stream: MediaStream }
   | { type: "PEER_LEFT"; peerId: string }
   | { type: "PEER_PRODUCER_CLOSED"; peerId: string; source: MediaSource; kind: "video" | "audio" }
@@ -63,10 +63,15 @@ export function reducer(state: State, action: Action): State {
       return { ...state, status: "error", error: action.error }
 
     case "PEER_JOINED": {
+      const existing = state.peers.get(action.peerId)
+      if (existing && (!action.playbackId || existing.playbackId === action.playbackId)) return state
       const peers = new Map(state.peers)
-      if (!peers.has(action.peerId)) {
-        peers.set(action.peerId, { peerId: action.peerId, displayName: action.displayName })
-      }
+      peers.set(action.peerId, {
+        ...existing,
+        peerId: action.peerId,
+        displayName: action.displayName,
+        playbackId: action.playbackId,
+      })
       return { ...state, peers }
     }
 

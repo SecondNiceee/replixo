@@ -12,6 +12,7 @@ import {
   SERVER_URL,
   CLIENT_ID,
   getOrCreatePeerId,
+  getPlaybackBrowserKey,
   getPeerToken,
   setPeerToken,
 } from "@/hooks/mediasoup/types"
@@ -414,6 +415,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         rtpCapabilities: object
         existingPeers: Array<{
           peerId: string
+          playbackId?: string
           displayName: string
           producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
         }>
@@ -637,6 +639,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           peerId: peerIdRef.current,
           clientId: CLIENT_ID,
           peerToken: getPeerToken(roomId),
+          playbackBrowserKey: getPlaybackBrowserKey(),
           displayName,
           rtpCapabilities: {},
           create,

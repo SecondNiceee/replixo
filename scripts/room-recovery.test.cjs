@@ -81,7 +81,7 @@ function roomClient({ setup } = {}) {
     },
     'socket.io-client': { io: () => socket },
     '@/lib/chat/reply': {},
-    '@/hooks/mediasoup/types': { CLIENT_ID: 'same-page', getOrCreatePeerId: () => 'peer', getPeerToken: () => 'token' },
+    '@/hooks/mediasoup/types': { CLIENT_ID: 'same-page', getOrCreatePeerId: () => 'peer', getPeerToken: () => 'token', getPlaybackBrowserKey: () => 'test-browser-key' },
     'mediasoup-client': { Device: class { async load() {} } },
     './mediasoup/types': {},
     './mediasoup/use-transports': {
@@ -216,12 +216,13 @@ test('leaving the room cancels a pending retry', async () => {
   assert.equal(h.actions.at(-1).type, 'DISCONNECTED')
 })
 
-function roomServer({ loadRoom } = {}) {
+function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackBrowserKey } = {}) {
   const peers = new Map()
   const owners = new Map()
   const clients = new Map()
   const tokens = new Map()
   const broadcasts = []
+  const joinedPeers = []
   const sessions = new Map()
   const room = {
     getPeer: (id) => peers.get(id), hasPeer: (id) => peers.has(id),
@@ -231,7 +232,7 @@ function roomServer({ loadRoom } = {}) {
     presentationDrawings: new Map(),
   }
   const roomRegistry = {
-    rooms: new Map([['TEST-ROOM', room]]), isRoomKnown: () => true,
+    rooms: new Map([[roomId, room]]), isRoomKnown: () => true,
     getOrCreateRoom: async () => { await loadRoom?.(); return room },
     hasPeerToken: (_, id) => tokens.has(id),
     verifyPeerToken: (_, id, token) => tokens.get(id) === token,
@@ -249,6 +250,7 @@ function roomServer({ loadRoom } = {}) {
   }
   const { registerMediaHandlers } = loadTs('server/src/socket/media-handlers.ts', {
     ...shared,
+    'node:crypto': require('node:crypto'),
     '../Peer': loadTs('server/src/Peer.ts', {}),
     '../db': { getRoomMessages: async () => [], getRoomReadMarkers: async () => [] },
     '../config': { MAX_PEERS_PER_ROOM: 1 },
@@ -260,7 +262,10 @@ function roomServer({ loadRoom } = {}) {
     connection.connectAs(id)
     connection.handshake = { headers: {}, address: '127.0.0.1' }
     connection.join = () => {}
-    connection.to = () => ({ emit: (event) => broadcasts.push(event) })
+    connection.to = () => ({ emit: (event, payload) => {
+      broadcasts.push(event)
+      if (event === 'peerJoined') joinedPeers.push(payload)
+    } })
     io.sockets.sockets.set(id, connection)
     const session = { roomId: null, peerId: null }
     sessions.set(id, session)
@@ -269,12 +274,12 @@ function roomServer({ loadRoom } = {}) {
     return connection
   }
   const join = (connection, peerToken, reply) => connection.inbound('joinRoom', {
-    roomId: 'TEST-ROOM', peerId: 'peer', clientId: 'same-page', peerToken, displayName: 'Test',
+    roomId, peerId, clientId: 'same-page', peerToken, playbackBrowserKey, displayName: 'Test',
   }, reply)
   const joinAndWait = (connection, token) => new Promise((resolve, reject) => {
     join(connection, token, (error, data) => error ? reject(new Error(error)) : resolve(data))
   })
-  return { socket, join, joinAndWait, owners, broadcasts, peers, sessions }
+  return { socket, join, joinAndWait, owners, broadcasts, joinedPeers, peers, sessions }
 }
 
 test('a full rejoin replaces the last peer in place and ignores a stale leave', async () => {
@@ -308,4 +313,19 @@ test('a join that finishes loading after its socket disconnected cannot take own
   assert.equal(server.owners.get('peer'), 'new')
   assert.equal(server.sessions.get('old').peerId, null)
   assert.deepEqual(server.broadcasts, ['peerJoined'])
+})
+
+test('the same browser gets one playback ID in different rooms and after reconnecting', async () => {
+  const playbackBrowserKey = 'test-browser-key'
+  const a = roomServer({ roomId: 'ROOM-A', peerId: 'peer-a', playbackBrowserKey })
+  const b = roomServer({ roomId: 'ROOM-B', peerId: 'peer-b', playbackBrowserKey })
+  const first = await a.joinAndWait(a.socket('first'))
+  await b.joinAndWait(b.socket('second'))
+  await a.joinAndWait(a.socket('reconnect'), first.peerToken)
+
+  const id = a.joinedPeers[0].playbackId
+  assert.match(id, /^[a-f0-9]{64}$/)
+  assert.equal(b.joinedPeers[0].playbackId, id)
+  assert.equal(a.peers.get('peer-a').playbackId, id)
+  assert.equal(a.joinedPeers[0].playbackBrowserKey, undefined)
 })

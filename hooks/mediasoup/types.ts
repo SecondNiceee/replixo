@@ -18,6 +18,7 @@ import type { ReplyRef } from "@/lib/chat/reply"
 
 export interface RemotePeer {
   peerId: string
+  playbackId?: string
   displayName: string
   videoStream?: MediaStream
   audioStream?: MediaStream
@@ -322,6 +323,24 @@ function createRandomId(): string {
  * like a duplicate and the page would kick itself out of the room.
  */
 export const CLIENT_ID = createRandomId()
+
+const PLAYBACK_KEY_STORAGE = "replixo:playback-browser-key"
+let playbackBrowserKey: string | undefined
+
+// Shared across calls in this browser profile. The server publishes a hash
+// for volume preferences; room ownership still uses the per-room peer token.
+export function getPlaybackBrowserKey(): string | undefined {
+  if (typeof window === "undefined") return
+  if (playbackBrowserKey) return playbackBrowserKey
+
+  try {
+    playbackBrowserKey = window.localStorage.getItem(PLAYBACK_KEY_STORAGE) || createRandomId()
+    window.localStorage.setItem(PLAYBACK_KEY_STORAGE, playbackBrowserKey)
+  } catch {
+    playbackBrowserKey ??= createRandomId()
+  }
+  return playbackBrowserKey
+}
 
 function peerIdKey(roomId: string): string {
   // Match the server's room canonicalisation (case-insensitive, separators

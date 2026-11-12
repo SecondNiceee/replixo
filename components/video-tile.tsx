@@ -5,6 +5,7 @@ import { MicOff, User, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
 import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
+import { DEFAULT_PLAYBACK_SETTINGS, usePlaybackSettingsStore } from "@/stores/playback-settings-store"
 import {
   StreamAnnotationCanvas,
   type AnnotationTool,
@@ -29,11 +30,13 @@ export interface VideoTileAnnotation {
 // Slider position that corresponds to the stream's natural loudness (gain 1.0).
 // The slider runs 0..1; this is the default so users have headroom both down
 // (quieter) and up (louder, up to 1/NORMAL_VOLUME ≈ 1.67x at 100%).
-const NORMAL_VOLUME = 0.6
+const NORMAL_VOLUME = DEFAULT_PLAYBACK_SETTINGS.volume
 
 interface VideoTileProps {
   stream?: MediaStream
   audioStream?: MediaStream
+  peerId?: string
+  playbackId?: string
   // For the local tile we don't get a separate audioStream, so the parent can
   // pass the local stream here purely for the speaking indicator.
   speakingStream?: MediaStream
@@ -51,6 +54,8 @@ interface VideoTileProps {
 export function VideoTile({
   stream,
   audioStream,
+  peerId,
+  playbackId,
   speakingStream,
   displayName,
   isMuted = false,
@@ -68,14 +73,26 @@ export function VideoTile({
   // coordinates map to the same screen pixels across every participant.
   const [videoBox, setVideoBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
 
-  // Per-user local audio controls (remote tiles only).
-  // `volume` is the slider position in 0..1 (shown as 0%..100%). The default
-  // sits at NORMAL_VOLUME (60%), which maps to the stream's natural loudness
-  // (gain 1.0). Dragging below 60% makes the participant quieter; dragging
-  // above 60% boosts them louder (up to ~1.67x at 100%).
-  const [localMuted, setLocalMuted] = useState(false)
-  const [volume, setVolume] = useState(NORMAL_VOLUME)
+  const source = isScreen ? "screen" : "voice"
+  const roomPlaybackKey = !isLocal && peerId ? `${source}:${peerId}` : null
+  const browserPlaybackKey = !isLocal && playbackId ? `browser:${source}:${playbackId}` : null
+  const playbackKey = browserPlaybackKey ?? roomPlaybackKey
+  const browserSettings = usePlaybackSettingsStore((state) =>
+    browserPlaybackKey ? state.bySource[browserPlaybackKey] : undefined,
+  )
+  const roomSettings = usePlaybackSettingsStore((state) =>
+    roomPlaybackKey ? state.bySource[roomPlaybackKey] : undefined,
+  )
+  const { volume, muted: localMuted } = browserSettings ?? roomSettings ?? DEFAULT_PLAYBACK_SETTINGS
+  const setPlayback = usePlaybackSettingsStore((state) => state.setPlayback)
   const [isDragging, setIsDragging] = useState(false)
+
+  useEffect(() => {
+    // Carry forward a saved room setting once this peer has a browser ID.
+    if (browserPlaybackKey && roomSettings && !usePlaybackSettingsStore.getState().bySource[browserPlaybackKey]) {
+      setPlayback(browserPlaybackKey, roomSettings)
+    }
+  }, [browserPlaybackKey, roomSettings, setPlayback])
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
   const analysedStream = isLocal ? speakingStream : audioStream
@@ -134,20 +151,7 @@ export function VideoTile({
     }
   }, [stream])
 
-  // Play remote audio through a dedicated <audio> element. Local audio is
-  // never played back to avoid echo/feedback. Playback + autoplay-unlock is
-  // handled centrally by the audio-unlock manager.
-  // On iOS we also pass the raw MediaStream so the manager can route it
-  // through an AudioContext (the only reliable path on mobile Safari).
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || !audioStream || isLocal) return
-    audio.srcObject = audioStream
-    const unregister = registerAudioElement(audio, audioStream)
-    return unregister
-  }, [audioStream, isLocal])
-
-  // Apply per-user local mute / volume to the remote audio.
+  // Apply gain before attaching a new stream so it starts at the saved level.
   // Remote audio is routed through an AudioContext gain node on every platform
   // (see audio-unlock), so the gain node is the authoritative volume control.
   // setStreamVolume returns true when the stream is routed through the context;
@@ -169,10 +173,21 @@ export function VideoTile({
         // HTMLMediaElement.volume only accepts 0..1, so boosting (>1) is only
         // possible on the AudioContext gain path above. Clamp the fallback.
         audio.volume = Math.max(0, Math.min(1, gain))
-        audio.muted = localMuted
+        audio.muted = gain === 0
       }
     }
   }, [volume, localMuted, isLocal, audioStream])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || !audioStream || isLocal) return
+    audio.srcObject = audioStream
+    const unregister = registerAudioElement(audio, audioStream)
+    return () => {
+      unregister()
+      audio.srcObject = null
+    }
+  }, [audioStream, isLocal])
 
   // Track the displayed video rectangle (accounting for object-contain
   // letterboxing) so the drawing canvas can overlay exactly the screen content.
@@ -277,7 +292,7 @@ export function VideoTile({
           tiles (their system audio arrives as `audioStream` here and is routed
           through the same per-stream gain node). Hidden when there's no audio
           to control so we never show a dead slider. */}
-      {!isLocal && audioStream && (
+      {playbackKey && audioStream && (
         <div
           className={cn(
             // Bottom-right corner, vertically aligned with the name label in
@@ -289,7 +304,7 @@ export function VideoTile({
           )}
         >
           <button
-            onClick={() => setLocalMuted((m) => !m)}
+            onClick={() => setPlayback(playbackKey, { volume, muted: !localMuted })}
             className="flex size-6 items-center justify-center rounded-full text-white transition-colors hover:bg-white/15"
             aria-label={
               localMuted
@@ -311,8 +326,7 @@ export function VideoTile({
             value={volume}
             onChange={(e) => {
               const v = Number(e.target.value)
-              setVolume(v)
-              setLocalMuted(v === 0)
+              setPlayback(playbackKey, { volume: v, muted: v === 0 })
             }}
             onPointerDown={() => setIsDragging(true)}
             onPointerUp={() => setIsDragging(false)}

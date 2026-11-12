@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { Peer } from '../Peer'
 import { getRoomMessages, getRoomReadMarkers } from '../db'
 import type {
@@ -70,7 +71,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
   socket.on(
     'joinRoom',
     async (payload: JoinRoomPayload, callback: Callback<{ rtpCapabilities: object; existingPeers: object[] }>) => {
-      const { peerId, displayName, rtpCapabilities, create, clientId, peerToken } = payload ?? {}
+      const { peerId, displayName, rtpCapabilities, create, clientId, peerToken, playbackBrowserKey } = payload ?? {}
       const roomId = canonicalRoomCode(payload?.roomId)
       const sequence = ++joinSequence
 
@@ -146,6 +147,12 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         const closedProducers = oldPeer && !repeatedJoin ? [...oldPeer.producers.keys()] : []
         if (!repeatedJoin) oldPeer?.close()
         const peer = repeatedJoin ? oldPeer! : new Peer({ peerId, displayName: displayName.trim(), socketId: socket.id })
+        peer.playbackId = oldPeer?.playbackId
+        if (!peer.playbackId && typeof playbackBrowserKey === 'string' && /^[a-z0-9-]{12,64}$/i.test(playbackBrowserKey)) {
+          // Other participants only receive the digest, so the ID they see
+          // cannot be reused as the browser key for their volume settings.
+          peer.playbackId = createHash('sha256').update(playbackBrowserKey).digest('hex')
+        }
         peer.displayName = displayName.trim()
         peer.rtpCapabilities = rtpCapabilities
         if (!repeatedJoin) room.addPeer(peer)
@@ -170,7 +177,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
 
         // A repeated acknowledgement from the same socket must not create a
         // second presence event or replay the join sound for other clients.
-        if (!oldPeer) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim() })
+        if (!oldPeer) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim(), playbackId: peer.playbackId })
 
         // Load persisted chat history so the joining peer (or someone who just
         // reloaded the page) sees prior messages. Empty when persistence is off.
@@ -337,6 +344,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // Notify all other peers in the room about the new producer
         socket.to(roomId).emit('newProducer', {
           peerId,
+          playbackId: peer.playbackId,
           displayName: peer.displayName,
           producerId: result.producerId,
           kind,

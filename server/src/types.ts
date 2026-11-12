@@ -12,6 +12,7 @@ import type {
 export interface JoinRoomPayload {
   roomId: string
   peerId: string
+  playbackBrowserKey?: string
   displayName: string
   rtpCapabilities: object
   create?: boolean
@@ -137,12 +138,14 @@ export interface ConsumedPayload {
 
 export interface ExistingPeerPayload {
   peerId: string
+  playbackId?: string
   displayName: string
   producers: { producerId: string; kind: string; appData: Record<string, unknown> }[]
 }
 
 export interface NewProducerPayload {
   peerId: string
+  playbackId?: string
   displayName: string
   producerId: string
   kind: string

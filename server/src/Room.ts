@@ -110,6 +110,7 @@ export class Room {
       if (peer.peerId === requestingPeerId) continue
       result.push({
         peerId: peer.peerId,
+        playbackId: peer.playbackId,
         displayName: peer.displayName,
         producers: [...peer.producers.values()].map((p) => ({
           producerId: p.id,

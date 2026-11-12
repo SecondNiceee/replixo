@@ -280,7 +280,9 @@ export function registerAudioElement(el: HTMLAudioElement, stream?: MediaStream)
     // In both cases play the element directly so the participant is audible.
     // When the deferred node is later built, buildStreamNodes() mutes this
     // element to prevent double playback.
-    el.muted = false
+    const gain = stream ? streamVolumes.get(stream) ?? 1 : 1
+    el.volume = Math.min(1, gain)
+    el.muted = gain === 0
     const p = el.play()
     if (p && typeof p.then === "function") {
       p.catch(() => setBlocked(true))
