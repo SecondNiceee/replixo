@@ -22,7 +22,7 @@ const MAX_ENTRIES = 300
 
 interface PlaybackSettingsState {
   bySource: Partial<Record<string, StoredPlaybackSettings>>
-  setPlayback: (key: string, settings: PlaybackSettings) => void
+  setPlayback: (key: string, settings: PlaybackSettings, keepDefault?: boolean) => void
 }
 
 function isDefault(s: PlaybackSettings): boolean {
@@ -33,12 +33,11 @@ export const usePlaybackSettingsStore = create<PlaybackSettingsState>()(
   persist(
     (set) => ({
       bySource: {},
-      setPlayback: (key, settings) =>
+      setPlayback: (key, settings, keepDefault = false) =>
         set((state) => {
           const bySource = { ...state.bySource }
-          // Вернули громкость к обычной — хранить нечего, запись только
-          // занимала бы место.
-          if (isDefault(settings)) {
+          // An explicit account setting of 60% takes precedence over guest settings.
+          if (!keepDefault && isDefault(settings)) {
             delete bySource[key]
           } else {
             bySource[key] = { volume: settings.volume, muted: settings.muted, at: Date.now() }

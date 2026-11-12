@@ -68,14 +68,14 @@ export function registerRoomSocketListeners(socket: Socket, deps: RoomSocketList
     })
   })
 
-  socket.on("peerJoined", ({ peerId: joinedId, displayName: joinedName, playbackId }) => {
+  socket.on("peerJoined", ({ peerId: joinedId, displayName: joinedName, playbackId, browserPlaybackId }) => {
     if (joinedId === peerIdRef.current) return
-    dispatch({ type: "PEER_JOINED", peerId: joinedId, displayName: joinedName, playbackId })
+    dispatch({ type: "PEER_JOINED", peerId: joinedId, displayName: joinedName, playbackId, browserPlaybackId })
     playJoinSound()
   })
 
-  socket.on("newProducer", async ({ peerId: remotePeerId, displayName: remoteName, playbackId, producerId, kind, appData }) => {
-    if (playbackId) dispatch({ type: "PEER_JOINED", peerId: remotePeerId, displayName: remoteName, playbackId })
+  socket.on("newProducer", async ({ peerId: remotePeerId, displayName: remoteName, playbackId, browserPlaybackId, producerId, kind, appData }) => {
+    if (playbackId) dispatch({ type: "PEER_JOINED", peerId: remotePeerId, displayName: remoteName, playbackId, browserPlaybackId })
     const waitForTransport = (): Promise<boolean> =>
       new Promise((resolve) => {
         if (recvTransportRef.current) { resolve(true); return }

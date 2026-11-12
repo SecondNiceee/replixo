@@ -303,6 +303,7 @@ export function useTransports({
       existingPeers: Array<{
         peerId: string
         playbackId?: string
+        browserPlaybackId?: string
         displayName: string
         producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
       }>,
@@ -331,8 +332,8 @@ export function useTransports({
       // would be invisible to a newcomer — they'd see fewer participants than
       // everyone else. Dispatching PEER_JOINED here guarantees the roster is
       // complete regardless of who is currently sending audio/video.
-      for (const { peerId: remotePeerId, displayName, playbackId } of existingPeers) {
-        dispatch({ type: "PEER_JOINED", peerId: remotePeerId, displayName, playbackId })
+      for (const { peerId: remotePeerId, displayName, playbackId, browserPlaybackId } of existingPeers) {
+        dispatch({ type: "PEER_JOINED", peerId: remotePeerId, displayName, playbackId, browserPlaybackId })
       }
 
       await Promise.all(

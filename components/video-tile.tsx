@@ -37,6 +37,7 @@ interface VideoTileProps {
   audioStream?: MediaStream
   peerId?: string
   playbackId?: string
+  browserPlaybackId?: string
   // For the local tile we don't get a separate audioStream, so the parent can
   // pass the local stream here purely for the speaking indicator.
   speakingStream?: MediaStream
@@ -56,6 +57,7 @@ export function VideoTile({
   audioStream,
   peerId,
   playbackId,
+  browserPlaybackId,
   speakingStream,
   displayName,
   isMuted = false,
@@ -75,29 +77,32 @@ export function VideoTile({
 
   const source = isScreen ? "screen" : "voice"
   const roomPlaybackKey = !isLocal && peerId ? `${source}:${peerId}` : null
-  const browserPlaybackKey = !isLocal && playbackId ? `browser:${source}:${playbackId}` : null
-  const playbackKey = browserPlaybackKey ?? roomPlaybackKey
-  const browserSettings = usePlaybackSettingsStore((state) =>
-    browserPlaybackKey ? state.bySource[browserPlaybackKey] : undefined,
+  const stablePlaybackKey = !isLocal && playbackId ? `browser:${source}:${playbackId}` : null
+  const guestPlaybackKey = !isLocal && browserPlaybackId && browserPlaybackId !== playbackId
+    ? `browser:${source}:${browserPlaybackId}`
+    : null
+  const playbackKey = stablePlaybackKey ?? roomPlaybackKey
+  const stableSettings = usePlaybackSettingsStore((state) =>
+    stablePlaybackKey ? state.bySource[stablePlaybackKey] : undefined,
+  )
+  const guestSettings = usePlaybackSettingsStore((state) =>
+    guestPlaybackKey ? state.bySource[guestPlaybackKey] : undefined,
   )
   const roomSettings = usePlaybackSettingsStore((state) =>
     roomPlaybackKey ? state.bySource[roomPlaybackKey] : undefined,
   )
-  const { volume, muted: localMuted } = browserSettings ?? roomSettings ?? DEFAULT_PLAYBACK_SETTINGS
+  const { volume, muted: localMuted } = stableSettings ?? guestSettings ?? roomSettings ?? DEFAULT_PLAYBACK_SETTINGS
   const setPlayback = usePlaybackSettingsStore((state) => state.setPlayback)
   const [isDragging, setIsDragging] = useState(false)
 
   useEffect(() => {
-    // Carry forward a saved room setting once this peer has a browser ID.
-    if (!browserPlaybackKey || !roomPlaybackKey || !roomSettings) return
-    if (!usePlaybackSettingsStore.getState().bySource[browserPlaybackKey]) {
-      setPlayback(browserPlaybackKey, roomSettings)
+    if (!stablePlaybackKey) return
+    const previous = guestSettings ?? roomSettings
+    if (previous && !usePlaybackSettingsStore.getState().bySource[stablePlaybackKey]) {
+      setPlayback(stablePlaybackKey, previous, true)
     }
-    // The room key has served its purpose. Left behind, it would be copied
-    // forward again after the user resets the volume to default (a default
-    // value deletes the browser entry).
-    setPlayback(roomPlaybackKey, DEFAULT_PLAYBACK_SETTINGS)
-  }, [browserPlaybackKey, roomPlaybackKey, roomSettings, setPlayback])
+    if (roomPlaybackKey && roomSettings) setPlayback(roomPlaybackKey, DEFAULT_PLAYBACK_SETTINGS)
+  }, [stablePlaybackKey, roomPlaybackKey, guestSettings, roomSettings, setPlayback])
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
   const analysedStream = isLocal ? speakingStream : audioStream
@@ -309,7 +314,7 @@ export function VideoTile({
           )}
         >
           <button
-            onClick={() => setPlayback(playbackKey, { volume, muted: !localMuted })}
+            onClick={() => setPlayback(playbackKey, { volume, muted: !localMuted }, !!stablePlaybackKey)}
             className="flex size-6 items-center justify-center rounded-full text-white transition-colors hover:bg-white/15"
             aria-label={
               localMuted
@@ -331,7 +336,7 @@ export function VideoTile({
             value={volume}
             onChange={(e) => {
               const v = Number(e.target.value)
-              setPlayback(playbackKey, { volume: v, muted: v === 0 })
+              setPlayback(playbackKey, { volume: v, muted: v === 0 }, !!stablePlaybackKey)
             }}
             onPointerDown={() => setIsDragging(true)}
             onPointerUp={() => setIsDragging(false)}

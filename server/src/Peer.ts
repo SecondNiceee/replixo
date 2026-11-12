@@ -4,6 +4,7 @@ import type { PeerData } from './types'
 export class Peer implements PeerData {
   peerId: string
   playbackId?: string
+  browserPlaybackId?: string
   displayName: string
   socketId: string
   transports: Map<string, WebRtcTransport>

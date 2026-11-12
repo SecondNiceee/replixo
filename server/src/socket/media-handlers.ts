@@ -171,13 +171,16 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // приложении), гость — к браузеру. Аккаунт подделать нельзя: id берётся
         // только из проверенной сессии, а не из того, что прислал клиент.
         // Остальным уходит только хэш, сам userId/ключ браузера не раскрывается.
+        const browserPlaybackId = typeof playbackBrowserKey === 'string' && /^[a-z0-9-]{12,64}$/i.test(playbackBrowserKey)
+          ? createHash('sha256').update(playbackBrowserKey).digest('hex')
+          : undefined
         if (accountUserId) {
           peer.playbackId = createHash('sha256').update(`account:${accountUserId}`).digest('hex')
+          // Lets listeners carry over a setting made while this browser was a guest.
+          peer.browserPlaybackId = browserPlaybackId
         } else {
-          peer.playbackId = oldPeer?.playbackId
-          if (!peer.playbackId && typeof playbackBrowserKey === 'string' && /^[a-z0-9-]{12,64}$/i.test(playbackBrowserKey)) {
-            peer.playbackId = createHash('sha256').update(playbackBrowserKey).digest('hex')
-          }
+          peer.playbackId = oldPeer?.playbackId ?? browserPlaybackId
+          peer.browserPlaybackId = oldPeer?.browserPlaybackId
         }
         peer.displayName = displayName.trim()
         peer.rtpCapabilities = rtpCapabilities
@@ -203,7 +206,12 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
 
         // A repeated acknowledgement from the same socket must not create a
         // second presence event or replay the join sound for other clients.
-        if (!oldPeer) socket.to(roomId).emit('peerJoined', { peerId, displayName: displayName.trim(), playbackId: peer.playbackId })
+        if (!oldPeer) socket.to(roomId).emit('peerJoined', {
+          peerId,
+          displayName: peer.displayName,
+          playbackId: peer.playbackId,
+          browserPlaybackId: peer.browserPlaybackId,
+        })
 
         // Load persisted chat history so the joining peer (or someone who just
         // reloaded the page) sees prior messages. Empty when persistence is off.
@@ -371,6 +379,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         socket.to(roomId).emit('newProducer', {
           peerId,
           playbackId: peer.playbackId,
+          browserPlaybackId: peer.browserPlaybackId,
           displayName: peer.displayName,
           producerId: result.producerId,
           kind,

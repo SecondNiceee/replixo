@@ -111,6 +111,7 @@ export class Room {
       result.push({
         peerId: peer.peerId,
         playbackId: peer.playbackId,
+        browserPlaybackId: peer.browserPlaybackId,
         displayName: peer.displayName,
         producers: [...peer.producers.values()].map((p) => ({
           producerId: p.id,

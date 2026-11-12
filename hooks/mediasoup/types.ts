@@ -19,6 +19,7 @@ import type { ReplyRef } from "@/lib/chat/reply"
 export interface RemotePeer {
   peerId: string
   playbackId?: string
+  browserPlaybackId?: string
   displayName: string
   videoStream?: MediaStream
   audioStream?: MediaStream

@@ -9,6 +9,7 @@ import { useOverlayClickThrough } from "@/hooks/use-overlay-click-through"
 interface Peer {
   peerId: string
   playbackId?: string
+  browserPlaybackId?: string
   displayName: string
   videoStream?: MediaStream
   audioStream?: MediaStream
@@ -135,6 +136,7 @@ export function RoomVideoGrid({
                     <VideoTile
                       peerId={item.peer.peerId}
                       playbackId={item.peer.playbackId}
+                      browserPlaybackId={item.peer.browserPlaybackId}
                       stream={item.peer.videoStream}
                       audioStream={item.peer.audioStream}
                       displayName={item.peer.displayName}
@@ -206,6 +208,7 @@ export function RoomVideoGrid({
               <VideoTile
                 peerId={item.peer.peerId}
                 playbackId={item.peer.playbackId}
+                browserPlaybackId={item.peer.browserPlaybackId}
                 stream={item.peer.videoStream}
                 audioStream={item.peer.audioStream}
                 displayName={item.peer.displayName}
@@ -299,6 +302,7 @@ export function RoomVideoGrid({
               key={`${peer.peerId}-screen`}
               peerId={peer.peerId}
               playbackId={peer.playbackId}
+              browserPlaybackId={peer.browserPlaybackId}
               stream={peer.screenStream}
               audioStream={peer.screenAudioStream}
               displayName={peer.displayName}
@@ -329,6 +333,7 @@ export function RoomVideoGrid({
           key={peer.peerId}
           peerId={peer.peerId}
           playbackId={peer.playbackId}
+          browserPlaybackId={peer.browserPlaybackId}
           stream={peer.videoStream}
           audioStream={peer.audioStream}
           displayName={peer.displayName}

@@ -421,6 +421,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
         existingPeers: Array<{
           peerId: string
           playbackId?: string
+          browserPlaybackId?: string
           displayName: string
           producers: { producerId: string; kind: string; appData?: Record<string, unknown> }[]
         }>

@@ -141,6 +141,7 @@ export interface ConsumedPayload {
 export interface ExistingPeerPayload {
   peerId: string
   playbackId?: string
+  browserPlaybackId?: string
   displayName: string
   producers: { producerId: string; kind: string; appData: Record<string, unknown> }[]
 }
@@ -148,6 +149,7 @@ export interface ExistingPeerPayload {
 export interface NewProducerPayload {
   peerId: string
   playbackId?: string
+  browserPlaybackId?: string
   displayName: string
   producerId: string
   kind: string

@@ -349,4 +349,7 @@ test('a signed-in user gets the same playback ID from different browsers; a bad 
   const forgedId = forged.peers.get('peer-c').playbackId
   assert.notEqual(forgedId, accountId)
   assert.equal(forgedId, require('node:crypto').createHash('sha256').update('laptop-browser-key').digest('hex'))
+  assert.equal(laptop.joinedPeers[0].browserPlaybackId, forgedId)
+  assert.notEqual(phone.joinedPeers[0].browserPlaybackId, forgedId)
+  assert.equal(forged.joinedPeers[0].browserPlaybackId, undefined)
 })
