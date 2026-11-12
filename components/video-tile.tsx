@@ -89,10 +89,15 @@ export function VideoTile({
 
   useEffect(() => {
     // Carry forward a saved room setting once this peer has a browser ID.
-    if (browserPlaybackKey && roomSettings && !usePlaybackSettingsStore.getState().bySource[browserPlaybackKey]) {
+    if (!browserPlaybackKey || !roomPlaybackKey || !roomSettings) return
+    if (!usePlaybackSettingsStore.getState().bySource[browserPlaybackKey]) {
       setPlayback(browserPlaybackKey, roomSettings)
     }
-  }, [browserPlaybackKey, roomSettings, setPlayback])
+    // The room key has served its purpose. Left behind, it would be copied
+    // forward again after the user resets the volume to default (a default
+    // value deletes the browser entry).
+    setPlayback(roomPlaybackKey, DEFAULT_PLAYBACK_SETTINGS)
+  }, [browserPlaybackKey, roomPlaybackKey, roomSettings, setPlayback])
 
   // Analyse the relevant audio stream to drive the "speaking" ring.
   const analysedStream = isLocal ? speakingStream : audioStream
