@@ -13,6 +13,7 @@ import {
   CLIENT_ID,
   getOrCreatePeerId,
   getPlaybackBrowserKey,
+  getAccountSessionToken,
   getPeerToken,
   setPeerToken,
 } from "@/hooks/mediasoup/types"
@@ -398,8 +399,12 @@ export function useMediasoup(roomId: string, displayName: string, create = false
       }
 
       let device: DeviceType
+      let sessionToken: string | undefined
       try {
-        const { Device } = await import("mediasoup-client")
+        // Токен аккаунта грузится параллельно с библиотекой и никогда не
+        // бросает: без него человек просто войдёт как гость.
+        const [{ Device }, token] = await Promise.all([import("mediasoup-client"), getAccountSessionToken()])
+        sessionToken = token
         assertActive()
         device = new Device()
         deviceRef.current = device
@@ -640,6 +645,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           clientId: CLIENT_ID,
           peerToken: getPeerToken(roomId),
           playbackBrowserKey: getPlaybackBrowserKey(),
+          sessionToken,
           displayName,
           rtpCapabilities: {},
           create,
