@@ -216,7 +216,7 @@ test('leaving the room cancels a pending retry', async () => {
   assert.equal(h.actions.at(-1).type, 'DISCONNECTED')
 })
 
-function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackBrowserKey, sessionToken } = {}) {
+function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackBrowserKey, sessionToken, env = {}, now = Date.now } = {}) {
   const peers = new Map()
   const owners = new Map()
   const clients = new Map()
@@ -224,6 +224,7 @@ function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackB
   const broadcasts = []
   const joinedPeers = []
   const sessions = new Map()
+  const logs = []
   const room = {
     getPeer: (id) => peers.get(id), hasPeer: (id) => peers.has(id),
     addPeer: (peer) => peers.set(peer.peerId, peer),
@@ -259,6 +260,10 @@ function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackB
     },
     '../config': { MAX_PEERS_PER_ROOM: 1 },
     '../limits': { clientIp: () => '127.0.0.1', createKeyedRateLimiter: () => () => true },
+  }, {
+    process: { env },
+    Date: class extends Date { static now() { return now() } },
+    console: { ...quiet, info: (line) => logs.push(line) },
   })
   const { registerLifecycleHandlers } = loadTs('server/src/socket/lifecycle-handlers.ts', shared)
   const socket = (id) => {
@@ -283,7 +288,7 @@ function roomServer({ loadRoom, roomId = 'TEST-ROOM', peerId = 'peer', playbackB
   const joinAndWait = (connection, token) => new Promise((resolve, reject) => {
     join(connection, token, (error, data) => error ? reject(new Error(error)) : resolve(data))
   })
-  return { socket, join, joinAndWait, owners, broadcasts, joinedPeers, peers, sessions }
+  return { socket, join, joinAndWait, owners, broadcasts, joinedPeers, peers, sessions, logs }
 }
 
 test('a full rejoin replaces the last peer in place and ignores a stale leave', async () => {
@@ -352,4 +357,48 @@ test('a signed-in user gets the same playback ID from different browsers; a bad 
   assert.equal(laptop.joinedPeers[0].browserPlaybackId, forgedId)
   assert.notEqual(phone.joinedPeers[0].browserPlaybackId, forgedId)
   assert.equal(forged.joinedPeers[0].browserPlaybackId, undefined)
+})
+
+test('FPS diagnostics correlate sender and viewer samples in the configured room until the deadline', async () => {
+  let now = Date.now()
+  const env = { SCREEN_FPS_DEBUG_ROOM: 'TEST-ROOM', SCREEN_FPS_DEBUG_UNTIL: new Date(now + 60_000).toISOString() }
+  const server = roomServer({ env, now: () => now })
+  const connection = server.socket('presenter')
+  const joined = await server.joinAndWait(connection)
+  assert.equal(joined.screenFpsDebugMs, 60_000)
+
+  const producers = server.peers.get('peer').producers
+  producers.set('screen', { id: 'screen', kind: 'video', appData: { source: 'screen' } })
+  connection.inbound('screenFpsSample', { stage: 'send', producerId: 'screen', fps: 8, captureFps: 30, limitation: 'bandwidth', extra: 'ignored' })
+  assert.match(server.logs[0], /^\[screen-fps\]\[LOW\] send .*"fps":8.*"captureFps":30.*"limitation":"bandwidth"/)
+  assert.doesNotMatch(server.logs[0], /ignored/)
+
+  const viewer = roomServer({ env, peerId: 'viewer', now: () => now })
+  const viewerSocket = viewer.socket('viewer-socket')
+  await viewer.joinAndWait(viewerSocket)
+  viewer.peers.get('viewer').consumers.set('viewer-screen', {
+    id: 'viewer-screen', producerId: 'screen', kind: 'video', appData: { source: 'screen' },
+  })
+  viewerSocket.inbound('screenFpsSample', {
+    stage: 'receive', consumerId: 'viewer-screen', producerId: 'screen', fps: 9, receivedFps: 30,
+  })
+  viewerSocket.inbound('screenFpsSample', {
+    stage: 'playback', consumerId: 'viewer-screen', producerId: 'screen', fps: 6, droppedFrames: 9, visibility: 'visible',
+  })
+  assert.match(viewer.logs[0], /\[LOW\] receive .*"producerId":"screen".*"viewerPeerId":"viewer".*"fps":9.*"receivedFps":30/)
+  assert.match(viewer.logs[1], /\[LOW\] playback .*"producerId":"screen".*"consumerId":"viewer-screen".*"fps":6.*"droppedFrames":9/)
+  viewerSocket.inbound('screenFpsSample', { stage: 'receive', consumerId: 'missing', producerId: 'screen', fps: 7 })
+  assert.equal(viewer.logs.length, 2)
+
+  now += 60_000
+  connection.inbound('screenFpsSample', { stage: 'send', producerId: 'screen', fps: 7 })
+  viewerSocket.inbound('screenFpsSample', {
+    stage: 'playback', consumerId: 'viewer-screen', producerId: 'screen', fps: 7,
+  })
+  assert.equal(server.logs.length, 1)
+  assert.equal(viewer.logs.length, 2)
+
+  const otherRoom = roomServer({ env, roomId: 'OTHER-ROOM', now: () => now - 60_000 })
+  const otherJoin = await otherRoom.joinAndWait(otherRoom.socket('other'))
+  assert.equal(otherJoin.screenFpsDebugMs, 0)
 })

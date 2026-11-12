@@ -40,6 +40,18 @@ import {
 // ---------------------------------------------------------------------------
 
 const allowRoomCreationFromIp = createKeyedRateLimiter(MAX_ROOM_CREATIONS_PER_IP, ROOM_CREATE_WINDOW_MS)
+const screenFpsDebugRoom = canonicalRoomCode(process.env.SCREEN_FPS_DEBUG_ROOM)
+const screenFpsDebugUntil = Date.parse(process.env.SCREEN_FPS_DEBUG_UNTIL ?? '')
+
+function screenFpsDebugRemaining(roomId: string): number {
+  if (roomId !== screenFpsDebugRoom || !Number.isFinite(screenFpsDebugUntil)) return 0
+  return Math.max(0, screenFpsDebugUntil - Date.now())
+}
+
+function screenFpsMetric(value: unknown, max: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > max) return
+  return Math.round(value * 10) / 10
+}
 
 export function registerMediaHandlers(ctx: HandlerContext): void {
   const { io, socket, session } = ctx
@@ -67,6 +79,52 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
     session.peerId === peerId &&
     getPeerSocket(roomId, peerId) === socket.id
   )
+
+  // One sample per stage per screen every 3 s, with room for multiple shares.
+  const allowScreenFpsSample = createRateLimiter(24, 3_000)
+  socket.on('screenFpsSample', (sample: Record<string, unknown> | undefined) => {
+    const { roomId, peerId } = session
+    if (!roomId || !peerId || !screenFpsDebugRemaining(roomId) || !ownsPeer(roomId, peerId)) return
+    if (!allowScreenFpsSample() || typeof sample?.producerId !== 'string') return
+    const stage = sample.stage
+    if (stage !== 'send' && stage !== 'receive' && stage !== 'playback') return
+    const peer = rooms.get(roomId)?.getPeer(peerId)
+    const consumer = stage !== 'send' && typeof sample.consumerId === 'string' ? peer?.getConsumer(sample.consumerId) : undefined
+    const media = stage === 'send' ? peer?.getProducer(sample.producerId) : consumer
+    if (!media || media.closed || media.kind !== 'video' || media.appData.source !== 'screen') return
+    const producerId = consumer?.producerId ?? media.id
+    if (producerId !== sample.producerId) return
+
+    const fps = screenFpsMetric(sample.fps, 240)
+    if (fps === undefined) return
+    const limitation = sample.limitation
+    const visibility = sample.visibility === 'visible' || sample.visibility === 'hidden' ? sample.visibility : undefined
+    const paused = media.paused || consumer?.producerPaused || sample.paused === true
+    const details = {
+      time: new Date(Date.now()).toISOString(),
+      roomId,
+      producerId,
+      viewerPeerId: consumer ? peerId : undefined,
+      consumerId: consumer?.id,
+      fps,
+      captureFps: screenFpsMetric(sample.captureFps, 240),
+      encodedFps: screenFpsMetric(sample.encodedFps, 240),
+      receivedFps: screenFpsMetric(sample.receivedFps, 240),
+      droppedFrames: screenFpsMetric(sample.droppedFrames, 100_000),
+      kbps: screenFpsMetric(sample.kbps, 100_000),
+      lostPackets: screenFpsMetric(sample.lostPackets, 100_000),
+      rttMs: screenFpsMetric(sample.rttMs, 60_000),
+      jitterMs: screenFpsMetric(sample.jitterMs, 60_000),
+      paused,
+      muted: typeof sample.muted === 'boolean' ? sample.muted : undefined,
+      visibility,
+      limitation: limitation === 'bandwidth' || limitation === 'cpu' || limitation === 'other' || limitation === 'none'
+        ? limitation
+        : undefined,
+    }
+    const low = !paused && visibility !== 'hidden' && fps < 15
+    console.info(`[screen-fps]${low ? '[LOW]' : ''} ${stage} ${JSON.stringify(details)}`)
+  })
 
   // Любое действие над транспортами/продюсерами/консьюмерами участника можно
   // выполнять только из сокета, который этим участником и является. Иначе,
@@ -234,6 +292,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
 
         ack(callback, {
           peerToken: issuedPeerToken,
+          screenFpsDebugMs: screenFpsDebugRemaining(roomId),
           rtpCapabilities: room.getRtpCapabilities(),
           existingPeers,
           currentSlide: room.currentSlide ?? null,

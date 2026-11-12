@@ -89,6 +89,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   const screenAudioProducerRef = useRef<Producer | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenQualityRef = useRef<ScreenQuality>("auto")
+  const screenFpsDebugDeadlineRef = useRef(0)
   const selectedMicIdRef = useRef<string | undefined>(undefined)
   const consumersRef = useRef<Map<string, Consumer>>(new Map())
   const pendingClosedProducersRef = useRef<Set<string>>(new Set())
@@ -139,7 +140,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // Sub-hooks
   // ---------------------------------------------------------------------------
   const transports = useTransports({
-    roomId, peerIdRef, socketRef, deviceRef,
+    roomId, peerIdRef, socketRef, deviceRef, screenFpsDebugDeadlineRef,
     sendTransportRef, recvTransportRef,
     consumersRef, pendingClosedProducersRef,
     iceRestartingRef, iceRetryTimersRef,
@@ -151,7 +152,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   })
 
   const mediaControls = useMediaControls({
-    roomId, peerIdRef, socketRef,
+    roomId, peerIdRef, socketRef, screenFpsDebugDeadlineRef,
     sendTransportRef, localStreamRef,
     audioProducerRef, videoProducerRef,
     screenVideoProducerRef, screenAudioProducerRef,
@@ -283,6 +284,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
   // ---------------------------------------------------------------------------
   const leave = useCallback(() => {
     connectionGenerationRef.current += 1
+    screenFpsDebugDeadlineRef.current = 0
     joinInFlightRef.current = false
     recoveryInFlightRef.current = false
     wasInRoomRef.current = false
@@ -417,6 +419,7 @@ export function useMediasoup(roomId: string, displayName: string, create = false
 
       type JoinAck = {
         peerToken?: string
+        screenFpsDebugMs?: number
         rtpCapabilities: object
         existingPeers: Array<{
           peerId: string
@@ -437,6 +440,9 @@ export function useMediasoup(roomId: string, displayName: string, create = false
           if (!data) throw new Error("joinRoom returned no data")
 
           if (typeof data.peerToken === "string" && data.peerToken) setPeerToken(roomId, data.peerToken)
+          screenFpsDebugDeadlineRef.current = typeof data.screenFpsDebugMs === "number"
+            ? performance.now() + data.screenFpsDebugMs
+            : 0
 
           await device.load({ routerRtpCapabilities: data.rtpCapabilities })
           assertActive()

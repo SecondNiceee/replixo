@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react"
 import type { Socket } from "socket.io-client"
 import { requestAck } from "./socket-request"
+import { createScreenFpsReporter, monitorScreenReceive } from "@/lib/screen-fps-diagnostics"
 import type { DeviceType, Transport, Consumer, Producer, MediaSource } from "./types"
 import { normalizeSource } from "./types"
 import type { Action } from "./reducer"
@@ -18,6 +19,7 @@ interface UseTransportsParams {
   roomId: string
   peerIdRef: React.MutableRefObject<string>
   socketRef: React.MutableRefObject<Socket | null>
+  screenFpsDebugDeadlineRef: React.MutableRefObject<number>
   deviceRef: React.MutableRefObject<DeviceType | null>
   sendTransportRef: React.MutableRefObject<Transport | null>
   recvTransportRef: React.MutableRefObject<Transport | null>
@@ -45,6 +47,7 @@ export function useTransports({
   roomId,
   peerIdRef,
   socketRef,
+  screenFpsDebugDeadlineRef,
   deviceRef,
   sendTransportRef,
   recvTransportRef,
@@ -570,13 +573,19 @@ export function useTransports({
           }, { timeout: 8000 })
           if (!isCurrent()) throw new Error("Consumer setup interrupted")
 
+          const stream = new MediaStream([consumer.track])
+          if (kind === "video" && source === "screen") {
+            monitorScreenReceive(consumer, stream, producerId, createScreenFpsReporter(
+              socketRef, screenFpsDebugDeadlineRef, { producerId, consumerId: data.consumerId },
+            ))
+          }
           dispatch({
             type: "PEER_STREAM",
             peerId: remotePeerId,
             displayName,
             kind,
             source,
-            stream: new MediaStream([consumer.track]),
+            stream,
           })
           if (kind === "audio" && source === "media" && data.producerPaused) {
             dispatch({ type: "PEER_AUDIO_MUTED", peerId: remotePeerId, muted: true })

@@ -5,6 +5,7 @@ import { MicOff, User, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSpeaking } from "@/hooks/use-speaking"
 import { registerAudioElement, setStreamVolume } from "@/lib/audio-unlock"
+import { monitorScreenPlayback } from "@/lib/screen-fps-diagnostics"
 import { DEFAULT_PLAYBACK_SETTINGS, usePlaybackSettingsStore } from "@/stores/playback-settings-store"
 import {
   StreamAnnotationCanvas,
@@ -120,6 +121,9 @@ export function VideoTile({
     const video = videoRef.current
     if (!video || !stream) return
     video.srcObject = stream
+    const stopDiagnostics = isScreen && !isLocal
+      ? monitorScreenPlayback(video, stream)
+      : undefined
     // Electron/Chromium sometimes leaves a freshly-attached remote stream
     // paused (the `autoPlay` attribute doesn't always fire when srcObject is
     // set imperatively), which shows up as a black tile even though frames are
@@ -154,12 +158,13 @@ export function VideoTile({
     window.addEventListener("focus", onVisible)
     return () => {
       cancelled = true
+      stopDiagnostics?.()
       video.removeEventListener("loadedmetadata", play)
       video.removeEventListener("pause", play)
       document.removeEventListener("visibilitychange", onVisible)
       window.removeEventListener("focus", onVisible)
     }
-  }, [stream])
+  }, [stream, isScreen, isLocal])
 
   // Apply gain before attaching a new stream so it starts at the saved level.
   // Remote audio is routed through an AudioContext gain node on every platform

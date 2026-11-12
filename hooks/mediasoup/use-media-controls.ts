@@ -23,6 +23,7 @@ import {
 } from "@/lib/electron-screen-capture"
 import { rememberProducerTransport, isProducerOnStaleTransport } from "./producer-transport"
 import { SCREEN_QUALITY_PRESETS } from "./types"
+import { createScreenFpsReporter, monitorScreenRtp } from "@/lib/screen-fps-diagnostics"
 import type { Transport, Producer, ScreenQuality } from "./types"
 import type { Action } from "./reducer"
 import { CAMERA_PRODUCE_OPTIONS } from "./types"
@@ -87,6 +88,7 @@ interface UseMediaControlsParams {
   roomId: string
   peerIdRef: React.MutableRefObject<string>
   socketRef: React.MutableRefObject<Socket | null>
+  screenFpsDebugDeadlineRef: React.MutableRefObject<number>
   sendTransportRef: React.MutableRefObject<Transport | null>
   localStreamRef: React.MutableRefObject<MediaStream | null>
   audioProducerRef: React.MutableRefObject<Producer | null>
@@ -124,6 +126,7 @@ export function useMediaControls({
   roomId,
   peerIdRef,
   socketRef,
+  screenFpsDebugDeadlineRef,
   sendTransportRef,
   localStreamRef,
   audioProducerRef,
@@ -919,6 +922,9 @@ export function useMediaControls({
       })
       rememberProducerTransport(producer, transport)
       screenVideoProducerRef.current = producer
+      monitorScreenRtp(producer, "send", producer.id,
+        createScreenFpsReporter(socketRef, screenFpsDebugDeadlineRef, { producerId: producer.id }),
+      )
       try {
         const sender = producer.rtpSender
         if (sender) {
@@ -945,7 +951,7 @@ export function useMediaControls({
       rememberProducerTransport(audioProducer, transport)
       screenAudioProducerRef.current = audioProducer
     }
-  }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef])
+  }, [screenQualityRef, screenVideoProducerRef, screenAudioProducerRef, screenFpsDebugDeadlineRef, socketRef])
 
   const stopScreenShare = useCallback((options?: { silent?: boolean }) => {
     const stream = screenStreamRef.current

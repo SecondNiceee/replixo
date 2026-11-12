@@ -333,8 +333,9 @@ function attachWindowDiagnostics(win) {
   // Ошибки из renderer тоже попадают в файл — иначе после краша окна
   // DevTools-консоль недоступна.
   win.webContents.on("console-message", (event) => {
-    if (event.level !== "error" && event.level !== "warning") return
-    log[event.level === "error" ? "error" : "warn"]("renderer", event.message, `(${event.lineNumber})`)
+    const level = event.level === "error" ? "error" : event.level === "warning" ? "warn" : null
+    if (level) log[level]("renderer", event.message, `(${event.lineNumber})`)
+    else if (event.message.startsWith("[screen-fps] ")) log.info("renderer", event.message)
   })
 }
 

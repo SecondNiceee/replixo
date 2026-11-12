@@ -323,6 +323,7 @@ export class Room {
       producerId,
       rtpCapabilities,
       paused: true, // start paused, resume after client acks
+      appData: { source: producer.appData.source },
     } as Parameters<typeof recvTransport.consume>[0])
 
     consumer.on('transportclose', () => {
