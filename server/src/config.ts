@@ -58,6 +58,11 @@ export const WINDOWS_INSTALLER_PATH =
 export const WINDOWS_INSTALLER_NAME =
   process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe'
 
+/** Dedicated directory for the public electron-updater feed. */
+export const WINDOWS_UPDATES_DIR = path.resolve(
+  process.env.WINDOWS_UPDATES_DIR?.trim() || path.join(process.cwd(), 'downloads', 'updates'),
+)
+
 // Подстраховка от "осиротевших" файлов после жёсткого падения сервера (когда
 // штатная очистка при уничтожении комнаты не успела отработать). Папки комнат,
 // не изменявшиеся дольше этого срока, удаляются фоновым сборщиком. По умолчанию

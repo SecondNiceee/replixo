@@ -16,6 +16,7 @@ import {
   UPLOAD_TTL_MS,
   WINDOWS_INSTALLER_PATH,
   WINDOWS_INSTALLER_NAME,
+  WINDOWS_UPDATES_DIR,
   MAX_UPLOADS_PER_IP_PER_MINUTE,
   ROOM_UPLOAD_QUOTA,
 } from './config'
@@ -315,6 +316,23 @@ async function main(): Promise<void> {
           console.error('[download] Ошибка отдачи установщика:', dlErr.message)
         }
       })
+    })
+  })
+
+  app.get('/download/updates/windows/:file', (req, res) => {
+    const { file } = req.params
+    const manifest = file === 'latest.yml'
+    if (!manifest && !/^Replixo-Setup-\d+\.\d+\.\d+\.exe(?:\.blockmap)?$/.test(file)) {
+      res.sendStatus(404)
+      return
+    }
+    res.sendFile(file, {
+      root: WINDOWS_UPDATES_DIR,
+      headers: {
+        'Cache-Control': manifest ? 'no-store' : 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Accel-Buffering': 'no',
+      },
     })
   })
 

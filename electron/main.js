@@ -19,6 +19,7 @@ const {
   setupDiagnosticsIpc,
   log,
 } = require("./diagnostics")
+const { setupUpdates } = require("./updates")
 const {
   startCaptureRegionTracking,
   stopCaptureRegionTracking,
@@ -1158,6 +1159,7 @@ app.whenReady().then(() => {
   setupAudioCapture()
   setupDiagnosticsIpc()
   createWindow()
+  setupUpdates()
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
