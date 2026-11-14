@@ -39,7 +39,7 @@ type Pane = 'chats' | 'friends' | 'notes'
  * (активный диалог, счётчики, presence) живёт здесь — на /chat он дублировался
  * бы и терялся при переходе.
  */
-export function ProfileClient({ user }: { user: User }) {
+export function ProfileClient({ user, desktop = false }: { user: User; desktop?: boolean }) {
   const [pane, setPane] = useState<Pane>('chats')
   const [activeId, setActiveId] = useState<string | null>(null)
 
@@ -232,6 +232,7 @@ export function ProfileClient({ user }: { user: User }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 md:gap-4">
       <ProfileTopbar
+        desktop={desktop}
         pending={pending}
         pendingLoading={pendingLoading}
         sent={sent}

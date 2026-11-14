@@ -21,6 +21,7 @@ import { SentRequests } from './sent-requests'
 import type { PendingRequest, SentRequest } from './types'
 
 interface ProfileTopbarProps {
+  desktop: boolean
   pending: PendingRequest[]
   pendingLoading: boolean
   sent: SentRequest[]
@@ -39,6 +40,7 @@ type RequestsTab = 'incoming' | 'outgoing'
  * список чатов и саму переписку.
  */
 export function ProfileTopbar({
+  desktop,
   pending,
   pendingLoading,
   sent,
@@ -54,21 +56,23 @@ export function ProfileTopbar({
     { id: 'outgoing', label: 'Исходящие', count: sent.length },
   ]
 
+  const brand = (
+    <>
+      <ReplixoMark className="size-8 shrink-0 text-primary" />
+      <span>Replixo</span>
+    </>
+  )
+  const brandClass = "mr-1 flex items-center gap-2.5 text-base font-semibold tracking-tight text-foreground md:text-lg"
+
   return (
     <header className="topbar-surface flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-border/60 px-3 py-2 backdrop-blur-xl md:px-4">
-      {/* ?landing=1 — иначе / отправит авторизованного обратно в кабинет и
-          лендинг остался бы недоступен изнутри приложения. */}
-      <a
-        href="/?landing=1"
-        className="mr-1 flex items-center gap-2.5 text-base font-semibold tracking-tight text-foreground transition-opacity hover:opacity-70 md:text-lg"
-      >
-        {/* Знак тот же, что в components/logo.tsx. Его размер и задаёт высоту
-            шапки: кнопки справа ниже, так что панель растёт за счёт логотипа. */}
-        <ReplixoMark className="size-8 shrink-0 text-primary" />
-        {/* Подпись видна всегда: слово короткое, а без него шапка на узком
-            экране начиналась пустотой. */}
-        <span>Replixo</span>
-      </a>
+      {desktop ? (
+        <div className={brandClass}>{brand}</div>
+      ) : (
+        <a href="/?landing=1" className={cn(brandClass, "transition-opacity hover:opacity-70")}>
+          {brand}
+        </a>
+      )}
 
       <div className="ml-auto flex items-center gap-2">
         <ThemeToggle className="size-8" />

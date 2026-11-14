@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
+import { isDesktopRequest } from '@/lib/desktop-request'
 import { listFriends } from '@/lib/chat/friends'
 import { listConversations } from '@/lib/chat/conversations'
 import { completePresence, fetchPresence } from '@/lib/chat/presence'
@@ -17,12 +18,14 @@ export const metadata: Metadata = {
 }
 
 export default async function ProfilePage() {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const requestHeaders = await headers()
+  const desktop = isDesktopRequest(requestHeaders)
+  const session = await auth.api.getSession({ headers: requestHeaders })
 
-  // Аноним уходит на лендинг; ?auth=sign-in там сразу открывает попап входа,
-  // чтобы не заставлять искать кнопку в шапке.
+  // В приложении гость видит выбор входа или регистрации. В браузере
+  // сохраняем прямой переход к форме входа на лендинге.
   if (!session?.user) {
-    redirect('/?auth=sign-in')
+    redirect(desktop ? '/' : '/?auth=sign-in')
   }
 
   // Списки и статусы снимаем здесь, а не в браузере: пока запросы летели с
@@ -72,7 +75,7 @@ export default async function ProfilePage() {
             контекст. Без него всё, что снято выше, до компонентов не доезжает,
             и первый кадр снова рисуется пустым. */}
         <ProfileBoot friends={friends} conversations={conversations} presence={presence}>
-          <ProfileClient user={session.user} />
+          <ProfileClient user={session.user} desktop={desktop} />
         </ProfileBoot>
       </Suspense>
     </main>

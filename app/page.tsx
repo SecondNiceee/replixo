@@ -1,6 +1,8 @@
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { auth } from "@/lib/auth"
+import { isDesktopRequest } from "@/lib/desktop-request"
+import { DesktopAuth } from "@/components/desktop-auth"
 import { SiteHeader } from "@/components/site-header"
 import { Reveal } from "@/components/reveal"
 import { Hero } from "@/components/hero"
@@ -46,7 +48,7 @@ const organizationJsonLd = {
 }
 
 interface PageProps {
-  searchParams: Promise<{ landing?: string }>
+  searchParams: Promise<{ landing?: string; auth?: string }>
 }
 
 export default async function Page({ searchParams }: PageProps) {
@@ -54,13 +56,19 @@ export default async function Page({ searchParams }: PageProps) {
   // кабинет, поэтому редирект делаем на сервере, до отдачи разметки.
   // ?landing=1 — единственная лазейка: по нему из кабинета можно вернуться
   // на лендинг (тарифы, возможности, скачать приложение) без петли редиректов.
-  const { landing } = await searchParams
+  const { landing, auth: authMode } = await searchParams
+  const requestHeaders = await headers()
+  const desktop = isDesktopRequest(requestHeaders)
 
-  if (landing !== "1") {
-    const session = await auth.api.getSession({ headers: await headers() })
+  if (desktop || landing !== "1") {
+    const session = await auth.api.getSession({ headers: requestHeaders })
     if (session?.user) {
       redirect("/profile")
     }
+  }
+
+  if (desktop) {
+    return <DesktopAuth key={authMode} initialMode={authMode === "sign-in" || authMode === "sign-up" ? authMode : null} />
   }
 
   return (
