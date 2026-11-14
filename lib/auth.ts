@@ -79,8 +79,10 @@ export const auth = betterAuth({
       const resetUrl = new URL(url)
       resetUrl.searchParams.set('email', user.email)
 
+      const from = process.env.SMTP_FROM?.trim() || process.env.SMTP_USER!
+      const fromAddress = from.match(/<([^<>]+)>$/)?.[1].trim() ?? from
       await transport.sendMail({
-        from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
+        from: { name: 'Replixo', address: fromAddress },
         to: user.email,
         subject: 'Сброс пароля — Replixo',
         html: `
