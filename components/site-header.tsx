@@ -1,7 +1,7 @@
 import { headers } from 'next/headers'
+import { Logo } from "@/components/logo"
 import Link from "next/link"
 import { auth } from '@/lib/auth'
-import { Logo } from "@/components/logo"
 import { AuthButtons } from "@/components/auth-buttons"
 import { HOME_HREF, SiteNav } from "@/components/site-nav"
 import { MobileNav } from "@/components/mobile-nav"

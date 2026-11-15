@@ -1,24 +1,11 @@
-/**
- * Знак Replixo — «Aperture»: кольцо и три ламели, смыкающиеся в треугольник.
- * Тот же рисунок, что MarkAperture на /logos; цвет наследуется через
- * currentColor, поэтому размер и цвет задаются снаружи классами.
- */
+import Image from "next/image"
+import { cn } from "@/lib/utils"
+
 export function ReplixoMark({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 48 48"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden="true"
-      focusable="false"
-    >
-      <circle cx="24" cy="24" r="17" stroke="currentColor" strokeWidth="3.5" />
-      <g stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" opacity="0.85">
-        <path d="M31.79 28.5 20.74 9.36" />
-        <path d="M31.79 28.5 20.74 9.36" transform="rotate(120 24 24)" />
-        <path d="M31.79 28.5 20.74 9.36" transform="rotate(240 24 24)" />
-      </g>
-    </svg>
+    <span aria-hidden="true" className={cn("inline-block size-9 shrink-0", className)}>
+      <Image className="theme-icon-light size-full" src="/replixo-camera-light.svg" width={80} height={80} alt="" unoptimized />
+      <Image className="theme-icon-dark size-full" src="/replixo-camera-dark.svg" width={80} height={80} alt="" unoptimized />
+    </span>
   )
 }

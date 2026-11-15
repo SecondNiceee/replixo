@@ -58,7 +58,7 @@ export function ProfileTopbar({
 
   const brand = (
     <>
-      <ReplixoMark className="size-8 shrink-0 text-primary" />
+      <ReplixoMark className="size-8" />
       <span>Replixo</span>
     </>
   )

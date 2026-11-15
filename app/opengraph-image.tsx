@@ -10,13 +10,23 @@ const MUTED = "#7d8196"
 
 // Встроенный шрифт ImageResponse не содержит кириллицы, поэтому в карточке
 // только латиница: знак, название и домен.
-const mark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <circle cx="24" cy="24" r="17" stroke="${FOREGROUND}" stroke-width="3.5"/>
-  <g stroke="${FOREGROUND}" stroke-width="3.5" stroke-linecap="round" opacity="0.85">
-    <path d="M31.79 28.5 20.74 9.36"/>
-    <path d="M31.79 28.5 20.74 9.36" transform="rotate(120 24 24)"/>
-    <path d="M31.79 28.5 20.74 9.36" transform="rotate(240 24 24)"/>
+const mark = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop class="tile-top" stop-color="#2b3034"/>
+      <stop offset="1" class="tile-bottom" stop-color="#101416"/>
+    </linearGradient>
+    <linearGradient id="camera" x1="0" y1="0" x2="0" y2="1">
+      <stop class="camera-top" stop-color="#14ffe1"/>
+      <stop offset="1" class="camera-bottom" stop-color="#00e7b4"/>
+    </linearGradient>
+  </defs>
+  <rect class="tile-border" x="1" y="1" width="78" height="78" rx="18" fill="url(#tile)" stroke="#1c2226" stroke-width="2"/>
+  <g fill="url(#camera)">
+    <path d="M48 35 59 27a3 3 0 0 1 5 2.4v21.2a3 3 0 0 1-5 2.4l-11-8Z"/>
+    <path d="M29 34.5a1.5 1.5 0 0 1 2.2-1.3l10 5.5a1.5 1.5 0 0 1 0 2.6l-10 5.5a1.5 1.5 0 0 1-2.2-1.3Z"/>
   </g>
+  <rect x="19" y="24" width="30" height="32" rx="7" fill="none" stroke="url(#camera)" stroke-width="5.5"/>
 </svg>`
 
 export default function OpengraphImage() {

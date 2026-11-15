@@ -14,7 +14,7 @@ export function DesktopAuth({ initialMode }: { initialMode: AuthMode | null }) {
       <div className="flex min-h-full flex-col items-center justify-center">
         <section aria-labelledby="desktop-auth-heading" className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8">
           <div className="mb-6 flex items-center gap-3">
-            <ReplixoMark className="size-9 text-primary" />
+            <ReplixoMark />
             <h1 id="desktop-auth-heading" className="text-xl font-semibold">Replixo</h1>
           </div>
           {mode ? (

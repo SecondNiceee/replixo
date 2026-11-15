@@ -18,7 +18,7 @@ export default function NotFound() {
           href="/"
           className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <ReplixoMark className="size-8 text-primary" />
+          <ReplixoMark className="size-8" />
           <span className="text-lg font-semibold tracking-tight text-foreground">Replixo</span>
         </Link>
       </header>
@@ -28,7 +28,7 @@ export default function NotFound() {
         className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-8 py-16 text-center"
       >
         <div className="relative flex items-center justify-center">
-          <ReplixoMark className="size-40 text-foreground/10 sm:size-52" />
+          <ReplixoMark className="size-40 opacity-15 sm:size-52" />
           <span className="absolute font-mono text-sm tracking-[0.3em] text-muted-foreground">
             404
           </span>
