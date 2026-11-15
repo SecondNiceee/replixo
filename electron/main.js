@@ -230,15 +230,18 @@ function createWindow() {
   mainWindow.webContents.on("did-start-navigation", (details) => {
     if (details.isMainFrame && !details.isSameDocument) {
       stopAudioCapture()
-      stopGlobalMouseHook()
-      stopCaptureRegionTracking()
+      exitOverlayMode()
     }
   })
+
+  mainWindow.on("blur", releaseOverlayChatFocus)
 
   mainWindow.on("closed", () => {
     clearTimeout(forceShowTimer)
     // PowerShell-воркер держит ссылку на окно — без остановки он пережил бы его.
+    stopGlobalMouseHook()
     stopCaptureRegionTracking()
+    overlayRestoreState = null
     mainWindow = null
   })
 }
@@ -643,16 +646,40 @@ function startCaptureRegionForOverlay() {
   })
 }
 
+function releaseOverlayChatFocus() {
+  if (!overlayRestoreState || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isFocusable()) return
+  mainWindow.setFocusable(false)
+  if (mainWindow.isFocused()) mainWindow.blur()
+}
+
+function exitOverlayMode() {
+  const restoreState = overlayRestoreState
+  overlayRestoreState = null
+  stopGlobalMouseHook()
+  stopCaptureRegionTracking()
+  if (!restoreState || !mainWindow || mainWindow.isDestroyed()) return
+
+  mainWindow.setIgnoreMouseEvents(false)
+  mainWindow.setAlwaysOnTop(restoreState.alwaysOnTop)
+  mainWindow.setVisibleOnAllWorkspaces(false)
+  mainWindow.setBounds(restoreState.bounds)
+  mainWindow.setFocusable(restoreState.focusable)
+
+  if (restoreState.isMaximized) mainWindow.maximize()
+}
+
 function setupOverlayMode() {
-  ipcMain.on("enter-overlay-mode", () => {
-    if (!mainWindow) return
+  ipcMain.on("enter-overlay-mode", (event) => {
+    if (event.sender !== mainWindow?.webContents || overlayRestoreState) return
 
     // Сохраняем прежнее состояние для восстановления
     overlayRestoreState = {
       bounds: mainWindow.getBounds(),
       isMaximized: mainWindow.isMaximized(),
       alwaysOnTop: mainWindow.isAlwaysOnTop(),
+      focusable: mainWindow.isFocusable(),
     }
+    releaseOverlayChatFocus()
 
     // Целевой монитор считаем от ИСТОЧНИКА, а не от окна приложения: при
     // демонстрации второго монитора overlay должен накрыть именно его.
@@ -677,21 +704,20 @@ function setupOverlayMode() {
   // канвас не мигнул на весь экран до первого тика опроса.
   ipcMain.handle("get-capture-region", () => getCaptureRegion())
 
-  ipcMain.on("exit-overlay-mode", () => {
-    stopGlobalMouseHook()
-    stopCaptureRegionTracking()
-    if (!mainWindow || !overlayRestoreState) return
+  ipcMain.on("exit-overlay-mode", (event) => {
+    if (event.sender === mainWindow?.webContents) exitOverlayMode()
+  })
 
-    mainWindow.setIgnoreMouseEvents(false)
-    mainWindow.setAlwaysOnTop(overlayRestoreState.alwaysOnTop)
-    mainWindow.setVisibleOnAllWorkspaces(false)
-    mainWindow.setBounds(overlayRestoreState.bounds)
+  ipcMain.on("focus-overlay-chat", (event) => {
+    if (!overlayRestoreState || event.sender !== mainWindow?.webContents) return
+    if (mainWindow.isFocused()) return
+    mainWindow.setFocusable(true)
+    mainWindow.focus()
+    if (!mainWindow.isFocused()) releaseOverlayChatFocus()
+  })
 
-    if (overlayRestoreState.isMaximized) {
-      mainWindow.maximize()
-    }
-
-    overlayRestoreState = null
+  ipcMain.on("release-overlay-chat-focus", (event) => {
+    if (event.sender === mainWindow?.webContents) releaseOverlayChatFocus()
   })
 }
 

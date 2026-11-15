@@ -34,6 +34,7 @@ import { getOrCreatePeerId } from "@/hooks/mediasoup/types"
 
 interface RoomChatProps {
   open: boolean
+  overlayMode: boolean
   onClose: () => void
   roomId: string
   messages: ChatMessage[]
@@ -136,6 +137,7 @@ function PendingAttachment({
 
 export const RoomChat = memo(function RoomChat({
   open,
+  overlayMode,
   onClose,
   roomId,
   messages,
@@ -522,9 +524,13 @@ export const RoomChat = memo(function RoomChat({
             }}
             onSubmit={submit}
             onPaste={handlePaste}
+            onClick={open && overlayMode ? (event) => {
+              event.currentTarget.focus({ preventScroll: true })
+              window.electronAPI?.focusOverlayChat?.()
+            } : undefined}
             disabled={false}
             maxLength={2000}
-            focusKey={replyTo?.id ?? null}
+            focusKey={overlayMode ? null : replyTo?.id ?? null}
             onEscape={replyTo ? cancelReply : undefined}
           />
           <Button

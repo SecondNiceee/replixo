@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   enterOverlayMode: () => ipcRenderer.send("enter-overlay-mode"),
   // Выход из overlay-режима (восстановление нормального окна)
   exitOverlayMode: () => ipcRenderer.send("exit-overlay-mode"),
+  focusOverlayChat: () => ipcRenderer.send("focus-overlay-chat"),
+  releaseOverlayChatFocus: () => ipcRenderer.send("release-overlay-chat-focus"),
 
   // Управление безрамочным окном (кастомный титлбар)
   windowMinimize: () => ipcRenderer.send("window-minimize"),

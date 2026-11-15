@@ -25,6 +25,8 @@ interface ElectronAPI {
   // Overlay-режим (демонстрация экрана)
   enterOverlayMode: () => void
   exitOverlayMode: () => void
+  focusOverlayChat?: () => void
+  releaseOverlayChatFocus?: () => void
   // Управление безрамочным окном (кастомный титлбар)
   windowMinimize: () => void
   windowMaximizeToggle: () => void

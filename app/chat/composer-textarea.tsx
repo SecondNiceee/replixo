@@ -102,6 +102,7 @@ interface ComposerTextareaProps {
   /** Enter без Shift; Shift+Enter переносит строку. */
   onSubmit: () => void
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void
+  onClick?: React.MouseEventHandler<HTMLTextAreaElement>
   disabled: boolean
   /** Чат комнаты режет сообщения на сервере до 2000 символов. */
   maxLength?: number
@@ -121,6 +122,7 @@ export function ComposerTextarea({
   onChange,
   onSubmit,
   onPaste,
+  onClick,
   disabled,
   maxLength = MAX_LENGTH,
   focusKey,
@@ -231,6 +233,7 @@ export function ComposerTextarea({
         // Второй, урезанный пересчёт на месте выставлял высоту, но не трогал
         // overflowY — и после него в невыросшем поле оставалась полоса.
         onChange={(e) => onChange(e.target.value)}
+        onClick={onClick}
         onKeyDown={handleKeyDown}
         onPaste={onPaste}
         rows={1}

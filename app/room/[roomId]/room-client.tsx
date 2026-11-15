@@ -233,6 +233,10 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
     markChatRead,
   })
 
+  useEffect(() => {
+    if (overlayMode && !chatOpen) window.electronAPI?.releaseOverlayChatFocus?.()
+  }, [overlayMode, chatOpen])
+
   // Stable array identity so the memoized chat doesn't re-render whenever the
   // peers Map changes for unrelated reasons (tracks, streams, stats).
   const peerIdsKey = Array.from(peers.keys()).join("|")
@@ -298,12 +302,19 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
   const anyScreenShared = isScreenSharing || [...peers.values()].some((p) => p.screenStream != null)
 
   return (
-    <div className={cn(
-      "relative flex select-none flex-col overflow-hidden",
-      // В Electron (без overlay) резервируем 32px под кастомный титлбар.
-      isElectron && !overlayMode ? "h-[calc(100vh-32px)]" : "h-screen",
-      overlayMode ? "bg-transparent" : "bg-background",
-    )}>
+    <div
+      className={cn(
+        "relative flex select-none flex-col overflow-hidden",
+        // В Electron (без overlay) резервируем 32px под кастомный титлбар.
+        isElectron && !overlayMode ? "h-[calc(100vh-32px)]" : "h-screen",
+        overlayMode ? "bg-transparent" : "bg-background",
+      )}
+      onClickCapture={overlayMode ? (event) => {
+        if (!(event.target instanceof HTMLTextAreaElement)) {
+          window.electronAPI?.releaseOverlayChatFocus?.()
+        }
+      } : undefined}
+    >
       {!overlayMode && <EnableSoundBanner />}
       {isReconnecting && (
         <div role="status" className="border-b border-border bg-muted px-4 py-2 text-center text-sm text-muted-foreground">
@@ -524,6 +535,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
 
         <RoomChat
           open={chatOpen}
+          overlayMode={overlayMode}
           onClose={closeChat}
           roomId={roomId}
           canSendNotes={isTeacher && isSignedIn}

@@ -118,20 +118,19 @@ export function useAnnotationOverlay({
   const [overlayMode, setOverlayMode] = useState(false)
 
   useEffect(() => {
-    if (!isElectron) return
-    if (isScreenSharing) {
-      // Сначала делаем документ прозрачным (data-overlay), затем растягиваем
-      // окно поверх экрана — чтобы не мелькнул непрозрачный фон.
-      document.documentElement.dataset.overlay = "1"
-      window.electronAPI!.enterOverlayMode()
-      setOverlayMode(true)
-    } else {
-      window.electronAPI!.exitOverlayMode()
-      delete document.documentElement.dataset.overlay
+    const electronAPI = window.electronAPI
+    if (!isElectron || !electronAPI || !isScreenSharing) {
       setOverlayMode(false)
+      return
     }
+
+    // Сначала делаем документ прозрачным, затем растягиваем окно поверх экрана.
+    document.documentElement.dataset.overlay = "1"
+    electronAPI.enterOverlayMode()
+    setOverlayMode(true)
+
     return () => {
-      // Подстраховка при размонтировании (например, выход из комнаты во время показа)
+      electronAPI.exitOverlayMode()
       delete document.documentElement.dataset.overlay
     }
   }, [isScreenSharing, isElectron])
