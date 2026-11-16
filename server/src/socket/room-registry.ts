@@ -203,7 +203,7 @@ export function allowRoomCreation(roomId: string, ttlMs: number = ROOM_CREATE_GR
   const existing = creatableRooms.get(roomId)
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => creatableRooms.delete(roomId), ttlMs)
-  // Разрешени���� не должно держать процесс живым.
+  // Разрешение не должно держать процесс живым.
   timer.unref?.()
   creatableRooms.set(roomId, timer)
 }

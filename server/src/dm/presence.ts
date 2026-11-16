@@ -117,7 +117,7 @@ const lastFlushAt = new Map<string, number>()
  * секунд (socket.ts), и понижать его нельзя, на нём держится устойчивость
  * звонков к мигнувшей сети. Поэтому у presence свой, более чуткий таймер:
  * клиент шлёт `dm:ping` каждые PING_INTERVAL_MS, а свипер считает соединение
- * мёртвым для presence через PING_TIMEOUT_MS ��ишины. Сам сокет при этом НЕ
+ * мёртвым для presence через PING_TIMEOUT_MS тишины. Сам сокет при этом НЕ
  * рвём — им распоряжается движок и звонки.
  *
  * Порог с запасом больше интервала: один потерянный пинг на плохой сети не
@@ -224,7 +224,7 @@ export function statusOf(userId: string): PresenceStatus {
   return 'offline'
 }
 
-/** Статусы сразу для списка пользователей �� для снапшота и /internal/presence. */
+/** Статусы сразу для списка пользователей и для снапшота и /internal/presence. */
 export function statusesFor(userIds: string[]): Record<string, PresenceStatus> {
   const result: Record<string, PresenceStatus> = {}
   for (const id of userIds) {
@@ -316,7 +316,7 @@ export async function trackConnect(
   sockets.set(socket.id, { status: initialStatus, lastPingAt: now })
 
   // Пользователь здесь и сейчас — фиксируем сразу, не дожидаясь первого
-  // периодическ��го сброса: короткая сессия иначе не оставила бы времени.
+  // периодического сброса: короткая сессия иначе не оставила бы времени.
   // Открытая в фоне вкладка тоже считается: страницу всё-таки загрузили, и
   // «был(а) только что» — правильный ответ, даже если точка не зажглась.
   flushLastSeen(userId, now, true)
@@ -335,7 +335,7 @@ export async function trackConnect(
   }
 
   // lastSeenAt читаем из БД: в памяти его больше нет, и именно поэтому снапшот
-  // тепер�� остаётся содержательным после рестарта сервера.
+  // теперь остаётся содержательным после рестарта сервера.
   const [statuses, lastSeenAt] = await Promise.all([
     Promise.resolve(statusesFor(friends)),
     getLastSeenBulk(friends),
@@ -525,7 +525,7 @@ function sweepStaleSockets(nsp: Namespace): void {
       flushLastSeen(userId, at, true)
       void broadcastStatus(nsp, userId, 'offline', at)
     } else {
-      // Остались соединения, но св��дный статус мог стать любым, включая offline
+      // Остались соединения, но сводный статус мог стать любым, включая offline
       // (все выжившие вкладки в фоне) — тогда helper приложит lastSeenAt.
       void broadcastCurrentStatus(nsp, userId)
     }

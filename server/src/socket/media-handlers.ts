@@ -276,7 +276,7 @@ export function registerMediaHandlers(ctx: HandlerContext): void {
         // Read markers of every participant so checkmarks render correctly on
         // already-sent messages right after joining/reloading.
         // Оба запроса некритичны для входа в звонок и выполняются параллельно с
-        // огранич��нием по времени: висящая база больше не задерживает ack.
+        // ограничением по времени: висящая база больше не задерживает ack.
         const [messages, readMarkers] = await Promise.all([
           optional(getRoomMessages(roomId), 3_000, 'getRoomMessages', []),
           optional(getRoomReadMarkers(roomId), 3_000, 'getRoomReadMarkers', []),

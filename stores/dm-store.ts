@@ -148,7 +148,7 @@ export const useDmStore = create<DmStore>((set) => ({
   setPresence: (userId, status, lastSeenAt) =>
     set((state) => {
       const statuses = { ...state.statuses }
-      // Пишем тол��ко 'online': и оффлайн, и (теоретический) 'unknown' в сторе
+      // Пишем только 'online': и оффлайн, и (теоретический) 'unknown' в сторе
       // выражаются отсутствием ключа.
       if (status === 'online') statuses[userId] = status
       else delete statuses[userId]

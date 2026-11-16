@@ -170,7 +170,7 @@ function handleWorkerLine(line) {
   state.degraded = false
 
   if (!data.ok) {
-    // Окно закрылось или свернулось: регион о��таётся прежним, но канвас скрыт.
+    // Окно закрылось или свернулось: регион остаётся прежним, но канвас скрыт.
     setRegion(state, state.screenRect, false, false)
     return
   }

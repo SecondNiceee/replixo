@@ -442,7 +442,7 @@ export const RoomChat = memo(function RoomChat({
                   type="button"
                   onClick={() => setUploadError(null)}
                   className="shrink-0 opacity-70 hover:opacity-100"
-                  aria-label="Скрыть ошибк��"
+                  aria-label="Скрыть ошибку"
                 >
                   <X className="size-3.5" />
                 </button>

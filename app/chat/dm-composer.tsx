@@ -67,7 +67,7 @@ export function DmComposer({
   }, [conversationId])
 
   // Грузим по одному файлу за раз (не параллельно): так порядок вложений в
-  // pendingList совпадает с порядком выбора, а прогресс легко показа��ь одним
+  // pendingList совпадает с порядком выбора, а прогресс легко показать одним
   // общим индикатором вместо счётчика по каждому файлу.
   const uploadOne = useCallback(
     async (file: File): Promise<void> => {

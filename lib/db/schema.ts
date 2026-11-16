@@ -150,7 +150,7 @@ export const conversation = pgTable(
   (t) => [index('dm_conversation_lastMessageAt_idx').on(t.lastMessageAt)],
 )
 
-// Участник диалога + его личное состояние прочит��нности.
+// Участник диалога + его личное состояние прочитанности.
 export const conversationMember = pgTable(
   'dm_conversation_member',
   {
@@ -234,7 +234,7 @@ export const messageRead = pgTable(
   {
     roomId: text('roomId').notNull(),
     peerId: text('peerId').notNull(),
-    // Время (createdAt) последнего прочитан��ого участником сообщения.
+    // Время (createdAt) последнего прочитанного участником сообщения.
     lastReadAt: timestamp('lastReadAt').notNull().defaultNow(),
     updatedAt: timestamp('updatedAt').notNull().defaultNow(),
   },
@@ -293,7 +293,7 @@ export const annotationSettings = pgTable('annotation_settings', {
 // --- Shared whiteboard -----------------------------------------------------
 // Совместная доска комнаты (tldraw). Для каждой комнаты храним один последний
 // снапшот документа целиком (JSON-строка от tldraw getSnapshot). Снапшот
-// периодически перезаписывается, пока участники рисуют, и стирает����я вместе с
+// периодически перезаписывается, пока участники рисуют, и стирается вместе с
 // комнатой, когда она опустела. open — открыта ли доска у всех сейчас.
 
 export const whiteboard = pgTable('whiteboard', {

@@ -139,7 +139,7 @@ function loadAppUrl() {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.loadURL(APP_URL).catch((error) => {
     // loadURL реджектится тем же кодом, что придёт в did-fail-load, поэтому
-    // саму повторную попытку планирует обработчик события — зде��ь только лог.
+    // саму повторную попытку планирует обработчик события — здесь только лог.
     log.warn("load", "loadURL rejected", error?.message || error)
   })
 }
@@ -329,7 +329,7 @@ function setupDesktopCapturer() {
   // Здесь мы используем штатный путь: renderer вызывает настоящий
   // navigator.mediaDevices.getDisplayMedia(constraints), Chromium (в Electron 42
   // это Chromium 148, где restrictOwnAudio уже поддержан) применяет
-  // restrictOwnAudio к аудиодорожке, а мы лишь п��дставляем выбранный источник и
+  // restrictOwnAudio к аудиодорожке, а мы лишь подставляем выбранный источник и
   // включаем системный loopback только если звук действительно запрошен.
   // ---------------------------------------------------------------------------
   session.defaultSession.setDisplayMediaRequestHandler(
@@ -773,7 +773,7 @@ const AUDIO_MAX_PACKETS_PER_TICK = 25
 // Backpressure на IPC.
 //
 // КРИТИЧНО: webContents.send() — это fire-and-forget. Если renderer занят
-// (GC, перерисовка, энкодер), пакеты не исчезают — они копятся в НЕОГРАНИЧЕНН��Й
+// (GC, перерисовка, энкодер), пакеты не исчезают — они копятся в НЕОГРАНИЧЕННЫЙ
 // внутренней очереди Chromium IPC, о которой мы ничего не знаем и которую не
 // можем ни измерить, ни обрезать. Наша аккуратно ограниченная очередь в main при
 // этом выглядит пустой, а память растёт в чужом буфере, пока процесс не умрёт.

@@ -310,7 +310,7 @@ export function ConversationView({
           size="icon"
           onClick={onBack}
           className="size-8 md:hidden"
-          aria-label="Назад к списк�� диалогов"
+          aria-label="Назад к списку диалогов"
         >
           <ArrowLeft className="size-4" />
         </Button>
@@ -339,7 +339,7 @@ export function ConversationView({
                 : 'text-muted-foreground',
             )}
           >
-            {/* Место подписи не пустует: вм��сто статуса, которого у заметок нет,
+            {/* Место подписи не пустует: вместо статуса, которого у заметок нет,
                 она объясняет сам чат — «Заметки только для вас». */}
             {isSelfChat ? FAVORITES_HINT : peerLabel}
           </span>

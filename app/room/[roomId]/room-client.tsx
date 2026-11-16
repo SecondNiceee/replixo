@@ -442,7 +442,7 @@ function ConnectedRoomClient({ roomId, create, displayName, isTeacher, isSignedI
             className={cn(
               "pointer-events-auto",
               overlayMode
-                // Overlay (Electron, идёт демонстрация): доска растянута на вс��
+                // Overlay (Electron, идёт демонстрация): доска растянута на всё
                 // прозрачное окно, поверх видеослоя, но ниже overlay-контролов
                 // (z-9990+). Сайдбар участников — fixed слева, поэтому
                 // отступаем, чтобы он не накрывал доску.

@@ -193,7 +193,7 @@ export function ProfileClient({ user, desktop = false }: { user: User; desktop?:
     if (restored.current || isLoading) return
     restored.current = true
 
-    // Глубокая ссылка важнее памя��и: если человек пришёл по ?c= или ?u=, он
+    // Глубокая ссылка важнее памяти: если человек пришёл по ?c= или ?u=, он
     // просил конкретный диалог, а не тот, что был открыт в прошлый раз.
     if (searchParams.get('c') || searchParams.get('u')) return
 

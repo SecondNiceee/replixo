@@ -211,7 +211,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
 
   // --- Уход по закрытию вкладки -------------------------------------------
   //
-  // Отдельный эффект: слушател�� тут ставятся на window и не должны
+  // Отдельный эффект: слушатели тут ставятся на window и не должны
   // переустанавливаться вместе с таймерами heartbeat.
   useEffect(() => {
     if (!socket) return
@@ -220,7 +220,7 @@ export function usePresenceHeartbeat(socket: Socket | null): void {
 
     const leave = () => {
       // pagehide может прийти и при уходе страницы в фоновый кэш, и следом
-      // beforeunload — вто��ой запрос ничего не добавит.
+      // beforeunload — второй запрос ничего не добавит.
       if (sent) return
       const socketId = socket.id
       if (!socketId) return

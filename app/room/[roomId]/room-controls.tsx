@@ -211,7 +211,7 @@ export function RoomControls({
               />
             </div>
             <p className="text-sm text-muted-foreground">
-              Ска��ите что-нибудь, чтобы проверить микрофон.
+              Скажите что-нибудь, чтобы проверить микрофон.
             </p>
           </section>
 
@@ -268,7 +268,7 @@ export function RoomControls({
           isCamStarting
             ? "Включение камеры…"
             : cameraSuppressed && !isCamOff
-              ? "Камера отключена из-за слабой сети. Включить прин��дительно"
+              ? "Камера отключена из-за слабой сети. Включить принудительно"
               : isCamOff
                 ? "Включить камеру"
                 : "Выключить камеру"
