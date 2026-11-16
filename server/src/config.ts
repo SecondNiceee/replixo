@@ -56,7 +56,7 @@ export const WINDOWS_INSTALLER_PATH =
 
 // Имя файла, под которым установщик будет сохранён у пользователя.
 export const WINDOWS_INSTALLER_NAME =
-  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe'
+  process.env.WINDOWS_INSTALLER_NAME?.trim() || path.basename(WINDOWS_INSTALLER_PATH)
 
 /** Dedicated directory for the public electron-updater feed. */
 export const WINDOWS_UPDATES_DIR = path.resolve(

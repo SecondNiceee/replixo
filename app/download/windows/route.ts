@@ -15,12 +15,12 @@ import type { NextRequest } from 'next/server'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const INSTALLER_NAME =
-  process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe'
-
 const INSTALLER_PATH =
   process.env.WINDOWS_INSTALLER_PATH ??
-  path.join(process.cwd(), 'server', 'downloads', INSTALLER_NAME)
+  path.join(process.cwd(), 'server', 'downloads', process.env.WINDOWS_INSTALLER_NAME ?? 'Replixo-Setup-version-4.exe')
+
+const INSTALLER_NAME =
+  process.env.WINDOWS_INSTALLER_NAME?.trim() || path.basename(INSTALLER_PATH)
 
 function baseHeaders(size: number): Record<string, string> {
   return {
